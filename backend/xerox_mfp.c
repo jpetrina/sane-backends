@@ -872,7 +872,7 @@ dev_inquiry(struct device *dev)
 
     dev->compressionTypes = dev->res[0x32];
     /* blacklist malfunctioning device(s) */
-    if (!strncmp(dev->sane.model, "SCX-4500W", 9) ||
+    if (!!strstr(dev->sane.model, "SCX-4500W") ||
 	!strncmp(dev->sane.model, "C460", 4) ||
 	!!strstr(dev->sane.model, "CLX-3170") ||
 	!!strstr(dev->sane.model, "4x24") ||
