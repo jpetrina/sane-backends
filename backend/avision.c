@@ -6835,6 +6835,7 @@ do_eof (Avision_Scanner *s)
 
   /* we do not scan anymore */
   s->prepared = s->scanning = SANE_FALSE;
+  s->page = 0;
 
   /* we can now mark the rear data as valid */
   if (s->avdimen.interlaced_duplex ||
