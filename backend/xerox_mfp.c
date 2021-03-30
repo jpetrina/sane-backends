@@ -355,7 +355,7 @@ static SANE_Status dev_stop(struct device *dev)
     dev->reserved = 0;
     dev_cmd(dev, CMD_RELEASE_UNIT);
     DBG(3, "total image %d*%d size %d (win %d*%d), %d*%d %d data: %d, out %d bytes\n",
-        dev->para.pixels_per_line, dev->para.lines,
+        dev->para.pixels_per_line, dev->total_lines,
         dev->total_img_size,
         dev->win_width, dev->win_len,
         dev->pixels_per_line, dev->ulines, dev->blocks,
@@ -652,7 +652,7 @@ static void set_parameters(struct device *dev)
         px_to_len = 1213.9 / dev->val[OPT_RESOLUTION].w;
 #endif
     }
-    dev->para.lines = dev->win_len / px_to_len;
+    dev->total_lines = dev->win_len / px_to_len;
     if (dev->composition == MODE_LINEART ||
         dev->composition == MODE_HALFTONE) {
         dev->para.format = SANE_FRAME_GRAY;
@@ -1200,19 +1200,6 @@ static int dev_acquire(struct device *dev)
     return 1;
 }
 
-static int fill_slack(struct device *dev, SANE_Byte *buf, int maxlen)
-{
-    const int slack = dev->total_img_size - dev->total_out_size;
-    const int havelen = MIN(slack, maxlen);
-    int j;
-
-    if (havelen <= 0)
-        return 0;
-    for (j = 0; j < havelen; j++)
-        buf[j] = 255;
-    return havelen;
-}
-
 static int copy_plain_trim(struct device *dev, SANE_Byte *buf, int maxlen, int *olenp)
 {
     int j;
@@ -1225,7 +1212,7 @@ static int copy_plain_trim(struct device *dev, SANE_Byte *buf, int maxlen, int *
         if (y >= dev->vertical)
             break; /* slack */
         if (x < dev->para.bytes_per_line &&
-            (y + dev->y_off) < dev->para.lines) {
+            (y + dev->y_off) < dev->total_lines) {
             *buf++ = dev->data[(dev->dataoff + j) & DATAMASK];
             (*olenp)++;
         }
@@ -1262,7 +1249,7 @@ static int copy_mix_bands_trim(struct device *dev, SANE_Byte *buf, int maxlen, i
         const int y_rly = y + y_off + dev->y_off; /* global y */
 
         if (x < dev->para.pixels_per_line &&
-            y_rly < dev->para.lines) {
+            y_rly < dev->total_lines) {
             *buf++ = dev->data[(dev->dataoff + band + x + y * linesize) & DATAMASK];
             (*olenp)++;
         }
@@ -1312,8 +1299,7 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
 
             /* but we may need to fill slack */
             if (buf && lenp && slack > 0) {
-                *lenp = fill_slack(dev, buf, maxlen);
-                dev->total_out_size += *lenp;
+                dev->total_out_size += MIN(slack, maxlen);
                 DBG(9, "<> slack: %d, filled: %d, maxlen %d\n",
                     slack, *lenp, maxlen);
                 return SANE_STATUS_GOOD;
@@ -1399,10 +1385,10 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
             DBG(9, "<> olen: %d, clrlen: %d, blocklen: %d/%d, maxlen %d (%d %d %d)\n",
                 olen, clrlen, dev->blocklen, dev->datalen, maxlen,
                 dev->dataindex / dev->bytes_per_line + dev->y_off,
-                dev->y_off, dev->para.lines);
+                dev->y_off, dev->total_lines);
 
             /* slack beyond last line */
-            if (dev->dataindex / dev->bytes_per_line + dev->y_off >= dev->para.lines) {
+            if (dev->dataindex / dev->bytes_per_line + dev->y_off >= dev->total_lines) {
                 dev->datalen = 0;
                 dev->dataoff = 0;
             }
@@ -1488,7 +1474,7 @@ sane_start(SANE_Handle h)
         dev->para.bytes_per_line = dev->para.pixels_per_line;
     }
 
-    dev->total_img_size = dev->para.bytes_per_line * dev->para.lines;
+    dev->total_img_size = dev->para.bytes_per_line * dev->total_lines;
 
     if (isSupportedDevice(dev) &&
         dev->composition == MODE_RGB24) {
