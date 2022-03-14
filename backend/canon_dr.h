@@ -51,6 +51,21 @@ enum scanner_Option
   OPT_SIDE,
   OPT_HW_CROP,
 
+  /*imprinter option group*/
+  OPT_PRE_IMPRINT_SPECSTRING,
+  OPT_PRE_IMPRINT_H_OFFSET,
+  OPT_PRE_IMPRINT_V_OFFSET,
+  OPT_PRE_IMPRINT_FONT_SIZE,
+  OPT_PRE_IMPRINT_FONT_ROT,
+  OPT_PRE_IMPRINT_SPACING,
+  OPT_POST_IMPRINT_SPECSTRING,
+  OPT_POST_IMPRINT_H_OFFSET,
+  OPT_POST_IMPRINT_V_OFFSET,
+  OPT_POST_IMPRINT_FONT_SIZE,
+  OPT_POST_IMPRINT_FONT_ROT,
+  OPT_POST_IMPRINT_SPACING,
+  OPT_POST_IMPRINT_ADDON_MODE,
+
   /*sensor group*/
   OPT_SENSOR_GROUP,
   OPT_START,
@@ -104,6 +119,32 @@ struct img_params
   /* dumb scanners send extra data */
   int skip_lines[2];
 
+};
+
+struct imprint_params
+{
+  /* ------------------------------------------------------------------------------ */
+  /*  allowed values for post imprinter (in mm units):                              */
+  /* 21, 35, 47, 59, 72, 99, 114, 143, 155, 167, 196, 211, 239, 251, 263, 275, 289  */
+  /*  allowed values for pre imprinter (in mm units):                               */
+  /* 14, 28, 41, 53, 65, 106                                                        */
+  int h_offset;
+  /* --------------------------------------- */
+  /*  allowed values: 0 to 500 (in mm units) */
+  int v_offset;
+
+  int font_size;
+  int font_rot;
+  int spacing;
+
+#define IMPRINT_SPECSTRING_LEN 64
+  /* ---------------------------------- */
+  /*  special tokens:                   */
+  /*  \TIME       time in HH:MM:SS      */
+  /*  \DMY        date in DD/MM/YYYY    */
+  /*  \YMD        date in YYYY/MM/DD    */
+  /*  [[0-9]+]    scan page count       */
+  char specstring[IMPRINT_SPECSTRING_LEN];
 };
 
 struct scanner
@@ -204,6 +245,8 @@ struct scanner
   int has_ssm2;          /* newer scanners user this similar command */
   int has_ssm_pay_head_len; /* newer scanners put the length twice in ssm */
   int has_hwcrop;
+  int has_pre_imprinter;
+  int has_post_imprinter;
   int can_read_sensors;
   int can_read_panel;
   int can_write_panel;
@@ -317,12 +360,33 @@ struct scanner
   unsigned char lut[256];
 
   /* --------------------------------------------------------------------- */
-  /* values used by the software enhancement code (deskew, crop, etc)       */
+  /* values used by the software enhancement code (deskew, crop, etc)      */
   SANE_Status deskew_stat;
   int deskew_vals[2];
   double deskew_slope;
 
   int crop_vals[4];
+
+  /* imprinter params */
+  struct imprint_params pre_imprint;
+  struct imprint_params post_imprint;
+  enum {
+    /*Black-on-White*/
+    ADDON_BoW = 0,
+    /*White-on-Black*/
+    ADDON_WoB,
+    /*Black-on-Image*/
+    ADDON_BoI,
+    ADDON_DISABLED
+  } post_imprint_addon_mode;
+
+  /* imprinter param constraints */
+  SANE_Int pre_imprinter_h_offset_list[7];
+  SANE_Int post_imprinter_h_offset_list[18];
+  SANE_Range imprinter_v_offset_range;
+  SANE_String_Const imprint_font_size_list[3];
+  SANE_Int imprinter_font_angle_list[5];
+  SANE_String_Const imprint_addon_mode_list[5];
 
   /* this is defined in sane spec as a struct containing:
         SANE_Frame format;
