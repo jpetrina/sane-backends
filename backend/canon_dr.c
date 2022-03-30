@@ -5006,14 +5006,14 @@ send_imprint_specstring(struct scanner* s, int is_postimprint)
   if (is_postimprint){
     set_SSM2_imprint_fontsize(out, s->post_imprint.font_size);
     set_SSM2_imprint_fontrot(out, s->post_imprint.font_rot);
-    set_SSM2_imprint_spacing(out, !s->post_imprint.spacing);
+    set_SSM2_imprint_spacing(out, s->post_imprint.spacing);
     if (s->post_imprint_addon_mode != ADDON_DISABLED)
       set_SSM2_imprint_addonmode(out, s->post_imprint_addon_mode);
     strcpy((SANE_Char*)(out + 45), (SANE_String_Const) s->post_imprint.specstring);
   }else{
     set_SSM2_imprint_fontsize(out, s->pre_imprint.font_size);
     set_SSM2_imprint_fontrot(out, s->pre_imprint.font_rot);
-    set_SSM2_imprint_spacing(out, !s->pre_imprint.spacing);
+    set_SSM2_imprint_spacing(out, s->pre_imprint.spacing);
     strcpy((SANE_Char*)(out + 45), (SANE_String_Const) s->pre_imprint.specstring);
   }
   return send_cmd(s, cmd, cmdLen, out, outLen, NULL, NULL);
