@@ -252,8 +252,8 @@ putnbyte (unsigned char *pnt, unsigned int value, unsigned int nbytes)
 #define get_R_SENSORS_adf(in)	        getbitfield(in, 1, 0)
 
 /*counters*/
-#define R_COUNTERS_len                  0x80
-#define get_R_COUNTERS_scans(in)        getnbyte(in + 0x04, 4)
+#define R_COUNTERS_len                 0x80
+#define get_R_COUNTERS_scans(in)       getnbyte(in + 0x04, 4)
 
 /*imprinters*/
 #define R_IMPRINTER_len                0x20
