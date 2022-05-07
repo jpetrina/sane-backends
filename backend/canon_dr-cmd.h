@@ -253,8 +253,7 @@ putnbyte (unsigned char *pnt, unsigned int value, unsigned int nbytes)
 
 /*counters*/
 #define R_COUNTERS_len                  0x80
-#define get_R_COUNTERS_total(in)        getnbyte(in + 0x04, 4)
-#define get_R_COUNTERS_last_srv(in)     getnbyte(in + 0x44, 4)
+#define get_R_COUNTERS_scans(in)        getnbyte(in + 0x04, 4)
 
 /*imprinters*/
 #define R_IMPRINTER_len                0x20
