@@ -797,6 +797,7 @@ AC_CONFIG_FILES([Makefile lib/Makefile sanei/Makefile frontend/Makefile \
   po/Makefile.in testsuite/Makefile \
   testsuite/backend/Makefile \
   testsuite/backend/genesys/Makefile \
+  testsuite/minigtest/Makefile \
   testsuite/sanei/Makefile testsuite/tools/Makefile \
   tools/Makefile doc/doxygen-sanei.conf doc/doxygen-genesys.conf])
 AC_CONFIG_FILES([tools/sane-config], [chmod a+x tools/sane-config])

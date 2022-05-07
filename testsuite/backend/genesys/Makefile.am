@@ -11,16 +11,18 @@ TEST_LDADD = \
   ../../../lib/liblib.la \
   ../../../backend/libgenesys.la \
   ../../../backend/sane_strstatus.lo \
+  ../../minigtest/libminigtest.la \
   $(MATH_LIB) $(TIFF_LIBS) $(USB_LIBS) $(XML_LIBS) $(PTHREAD_LIBS)
 
 check_PROGRAMS = genesys_unit_tests genesys_session_config_tests
 TESTS = genesys_unit_tests
 
-AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include -I$(top_srcdir)/include $(USB_CFLAGS) \
+AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include -I$(top_srcdir)/include \
+    -I$(top_srcdir)/testsuite $(USB_CFLAGS) \
     -DBACKEND_NAME=genesys -DTESTSUITE_BACKEND_GENESYS_SRCDIR=$(srcdir)
 
 genesys_unit_tests_SOURCES = tests.cpp tests.h \
-    minigtest.cpp minigtest.h tests_printers.h \
+    tests_printers.h \
     tests_calibration.cpp \
     tests_image.cpp \
     tests_image_pipeline.cpp \

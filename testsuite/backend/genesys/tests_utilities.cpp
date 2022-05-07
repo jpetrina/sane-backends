@@ -21,7 +21,7 @@
 #define DEBUG_DECLARE_ONLY
 
 #include "tests.h"
-#include "minigtest.h"
+#include "minigtest/minigtest.h"
 #include "tests_printers.h"
 
 #include "../../../backend/genesys/utilities.h"
