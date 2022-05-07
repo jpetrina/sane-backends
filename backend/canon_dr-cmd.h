@@ -219,6 +219,7 @@ putnbyte (unsigned char *pnt, unsigned int value, unsigned int nbytes)
 #define SR_datatype_endorser            0x90
 #define SR_datatype_fineoffset          0x90
 #define SR_datatype_finegain            0x91
+#define SR_datatype_imprinters          0x96 /*DR-X10C*/
 
 /* ==================================================================== */
 /* READ */
@@ -251,8 +252,21 @@ putnbyte (unsigned char *pnt, unsigned int value, unsigned int nbytes)
 #define get_R_SENSORS_adf(in)	        getbitfield(in, 1, 0)
 
 /*counters*/
-#define R_COUNTERS_len                 0x80
-#define get_R_COUNTERS_scans(in)       getnbyte(in + 0x04, 4)
+#define R_COUNTERS_len                  0x80
+#define get_R_COUNTERS_total(in)        getnbyte(in + 0x04, 4)
+#define get_R_COUNTERS_last_srv(in)     getnbyte(in + 0x44, 4)
+
+/*imprinters*/
+#define R_IMPRINTER_len                0x20
+#define R_PRE_IMPRINTER                0
+#define R_POST_IMPRINTER               1
+#define get_R_IMPRINTER_found(in)      getbitfield(in+1, 1, 0)
+/*4 bytes at in + 0: (DR-X10C)
+pre-imprinter on:   0x07010000
+pre-imprinter off:  0x06000000
+post-imprinter on:  0x03010000
+post-imprinter off: 0x02000000
+*/
 
 /*endorser unread?*/
 
@@ -473,7 +487,7 @@ putnbyte (unsigned char *pnt, unsigned int value, unsigned int nbytes)
 
 /* the payload */
 #define SSM2_PAY_len                     0x10
-#define SSM2_IMPRINTER_STRING_PAY_len    142
+#define SSM2_IMPRINTER_STRING_PAY_len    0x8e
 
 /* for DF (0x00) page */
 #define set_SSM2_DF_imprint(sb, val)     setbitfield(sb+2, 1, 0, val)

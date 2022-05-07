@@ -1001,6 +1001,12 @@ attach_one (const char *device_name, int connType)
     return ret;
   }
 
+  /* this loads model specific optional features that might not be always available */
+  ret = init_model_extras (s);
+  if (ret != SANE_STATUS_GOOD) {
+    DBG (5, "attach_one: errors while trying to detect optional model features, continuing\n");
+  }
+
   /* enable/read the buttons */
   ret = init_panel (s);
   if (ret != SANE_STATUS_GOOD) {
@@ -1964,6 +1970,29 @@ init_model (struct scanner *s)
   DBG (10, "init_model: finish\n");
 
   return SANE_STATUS_GOOD;
+}
+
+/*
+ * try to detect model specific extra functionality.
+ */
+static SANE_Status
+init_model_extras (struct scanner *s)
+{
+  SANE_Status ret = SANE_STATUS_GOOD;
+
+  if (strstr (s->model_name,"DR-X10C")){
+
+    ret = detect_imprinter(s,R_PRE_IMPRINTER);
+    if(ret != SANE_STATUS_GOOD){
+      return ret;
+    }
+
+    ret = detect_imprinter(s,R_POST_IMPRINTER);
+    if(ret != SANE_STATUS_GOOD){
+      return ret;
+    }
+  }
+  return ret;
 }
 
 /*
@@ -5061,23 +5090,69 @@ load_imprinting_settings(struct scanner *s)
   DBG(30, "send_pre_imprint_positioning = %d \n", ret);
   if (requires_preimprint){
     ret = send_imprint_specstring(s, 0);
-    DBG(30, "send_pre_imprint_specstring = %d \n", ret);
+    DBG(10, "send_pre_imprint_specstring = %d \n", ret);
     if (ret != SANE_STATUS_GOOD)
       return ret;
   }
 
   ret = send_imprint_positioning(s, 1, requires_postimprint);
-  DBG(5, "send_post_imprint_positioning = %d \n", ret);
+  DBG(30, "send_post_imprint_positioning = %d \n", ret);
   if (requires_postimprint){
     ret = send_imprint_specstring(s, 1);
-    DBG(30, "send_post_imprint_specstring = %d \n", ret);
+    DBG(10, "send_post_imprint_specstring = %d \n", ret);
     if (ret != SANE_STATUS_GOOD)
       return ret;
   }
   if (send_date_time){
-    ret = send_imprint_date_and_time(s); // set date time
-    DBG(30, "send_imprint_date_and_time = %d \n", ret);
+    ret = send_imprint_date_and_time(s);
+    DBG(10, "send_imprint_date_and_time = %d \n", ret);
   }
+  return ret;
+}
+
+static SANE_Status
+detect_imprinter(struct scanner *s,SANE_Int option)
+{
+  SANE_Status ret = SANE_STATUS_GOOD;
+
+  unsigned char cmd[READ_len];
+  size_t cmdLen = READ_len;
+
+  unsigned char in[R_IMPRINTER_len];
+  size_t inLen = R_IMPRINTER_len;
+
+  DBG (10, "detect_imprinter: start %d\n", option);
+
+  memset(cmd,0,cmdLen);
+  set_SCSI_opcode(cmd, READ_code);
+  set_R_datatype_code(cmd, SR_datatype_imprinters);
+  set_R_xfer_uid(cmd, option);
+  set_R_xfer_length(cmd, inLen);
+
+  ret = do_cmd(
+    s, 1, 0,
+    cmd, cmdLen,
+    NULL, 0,
+    in, &inLen
+  );
+
+  if (ret == SANE_STATUS_GOOD || ret == SANE_STATUS_EOF) {
+    ret = SANE_STATUS_GOOD;
+  }
+
+  int imprinter_found = get_R_IMPRINTER_found(in);
+  const char* imprinter_type = "unknown";
+  if (option == R_PRE_IMPRINTER){
+    s->has_pre_imprinter = imprinter_found;
+    imprinter_type = "pre-imprinter";
+  }
+  else if (option == R_POST_IMPRINTER){
+    s->has_post_imprinter = imprinter_found;
+    imprinter_type = "post-imprinter";
+  }
+
+  DBG (10, "detect_imprinter:  type: %s. found status bit: %d \n",imprinter_type,imprinter_found);
+
   return ret;
 }
 

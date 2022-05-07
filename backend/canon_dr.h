@@ -605,6 +605,7 @@ static SANE_Status sense_handler (int scsi_fd, u_char * result, void *arg);
 static SANE_Status init_inquire (struct scanner *s);
 static SANE_Status init_vpd (struct scanner *s);
 static SANE_Status init_model (struct scanner *s);
+static SANE_Status init_model_extras (struct scanner *s);
 static SANE_Status init_panel (struct scanner *s);
 static SANE_Status init_user (struct scanner *s);
 static SANE_Status init_options (struct scanner *s);
@@ -695,6 +696,12 @@ static SANE_Status calibrate_fine_dest_hw(struct scanner *s);
 
 static SANE_Status write_AFE (struct scanner *s);
 static SANE_Status calibration_scan (struct scanner *s, int);
+
+static SANE_Status send_imprint_positioning(struct scanner* s, int is_postimprint, int enabled);
+static SANE_Status send_imprint_specstring(struct scanner* s, int is_postimprint);
+static SANE_Status send_imprint_date_and_time(struct scanner* s);
+static SANE_Status load_imprinting_settings(struct scanner *s);
+static SANE_Status detect_imprinter(struct scanner *s, SANE_Int option);
 
 static void hexdump (int level, char *comment, unsigned char *p, int l);
 static void default_globals (void);
