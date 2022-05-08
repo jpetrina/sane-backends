@@ -49,7 +49,23 @@ void check_equal(const T& t, const U& u, const char* function, const char* path,
     }
 }
 
-inline void check_true(bool x, const char* function, const char* path, unsigned line)
+template<class T, class U>
+void check_not_equal(const T& t, const U& u, const char* function, const char* path, unsigned line)
+{
+    if (t == u) {
+        s_num_failures++;
+        std::cerr << "FAILURE at ";
+        print_location(std::cerr, function, path, line);
+        std::cerr << " :\n" << t << " != " << u << "\n\n";
+    } else {
+        s_num_successes++;
+        std::cerr << "SUCCESS at ";
+        print_location(std::cerr, function, path, line);
+        std::cerr << "\n";
+    }
+}
+
+ inline void check_true(bool x, const char* function, const char* path, unsigned line)
 {
     if (x) {
         s_num_successes++;
@@ -88,6 +104,8 @@ inline void check_raises_raised_unexpected(const char* function, const char* pat
 }
 
 #define ASSERT_EQ(x, y)  do { check_equal((x), (y), __func__, __FILE__, __LINE__); } \
+                         while (false)
+#define ASSERT_NE(x, y)  do { check_not_equal((x), (y), __func__, __FILE__, __LINE__); } \
                          while (false)
 #define ASSERT_TRUE(x)  do { check_true(bool(x), __func__, __FILE__, __LINE__); } \
                         while (false)
