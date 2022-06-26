@@ -4180,9 +4180,6 @@ ssm_df (struct scanner *s)
     if (requires_postimprint || requires_preimprint)
     {
       set_SSM2_DF_imprint(out, 1);
-      /* this bit seems to be set on USB captures when imprinting with
-         the TWAIN driver, but disabling it seems to work as well */
-      set_SSM2_DF_imprint2(out, 1);
     }
 
     ret = do_cmd (
