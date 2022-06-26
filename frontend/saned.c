@@ -84,8 +84,8 @@
 
 #include "lgetopt.h"
 
-#if defined(HAVE_SYS_POLL_H) && defined(HAVE_POLL)
-# include <sys/poll.h>
+#if defined(HAVE_POLL_H) && defined(HAVE_POLL)
+# include <poll.h>
 #else
 /*
  * This replacement poll() using select() is only designed to cover
@@ -2449,7 +2449,7 @@ void
 sig_int_term_handler (int signum)
 {
   /* unused */
-  signum = signum;
+  (void) signum;
 
   signal (SIGINT, NULL);
   signal (SIGTERM, NULL);
@@ -2543,7 +2543,7 @@ saned_avahi_group_callback (AvahiEntryGroup *g, AvahiEntryGroupState state, void
   char *n;
 
   /* unused */
-  userdata = userdata;
+  (void) userdata;
 
   if ((!g) || (g != avahi_group))
     return;
@@ -2657,7 +2657,7 @@ saned_avahi_callback (AvahiClient *c, AvahiClientState state, void *userdata)
   int error;
 
   /* unused */
-  userdata = userdata;
+  (void) userdata;
 
   if (!c)
     return;
