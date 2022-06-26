@@ -4178,9 +4178,7 @@ ssm_df (struct scanner *s)
     int requires_preimprint = s->has_pre_imprinter && (strlen(s->pre_imprint.specstring) > 0);
     set_SSM2_DF_post_addon(out, requires_postimprint);
     if (requires_postimprint || requires_preimprint)
-    {
       set_SSM2_DF_imprint(out, 1);
-    }
 
     ret = do_cmd (
         s, 1, 0,
