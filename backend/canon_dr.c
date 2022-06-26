@@ -5082,27 +5082,32 @@ load_imprinting_settings(struct scanner *s)
 {
   SANE_Status ret = SANE_STATUS_GOOD;
 
-  int requires_preimprint = s->has_pre_imprinter && (strlen(s->pre_imprint.specstring) > 0);
-  int requires_postimprint = s->has_post_imprinter && (strlen(s->post_imprint.specstring) > 0);
-  int send_date_time = requires_preimprint || requires_postimprint;
+  int requires_preimprint = (strlen(s->pre_imprint.specstring) > 0);
+  int requires_postimprint = (strlen(s->post_imprint.specstring) > 0);
+  int send_date_time = (s->has_pre_imprinter && requires_preimprint) || (s->has_post_imprinter && requires_postimprint);
 
-  ret = send_imprint_positioning(s, 0, requires_preimprint);
-  DBG(30, "send_pre_imprint_positioning = %d \n", ret);
-  if (requires_preimprint){
-    ret = send_imprint_specstring(s, 0);
-    DBG(10, "send_pre_imprint_specstring = %d \n", ret);
-    if (ret != SANE_STATUS_GOOD)
-      return ret;
+  if (s->has_pre_imprinter){
+    ret = send_imprint_positioning(s, 0, requires_preimprint);
+    DBG(30, "send_pre_imprint_positioning = %d \n", ret);
+    if (requires_preimprint){
+      ret = send_imprint_specstring(s, 0);
+      DBG(10, "send_pre_imprint_specstring = %d \n", ret);
+      if (ret != SANE_STATUS_GOOD)
+        return ret;
+    }
   }
 
-  ret = send_imprint_positioning(s, 1, requires_postimprint);
-  DBG(30, "send_post_imprint_positioning = %d \n", ret);
-  if (requires_postimprint){
-    ret = send_imprint_specstring(s, 1);
-    DBG(10, "send_post_imprint_specstring = %d \n", ret);
-    if (ret != SANE_STATUS_GOOD)
-      return ret;
+  if (s->has_post_imprinter){
+    ret = send_imprint_positioning(s, 1, requires_postimprint);
+    DBG(30, "send_post_imprint_positioning = %d \n", ret);
+    if (requires_postimprint){
+      ret = send_imprint_specstring(s, 1);
+      DBG(10, "send_post_imprint_specstring = %d \n", ret);
+      if (ret != SANE_STATUS_GOOD)
+        return ret;
+    }
   }
+
   if (send_date_time){
     ret = send_imprint_date_and_time(s);
     DBG(10, "send_imprint_date_and_time = %d \n", ret);
