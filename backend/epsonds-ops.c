@@ -158,6 +158,25 @@ eds_set_adf_area(struct epsonds_device *dev, int x, int y, int unit)
 }
 
 void
+eds_set_adf_area_large(struct epsonds_device *dev, int x, int y, int unit)
+{
+	dev->adf_x_range_large.min = 0;
+	dev->adf_x_range_large.max = SANE_FIX(x * MM_PER_INCH / unit);
+	dev->adf_x_range_large.quant = 0;
+
+	dev->adf_y_range_large.min = 0;
+	dev->adf_y_range_large.max = SANE_FIX(y * MM_PER_INCH / unit);
+	dev->adf_y_range_large.quant = 0;
+
+	DBG(5, "%s: %f,%f %f,%f %d [mm]\n",
+	    __func__,
+	    SANE_UNFIX(dev->adf_x_range_large.min),
+	    SANE_UNFIX(dev->adf_y_range_large.min),
+	    SANE_UNFIX(dev->adf_x_range_large.max),
+	    SANE_UNFIX(dev->adf_y_range_large.max), unit);
+}
+
+void
 eds_set_tpu_area(struct epsonds_device *dev, int x, int y, int unit)
 {
 	dev->tpu_x_range.min = 0;

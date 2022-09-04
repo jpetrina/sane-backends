@@ -20,6 +20,7 @@ extern SANE_Status eds_add_resolution(epsonds_device *dev, int r);
 extern SANE_Status eds_set_resolution_range(epsonds_device *dev, int min, int max);
 extern void eds_set_fbf_area(epsonds_device *dev, int x, int y, int unit);
 extern void eds_set_adf_area(epsonds_device *dev, int x, int y, int unit);
+extern void eds_set_adf_area_large(epsonds_device *dev, int x, int y, int unit);
 extern void eds_set_tpu_area(epsonds_device *dev, int x, int y, int unit);
 
 extern SANE_Status eds_add_depth(epsonds_device *dev, SANE_Word depth);

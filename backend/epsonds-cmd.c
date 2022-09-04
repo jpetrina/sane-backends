@@ -465,6 +465,7 @@ static SANE_Status info_cb(void *userdata, char *token, int len)
 				int max = decode_value(value + 4 + 8, 8);
 
 				DBG(1, "     ADF: max %dx%d @ 100dpi\n", min, max);
+				eds_set_adf_area_large(s->hw, min, max, 100);
 			}
 		}
 
@@ -493,6 +494,7 @@ static SANE_Status info_cb(void *userdata, char *token, int len)
 				int max = decode_value(value + 4 + 4, 8);
 
 				DBG(1, "     ADF: max %dx%d @ 100dpi\n", min, max);
+				eds_set_adf_area_large(s->hw, min, max, 100);
 			}
 		}
 
