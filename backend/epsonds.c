@@ -2823,6 +2823,13 @@ sane_start(SANE_Handle handle)
 	char cmd[CMD_BUF_SIZE]; /* take care not to overflow */
 	SANE_Status status = 0;
 
+	/* A pending cancel will interfere with sane_get_parameters, so process it first. */
+	if (s->canceling)
+	{
+		DBG(5, "Cancel request in progress at start of scan.\n");
+		esci2_can(s);
+	}
+
 	s->pages++;
 
 	DBG(5, "** %s, pages = %d, scanning = %d, backside = %d, front fill: %d, back fill: %d\n",
@@ -3588,6 +3595,7 @@ sane_read(SANE_Handle handle, SANE_Byte *data, SANE_Int max_length, SANE_Int *le
 	{
 		esci2_can(s);
 		*length = 0;
+		s->canceling = 0;
 		return SANE_STATUS_CANCELLED;
 	}
 
@@ -3631,6 +3639,7 @@ sane_cancel(SANE_Handle handle)
 {
 	DBG(1, "** %s\n", __func__);
 	((epsonds_scanner *)handle)->canceling = SANE_TRUE;
+	((epsonds_scanner *)handle)->scanning  = SANE_FALSE;
 }
 
 /*
