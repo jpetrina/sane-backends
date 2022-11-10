@@ -189,7 +189,8 @@ DESC_FILES = descriptions/abaton.desc descriptions/agfafocus.desc \
   descriptions/v4l.desc descriptions/xerox_mfp.desc
 EXTRA_DIST += $(DESC_FILES) descriptions/template.desc
 
-DESC_EXT_FILES = descriptions-external/brother2.desc \
+DESC_EXT_FILES = descriptions-external/ambir.desc \
+  descriptions-external/brother2.desc \
   descriptions-external/brother.desc \
   descriptions-external/brother-mfc4600.desc \
   descriptions-external/cs3200f.desc \
@@ -200,6 +201,7 @@ DESC_EXT_FILES = descriptions-external/brother2.desc \
   descriptions-external/hpaio.desc \
   descriptions-external/hpoj.desc \
   descriptions-external/kodak-twain.desc \
+  descriptions-external/kyocera.desc \
   descriptions-external/lhii.desc \
   descriptions-external/mustek_a3p1.desc \
   descriptions-external/panamfs.desc \

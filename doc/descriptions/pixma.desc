@@ -1013,6 +1013,18 @@
 :status :untested
 :comment "Testers needed!"
 
+:model "PIXMA TS2400 Series"
+:interface "USB WiFi"
+:usbid "0x04a9" "0x1108"
+:status :good
+:comment "All resolutions supported (up to 600DPI). WiFi not working."
+
+:model "PIXMA TS2600 Series"
+:interface "USB WiFi"
+:usbid "0x04a9" "0x1107"
+:status :good
+:comment "All resolutions supported (up to 600DPI). WiFi not working."
+
 :model "PIXMA TS3100 Series"
 :interface "USB WiFi"
 :usbid "0x04a9" "0x1827"
@@ -1148,8 +1160,8 @@
 :model "PIXMA TS6400 Series"
 :interface "USB"
 :usbid "0x04a9" "0x18d3"
-:status :untested
-:comment "Testers needed!"
+:status :good
+:comment "All resolutions supported (up to 1200DPI). WiFi not tested by Pixma as yet."
 
 :model "PIXMA TS7330 Series"
 :interface "USB WiFi"
@@ -1744,6 +1756,12 @@
 :usbid "0x04a9" "0x261f"
 :status :complete
 :comment "All resolutions supported (up to 600DPI). Identical with SmartBase MPC200 and PIXUS MP10."
+
+:model "imageRUNNER 1018/1022/1023"
+:interface "USB"
+:usbid "0x04a9" "0x269d"
+:status :complete
+:comment "Flatbed and ADF scan.  All resolutions supported (up to 600DPI)"
 
 :model "imageRUNNER 1020/1024/1025"
 :interface "USB"
