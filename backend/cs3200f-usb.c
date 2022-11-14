@@ -441,9 +441,10 @@ u_b_w( SANE_Int dn, SANE_Int addr, SANE_Byte data )
 SANE_Byte
 u_state_q( SANE_Int dn )
 {
-  SANE_Byte status[1] = { 0 };
+  /* TODO: the original driver sometimes queries 2 and sometimes 4 bytes. */
+  SANE_Byte status[2] = { 0 };
 
-  (void)u_read( dn, 0x0040, 0, status, 1 );
+  (void)u_read( dn, 0x0040, 0, status, sizeof(status) );
 
   return status[0];
 }
