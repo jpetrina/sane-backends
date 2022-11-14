@@ -1,0 +1,239 @@
+************************************************************************
+* NOTE!
+************************************************************************
+
+NOTE! The code in this directory is highly experimental, likely
+to contain errors, crappy by outlook etc. etc.
+Also note: because of this: IF YOU DO NOT KNOW WHAT
+YOU ARE DOING, DON'T USE IT. At best it may give
+some hint of where the development is going, at
+worst IT MAY BURN YOUR SCANNER. So, you were warned! 
+
+************************************************************************
+* Status
+************************************************************************
+
+What works in this version is basically the UI and uncalibrated
+reflective scans at 150/300/600/1200 dpi, 8-bit gray and color.
+
+Everything else is non-functional or buggy or someting else that
+makes it useless in practice.
+
+************************************************************************
+* Design info
+************************************************************************
+
+Files
+=====
+
+First level
+-----------
+cs3200f.c
+ - identifier prefix c_
+ - contains the SANE interface functions that delegate
+   almost all workings to subsystems
+ - only the library initialization is done here
+   (sane_init implementation intializes trace, usb etc.)
+ - includes interfaces of second level subsystems
+ - includes sources of second level subsystems
+
+Second level
+------------
+cs3200f-dev.[ch]
+ - identifier prefix d_
+ - device handling
+
+cs3200f-opt.[ch]
+ - identifier prefix o_
+ - option and option descriptor handling
+
+cs3200f-scan.[ch]
+ - identifier prefix s_
+ - scanning engine
+
+Third level
+-----------
+cs3200f-drv.[ch]
+ - identifier prefix r_
+ - scanner driver
+
+Fourth level
+------------
+cs3200f-dat.[ch]
+ - identifier prefix a_
+ - device specific data
+
+cs3200f-usb.[ch]
+ - identifier prefix u_
+ - scanner specific USB interface
+
+************************************************************************
+* How to build
+************************************************************************
+
+Below some instructions of how to compile this in.
+I do not provide this as a patch to SANE release
+because of the pre-alpha experimental status.
+Still, it can be compiled and run, with varying
+success.
+------------------------------------------------------
+First, take the latest SANE back-ends from CVS, or any
+1.0.17 release (I think any should work since cs3200f
+does not depend on any recent patches).
+
+I would recommend a directory structure
+$SOMEDIR/sane-backends
+$SOMEDIR/sandbox
+if you have SANE already installed. The sandbox dir will
+be used for installing the compiled backend instead of the
+actual directories (like /usr/lib/sane etc.)
+
+Then put the cs3200f files into
+$SOMEDIR/sane-backends/backend
+Put only c and h files. The links will be made automatically
+in compilation phase.
+
+In $SOMEDIR/sane-backends do
+./configure --prefix=$SOMEDIR/sandbox BACKENDS="test cs3200f"
+
+The test backend is not necessary but will show if your
+compilation system works when you build it.
+
+Now, in dir $SOMEDIR/sane-backends/backend you must add
+to the Makefile the following lines
+(e.g. before the line starting libsane-dc25.la: ...)
+libsane-cs3200f.la: ../sanei/sanei_constrain_value.lo
+libsane-cs3200f.la: ../sanei/sanei_thread.lo
+libsane-cs3200f.la: ../sanei/sanei_usb.lo
+libsane-cs3200f.la: ../sanei/sanei_access.lo
+libsane-cs3200f.la: ../lib/md5.lo
+
+Now in dir $SOMEDIR/sane-backends
+do make and check that it works OK. E.g. in
+$SOMEDIR/sane-backends do
+make >make.log 2>&1
+In make log there may be warnings but compilation
+of cs3200f.c should give no warnings or errors. If
+it does, drop me a note with log (compressed please :) ).
+The make may end in error in makin sane.ps but that
+do not worry about, that's just docs.
+
+Then do make install and you should now have the
+cs3200f libraries in $SOMEDIR/sandbox/lib/sane.
+
+Now become a root and copy the cs3200f lib files
+to /usr/lib/sane or where ever your xsane expects
+the libs to be.
+
+Then in /etc/sane.d (or wherever you find the dll.conf
+for sane dll lib) add to the dll.conf line
+cs3200f
+and if you wish, uncomment test backend.
+
+Now run xsane. You should have test backend and
+cs3200f:dummy devices available (do not plugin the
+scanner, if you plugin the scanner, the real one
+instead of dummy you shall get). :)
+
+Now, into directory $SOMEDIR/share/sane/cs3200f put
+the firmware file cs3200f_v0054.fw you have
+created. Instructions are given below.
+
+Now, if you plug in the scanner and restart the xsane
+you should actually be able to boot the sanner and
+then moving the top left y cordinate will actually
+move the scan head, and pressing the calibrate
+now, will calibrate the AFE (that takes some time
+if lamp is not warmed up). These are just for
+testing the driver and thus do not reflect the
+actual final functions of these controls.
+
+Warning: if you hear strange noises from the scanner,
+unplug the power adapter immediately. Then reset
+the scanner with windows driver and check that it
+still works OK. This "should" hot happen but
+happened to me several times when figuring out the
+command set.
+
+If you suspect problems,
+have the following env vars exported:
+export SANE_DEBUG_CS3200F=255
+export SANE_DEBUG_SANEI_USB=255
+export SANE_DEBUG_SANEI_ACCESS=255
+and start xsane from a command line like
+xsane >xsane.log 2>&1
+
+Send me the log, compressed, or try to figure out
+where the problem is.
+
+That should do it. If not, drop me a note.
+
+************************************************************************
+* On the firmware
+************************************************************************
+
+Now, there is one complication, that must be addressed
+early. Like snapscan driver, this will also require
+uploading the firmware to the scanner at the beginning.
+While cross checking Windows logs (thanks to Mike
+Evans) I found out that there are at least two versions
+of the firmware out there. Some early CDs shipped with
+the scanners contain firmware version 0052. The latest
+(and presumably final one, since CanoScan 3200F is a
+discontinued product) is version 0054 and that version
+can be found in ScanGear version 8.5.1.1 which is available
+from Canon www pages (either as 3200F8511WNEN.exe which
+is a self extracting LHA package, for US and Japan, I guess,
+or s3A0Benx.exe which is a self extracting ZIP file).
+In the package there is a self extracting ZIP file
+(installer) SetupSG.exe which contains the low level
+DLL file CNQL1210.DLL. That file contains, as a binary file
+resource, the needed firmware.
+
+If you have CD version 1.03 or 1.04 that should contain
+the correct version of the DLL, which is 1.0.3.0. Else
+get your copy from the net.
+
+In the first phase I will only support the version 0054
+so anybody wanting to use the driver will need that
+version of the firmware. To get it you have to get the
+mentioned DLL and run the following perl script on it:
+=====================================================
+#!perl
+
+use Digest::MD5 qw(md5_base64);
+
+$start_address = 0x3a8c0;
+$end_address = 0x44304;
+$length = $end_address - $start_address;
+$refmd5 = "/wyuQDxka5rgidwmcDedZA";
+
+open FIN, "<CNQL1210.DLL";
+binmode FIN;
+
+sysseek FIN, 0x3a8c0, 0;
+
+$res = sysread FIN, $fw, $length;
+
+close FIN;
+
+$md5 = md5_base64( $fw );
+if ( $md5 ne $refmd5 ) {
+    print "Did not find CanoScan 3200F firmware v0054\n";
+    die;
+}
+
+open FOUT, ">cs3200f_v0054.fw";
+binmode FOUT;
+
+syswrite FOUT, $fw, $length;
+
+close FOUT;
+=====================================================
+
+The resulting file cs3200f_v0054.fw will be needed
+in order to the driver to work properly.
+
+************************************************************************
+* $Id: cs3200f.txt,v 1.1 2006/03/26 19:01:59 lapi-guest Exp $
+************************************************************************

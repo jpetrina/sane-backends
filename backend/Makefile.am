@@ -187,7 +187,7 @@ be_convenience_libs = libabaton.la libagfafocus.la \
     libtamarack.la libtest.la libteco1.la \
     libteco2.la libteco3.la libu12.la libumax.la \
     libumax1220u.la libumax_pp.la libv4l.la \
-    libxerox_mfp.la
+    libxerox_mfp.la libcs3200f.la
 
 # Each stand-alone backend that's possible to be built should be listed
 # here.  There are the libraries that are installed under $(libdir)/sane.
@@ -222,7 +222,7 @@ be_dlopen_libs = libsane-abaton.la libsane-agfafocus.la \
     libsane-tamarack.la libsane-test.la libsane-teco1.la \
     libsane-teco2.la libsane-teco3.la libsane-u12.la libsane-umax.la \
     libsane-umax1220u.la libsane-umax_pp.la libsane-v4l.la \
-    libsane-xerox_mfp.la
+    libsane-xerox_mfp.la libsane-cs3200f.la
 
 EXTRA_LTLIBRARIES = $(be_convenience_libs) $(be_dlopen_libs)
 
@@ -1162,6 +1162,24 @@ libsane_ma1509_la_LIBADD = $(COMMON_LIBS) \
     ../sanei/sanei_usb.lo \
     $(USB_LIBS) $(RESMGR_LIBS)
 EXTRA_DIST += ma1509.conf.in
+
+libcs3200f_la_SOURCES = cs3200f.c
+libcs3200f_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=cs3200f
+
+nodist_libsane_cs3200f_la_SOURCES = cs3200f-s.c
+libsane_cs3200f_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=cs3200f
+libsane_cs3200f_la_LDFLAGS = $(DIST_SANELIBS_LDFLAGS)
+libsane_cs3200f_la_LIBADD = $(COMMON_LIBS) \
+    libcs3200f.la \
+    ../sanei/sanei_init_debug.lo \
+    ../sanei/sanei_constrain_value.lo \
+    ../sanei/sanei_config.lo \
+    sane_strstatus.lo \
+    ../sanei/sanei_usb.lo \
+    ../sanei/sanei_access.lo \
+    ../sanei/sanei_thread.lo \
+    $(USB_LIBS) $(RESMGR_LIBS)
+# EXTRA_DIST += cs3200f.conf.in
 
 libmagicolor_la_SOURCES = magicolor.c magicolor.h
 libmagicolor_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=magicolor $(SNMP_CFLAGS)
