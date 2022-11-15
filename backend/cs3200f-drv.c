@@ -85,7 +85,7 @@ typedef enum
  ***********************************************************************/
 
 #define FW_SIZE 39492
-#define FW_BUF_LEN ((FW_SIZE+63)&(~63))
+#define FW_BUF_LEN ((FW_SIZE+511)&(~511))
 
 static const unsigned char fw_md5_ref[16] =
   { 0xFF, 0x0C, 0xAE, 0x40, 0x3C, 0x64, 0x6B, 0x9A, 
