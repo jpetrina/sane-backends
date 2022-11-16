@@ -605,7 +605,7 @@ static SANE_Status sense_handler (int scsi_fd, u_char * result, void *arg);
 static SANE_Status init_inquire (struct scanner *s);
 static SANE_Status init_vpd (struct scanner *s);
 static SANE_Status init_model (struct scanner *s);
-static SANE_Status init_model_extras (struct scanner *s);
+static SANE_Status init_imprinters (struct scanner *s);
 static SANE_Status init_panel (struct scanner *s);
 static SANE_Status init_user (struct scanner *s);
 static SANE_Status init_options (struct scanner *s);

@@ -456,7 +456,6 @@
 #define STRING_IMPRINTER_ADDON_BoW SANE_I18N("Black-on-White")
 #define STRING_IMPRINTER_ADDON_BoI SANE_I18N("Black-on-Image")
 #define STRING_IMPRINTER_ADDON_WoB SANE_I18N("White-on-Black")
-#define STRING_IMPRINTER_ADDON_DISABLED SANE_I18N("no")
 
 /* Also set via config file. */
 static int global_buffer_size;
@@ -1001,10 +1000,10 @@ attach_one (const char *device_name, int connType)
     return ret;
   }
 
-  /* this loads model specific optional features that might not be always available */
-  ret = init_model_extras (s);
+  /* this loads model specific imprinters if they are available */
+  ret = init_imprinters (s);
   if (ret != SANE_STATUS_GOOD) {
-    DBG (5, "attach_one: errors while trying to detect optional model features, continuing\n");
+    DBG (5, "attach_one: errors while trying to detect optional imprinters, continuing\n");
   }
 
   /* enable/read the buttons */
@@ -1908,9 +1907,6 @@ init_model (struct scanner *s)
 
     s->has_hwcrop = 1;
 
-    s->has_pre_imprinter = 1;
-    s->has_post_imprinter = 1;
-
     /*valid horizontal offsets for post-imprinter*/
     s->post_imprinter_h_offset_list[++i] = 21;
     s->post_imprinter_h_offset_list[++i] = 35;
@@ -1963,7 +1959,7 @@ init_model (struct scanner *s)
     s->imprint_addon_mode_list[i++] = STRING_IMPRINTER_ADDON_BoI;
     s->imprint_addon_mode_list[i++] = STRING_IMPRINTER_ADDON_BoW;
     s->imprint_addon_mode_list[i++] = STRING_IMPRINTER_ADDON_WoB;
-    s->imprint_addon_mode_list[i++] = STRING_IMPRINTER_ADDON_DISABLED;
+    s->imprint_addon_mode_list[i++] = STRING_NONE;
     s->imprint_addon_mode_list[i] = NULL;
   }
 
@@ -1973,25 +1969,26 @@ init_model (struct scanner *s)
 }
 
 /*
- * try to detect model specific extra functionality.
+ * try to detect model specific imprinters.
  */
 static SANE_Status
-init_model_extras (struct scanner *s)
+init_imprinters (struct scanner *s)
 {
   SANE_Status ret = SANE_STATUS_GOOD;
 
-  if (strstr (s->model_name,"DR-X10C")){
+  s->has_pre_imprinter = 0;
+  s->has_post_imprinter = 0;
 
-    ret = detect_imprinter(s,R_PRE_IMPRINTER);
-    if(ret != SANE_STATUS_GOOD){
-      return ret;
-    }
-
-    ret = detect_imprinter(s,R_POST_IMPRINTER);
-    if(ret != SANE_STATUS_GOOD){
-      return ret;
-    }
+  ret = detect_imprinter(s,R_PRE_IMPRINTER);
+  if(ret != SANE_STATUS_GOOD){
+    return ret;
   }
+
+  ret = detect_imprinter(s,R_POST_IMPRINTER);
+  if(ret != SANE_STATUS_GOOD){
+    return ret;
+  }
+
   return ret;
 }
 
@@ -2953,7 +2950,7 @@ sane_get_option_descriptor (SANE_Handle handle, SANE_Int option)
   if(option==OPT_POST_IMPRINT_SPECSTRING){
     opt->name = "post-imprint-string";
     opt->title = "Post-Imprinter string";
-    opt->desc = "String specifier for the postimprinter text";
+    opt->desc = "String specifier for the post-imprinter text";
     opt->type = SANE_TYPE_STRING;
     opt->size = IMPRINT_SPECSTRING_LEN;
     if (s->has_post_imprinter)
@@ -3034,7 +3031,7 @@ sane_get_option_descriptor (SANE_Handle handle, SANE_Int option)
 
   if(option==OPT_POST_IMPRINT_ADDON_MODE){
     opt->name = "post-imprint-addon-mode";
-    opt->title = "Post-Imprinter addon moe";
+    opt->title = "Post-Imprinter addon mode";
     opt->desc = "Integer specifying the type of post-imprint addon rendered in the scanned image";
     opt->type = SANE_TYPE_STRING;
     opt->constraint_type = SANE_CONSTRAINT_STRING_LIST;
@@ -3528,7 +3525,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option,
               break;
 
             case ADDON_DISABLED:
-              strcpy(val, STRING_IMPRINTER_ADDON_DISABLED);
+              strcpy(val, STRING_NONE);
               break;
           }
           return SANE_STATUS_GOOD;
@@ -3964,7 +3961,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option,
           if (!strcmp (val, STRING_IMPRINTER_ADDON_WoB)) {
             s->post_imprint_addon_mode = ADDON_WoB;
           }
-          if (!strcmp (val, STRING_IMPRINTER_ADDON_DISABLED)) {
+          if (!strcmp (val, STRING_NONE)) {
             s->post_imprint_addon_mode = ADDON_DISABLED;
           }
           return SANE_STATUS_GOOD;
@@ -4176,9 +4173,10 @@ ssm_df (struct scanner *s)
 
     int requires_postimprint = s->has_post_imprinter && (strlen(s->post_imprint.specstring) > 0);
     int requires_preimprint = s->has_pre_imprinter && (strlen(s->pre_imprint.specstring) > 0);
-    set_SSM2_DF_post_addon(out, requires_postimprint);
-    if (requires_postimprint || requires_preimprint)
+    if (requires_postimprint || requires_preimprint){
+      set_SSM2_DF_post_addon(out, requires_postimprint);
       set_SSM2_DF_imprint(out, 1);
+    }
 
     ret = do_cmd (
         s, 1, 0,
@@ -4977,9 +4975,14 @@ send_imprint_positioning(struct scanner* s, int is_postimprint, int enabled)
       set_SSM2_postimprint_addon(out);
     h_offset = s->post_imprint.h_offset;
     v_offset = s->post_imprint.v_offset;
+
+    if (enabled)
+      DBG (10, "send_imprint_positioning: post-imprinter: h_offset: %d v_offset: %d\n",h_offset,v_offset);
   }else{
     h_offset = s->pre_imprint.h_offset;
     v_offset = s->pre_imprint.v_offset;
+    if (enabled)
+      DBG (10, "send_imprint_positioning: pre-imprinter: h_offset: %d v_offset: %d\n",h_offset,v_offset);
   }
   if(!enabled)
     h_offset = v_offset = 0;
@@ -5034,12 +5037,15 @@ send_imprint_specstring(struct scanner* s, int is_postimprint)
     if (s->post_imprint_addon_mode != ADDON_DISABLED)
       set_SSM2_imprint_addonmode(out, s->post_imprint_addon_mode);
     strcpy((SANE_Char*)(out + 45), (SANE_String_Const) s->post_imprint.specstring);
+    DBG (10, "send_imprint_specstring: post-imprinter: font size: %d rotation: %d spacing: %d text: '%s' imprint-addon-mode: %d\n",s->post_imprint.font_size,s->post_imprint.font_rot,s->post_imprint.spacing,s->post_imprint.specstring,s->post_imprint_addon_mode);
   }else{
     set_SSM2_imprint_fontsize(out, s->pre_imprint.font_size);
     set_SSM2_imprint_fontrot(out, s->pre_imprint.font_rot);
     set_SSM2_imprint_spacing(out, s->pre_imprint.spacing);
     strcpy((SANE_Char*)(out + 45), (SANE_String_Const) s->pre_imprint.specstring);
+    DBG (10, "send_imprint_specstring: pre-imprinter: font size: %d rotation: %d spacing: %d text: '%s'\n",s->pre_imprint.font_size,s->pre_imprint.font_rot,s->pre_imprint.spacing,s->pre_imprint.specstring);
   }
+
   return send_cmd(s, cmd, cmdLen, out, outLen, NULL, NULL);
 }
 
@@ -5083,10 +5089,12 @@ load_imprinting_settings(struct scanner *s)
 
   if (s->has_pre_imprinter){
     ret = send_imprint_positioning(s, 0, requires_preimprint);
-    DBG(30, "send_pre_imprint_positioning = %d \n", ret);
+    DBG(10, "load_imprinting_settings: send_pre_imprint_positioning = %d \n", ret);
+    if (ret != SANE_STATUS_GOOD)
+      return ret;
     if (requires_preimprint){
       ret = send_imprint_specstring(s, 0);
-      DBG(10, "send_pre_imprint_specstring = %d \n", ret);
+      DBG(10, "load_imprinting_settings: send_pre_imprint_specstring = %d \n", ret);
       if (ret != SANE_STATUS_GOOD)
         return ret;
     }
@@ -5094,10 +5102,12 @@ load_imprinting_settings(struct scanner *s)
 
   if (s->has_post_imprinter){
     ret = send_imprint_positioning(s, 1, requires_postimprint);
-    DBG(30, "send_post_imprint_positioning = %d \n", ret);
+    DBG(10, "load_imprinting_settings: send_post_imprint_positioning = %d \n", ret);
+    if (ret != SANE_STATUS_GOOD)
+      return ret;
     if (requires_postimprint){
       ret = send_imprint_specstring(s, 1);
-      DBG(10, "send_post_imprint_specstring = %d \n", ret);
+      DBG(10, "load_imprinting_settings: send_post_imprint_specstring = %d \n", ret);
       if (ret != SANE_STATUS_GOOD)
         return ret;
     }
@@ -5105,7 +5115,7 @@ load_imprinting_settings(struct scanner *s)
 
   if (send_date_time){
     ret = send_imprint_date_and_time(s);
-    DBG(10, "send_imprint_date_and_time = %d \n", ret);
+    DBG(10, "load_imprinting_settings: send_imprint_date_and_time = %d \n", ret);
   }
   return ret;
 }
