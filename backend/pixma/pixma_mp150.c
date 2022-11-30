@@ -2134,6 +2134,7 @@ pixma_add_custom_mp150_device (const char *name,
        if(strstr(capacity, ccaps[lcaps]) != NULL) {
 	  caps = caps | ucaps[lcaps];
        }
+       lcaps++;
    }
 
    ddpi = atoi(dpi);
