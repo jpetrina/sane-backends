@@ -2629,21 +2629,33 @@ sane_get_parameters(SANE_Handle handle, SANE_Parameters *params)
 	if (params == NULL)
 		DBG(1, "%s: params is NULL\n", __func__);
 
+
 	/*
-	 * If sane_start was already called, then just retrieve the parameters
-	 * from the scanner data structure
+	 * If scanning then make sure that we acquire an image before we proceed
+	 * if we didn't before. It is unlikely that s->scanning can be true and we have
+	 * not acquired an image yet but let us be sure.
+	 *
+	 * Otherwise, we will generate parameters purely from the current settings
+	 * rather than anything we got from the current image.
+	 *
 	 */
-	if (s->scanning) {
+	if (s->scanning)
+	{
 		DBG(5, "scan in progress, returning saved params structure\n");
+
+		if (s->acquirePage == 0)
+		{
+			SANE_Status status = get_next_image(s);
+			if (status != SANE_STATUS_GOOD)
+			{
+				DBG(1, "failed to acquire image for parameters.\n");
+				return status;
+			}
+		}
 	} else {
 		/* otherwise initialize the params structure */
 		eds_init_parameters(s);
 	}
-
-
-	SANE_Status status = SANE_STATUS_GOOD;
-
-	status = get_next_image(s);
 
 	// if size auto, update page size value
 	if(s->val[OPT_ADF_CRP].w)
@@ -2707,7 +2719,7 @@ sane_get_parameters(SANE_Handle handle, SANE_Parameters *params)
 	print_params(s->params);
 
 	DBG(20, "s->params.line  = %d  s->params.bytes_per_line = %d s->params.pixels_per_line = %d \n", s->params.lines, s->params.bytes_per_line , s->params.pixels_per_line );
-	return status;
+	return SANE_STATUS_GOOD;
 }
 
 
@@ -3305,6 +3317,10 @@ sane_start(SANE_Handle handle)
 	s->scanning = 1;
 	s->dummy = 0;
 	s->scanEnd = 0;
+
+	/* acquire the first image. */
+	status = get_next_image(s);
+
 end:
 	if (status != SANE_STATUS_GOOD) {
 		DBG(1, "%s: start failed: %s\n", __func__, sane_strstatus(status));
