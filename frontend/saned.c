@@ -1771,6 +1771,10 @@ do_scan (Wire * w, int h, int data_fd)
               /* get more input data */
 
               /* reserve 4 bytes to store the length of the data record: */
+
+              /* NOTE: it seems to me that we could dispense with the record if we read nothing from sane_read() */
+              /* Consider an optimization whereby we add nothing to the ring buffer in this case. */
+              /* I do need to check the semantics of this though. [RL] */
               i = reader;
               reader += 4;
               if (reader >= (int) buffer_size)

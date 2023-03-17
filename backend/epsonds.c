@@ -3613,10 +3613,12 @@ sane_read(SANE_Handle handle, SANE_Byte *data, SANE_Int max_length, SANE_Int *le
 				// data is empty fin
 		if (read == 0) {
 			*length = 0;
-			eds_ring_flush(s->current);
-			eds_ring_destory(s->current);
-			DBG(18, "returns EOF 2\n");
-			return SANE_STATUS_EOF;
+
+			// This is silly: we already established above that there is data available.
+//			eds_ring_flush(s->current);
+//			eds_ring_destory(s->current);
+			DBG(18, "Couldn't read anything from ring buffer: probably not enough capacity to receive.\n");
+			return SANE_STATUS_GOOD;
 		}
 		*length = read;
 
