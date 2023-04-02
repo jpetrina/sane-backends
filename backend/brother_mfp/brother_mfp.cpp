@@ -274,6 +274,24 @@ static Brother_Model models[] =
       CAP_BUTTON_HAS_SCAN_IMAGE |
       CAP_ENCODING_HAS_JPEG },
 
+    { "Brother", "MFC-8910DW", BROTHER_FAMILY_4, 0x04f9, 0x0298,
+      { 0, SANE_FIX(211.5), 0 },
+      { 0, SANE_FIX(297), 0 },
+      { 6, 100, 150, 200, 300, 600, 1200 },
+      { 7, 100, 150, 200, 300, 600, 1200, 2400 },
+      CAP_MODE_COLOUR |
+      CAP_MODE_GRAY |
+      CAP_MODE_GRAY_DITHER |
+      CAP_MODE_BW |
+      CAP_SOURCE_HAS_FLATBED |
+      CAP_SOURCE_HAS_ADF_DUPLEX |
+      CAP_BUTTON_HAS_SCAN_EMAIL |
+      CAP_BUTTON_HAS_SCAN_FILE |
+      CAP_BUTTON_HAS_SCAN_OCR |
+      CAP_BUTTON_HAS_SCAN_IMAGE |
+      CAP_ENCODING_HAS_JPEG },
+
+
     {NULL, NULL, BROTHER_FAMILY_NONE, 0, 0, {0, 0, 0}, {0, 0, 0}, {0}, {0}, 0}
 };
 
@@ -1562,7 +1580,7 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters * params)
         }
     }
   else if ((strcmp (device->val[OPT_SOURCE].s, SANE_VALUE_SOURCE_ADF) == 0)
-      || (strcmp (device->val[OPT_SOURCE].s, SANE_VALUE_SOURCE_ADF) == 0))
+      || (strcmp (device->val[OPT_SOURCE].s, SANE_VALUE_SOURCE_ADF_SIMPLEX) == 0))
     {
       rc = device->driver->SetSource(BROTHER_SOURCE_ADF);
       if (rc != SANE_STATUS_GOOD)
