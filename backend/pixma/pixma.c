@@ -297,7 +297,7 @@ static SANE_Status config_attach_pixma(SANEI_Config __sane_unused__ * config,
     }
   }
   else {
-    
+
     return config_attach_pixma_generic (line);
   }
   return SANE_STATUS_INVAL;
