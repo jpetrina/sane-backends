@@ -2073,45 +2073,6 @@ const pixma_config_t pixma_mp150_devices[] = {
   END_OF_DEVICE_LIST
 };
 
-const char *ccaps [] = {"PIXMA_CAP_EASY_RGB",
-                        "PIXMA_CAP_GRAY",
-                        "PIXMA_CAP_ADF",
-                        "PIXMA_CAP_48BIT",
-                        "PIXMA_CAP_GAMMA_TABLE",
-                        "PIXMA_CAP_EVENTS",
-                        "PIXMA_CAP_TPU",
-                        "PIXMA_CAP_ADFDUP",
-                        "PIXMA_CAP_CIS",
-                        "PIXMA_CAP_CCD",
-                        "PIXMA_CAP_LINEART",
-                        "PIXMA_CAP_NEGATIVE",
-                        "PIXMA_CAP_TPUIR",
-                        "PIXMA_CAP_ADF_WAIT",
-                        "PIXMA_CAP_ADF_JPEG",
-                        "PIXMA_CAP_JPEG",
-                        "PIXMA_CAP_GT_4096",
-                        NULL
-                      };
-
-const unsigned ucaps [] = {PIXMA_CAP_EASY_RGB,
-                           PIXMA_CAP_GRAY,
-                           PIXMA_CAP_ADF,
-                           PIXMA_CAP_48BIT,
-                           PIXMA_CAP_GAMMA_TABLE,
-                           PIXMA_CAP_EVENTS,
-                           PIXMA_CAP_TPU,
-                           PIXMA_CAP_ADFDUP,
-                           PIXMA_CAP_CIS,
-                           PIXMA_CAP_CCD,
-                           PIXMA_CAP_LINEART,
-                           PIXMA_CAP_NEGATIVE,
-                           PIXMA_CAP_TPUIR,
-                           PIXMA_CAP_ADF_WAIT,
-                           PIXMA_CAP_ADF_JPEG,
-                           PIXMA_CAP_JPEG,
-                           PIXMA_CAP_GT_4096
-                      };
-
 void
 pixma_add_custom_mp150_device (const char *name,
                                const char *model,
