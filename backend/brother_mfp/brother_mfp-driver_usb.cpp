@@ -431,10 +431,10 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
                                                    length);
 
   DBG (DBG_DETAIL,
-       "BrotherUSBDriver::ReadScanData: decoder consumes %zu bytes and writes %zu bytes, returning %d\n",
+       "BrotherUSBDriver::ReadScanData: decoder consumes %zu bytes and writes %zu bytes, returning %s\n",
        data_consumed,
        *length,
-       dec_ret);
+       encoder->DecodeStatusToString(dec_ret));
 
   res = encoder->DecodeStatusToSaneStatus(dec_ret);
 
@@ -447,6 +447,7 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
   else if (dec_ret == DECODE_STATUS_ENDOFFRAME_WITH_MORE)
     {
       next_frame_number++;
+      encoder->NewPage();
     }
 
   /*
@@ -1105,38 +1106,56 @@ SANE_Status BrotherUSBDriver::CheckSensor (BrotherSensor &status)
 
  /*
   * Now we query the button state.
-  * The request is the same apparently but we get a different response.
-  * Not really sure I understand because it seems stateful this but it is what we observe.
+  * This is done by the same request. Not sure why the first response even
+  * exists, but this is how it appears to work. Also note that there may be
+  * default ("no button pressed") responses in between, hence the loop and
+  * timeout.
   *
   */
-  res = sanei_usb_control_msg (fd, USB_DIR_IN | USB_TYPE_VENDOR,
-                               BROTHER_USB_REQ_BUTTONSTATE,
-                               0, 0, 255, small_buffer);
-
-if (res != SANE_STATUS_GOOD)
-  {
-    DBG (DBG_WARN,
-        "BrotherUSBDriver::CheckSensor: failed to send check sensor sequence: %s.\n",
-        devicename);
-      return res;
-    }
-
-  /*
-   * And the second response is a bit longer and button specific.
-   *
-   */
-  BrotherButtonStateResponse state_resp;
-
-  DecodeStatus dec_ret = encoder->DecodeButtonStateResp (small_buffer, 9, state_resp);
-  if (dec_ret != DECODE_STATUS_GOOD)
+  useconds_t time_left = TIMEOUT_SECS(2);
+  static const useconds_t deltaT = TIMEOUT_MILLISECS(100);
+  
+  while (time_left > deltaT)
     {
-      DBG (DBG_WARN, "BrotherUSBDriver::CheckSensor: button info response is invalid.\n");
-      return encoder->DecodeStatusToSaneStatus (dec_ret);;
+      res = sanei_usb_control_msg (fd, USB_DIR_IN | USB_TYPE_VENDOR,
+                                  BROTHER_USB_REQ_BUTTONSTATE,
+                                  0, 0, 255, small_buffer);
+
+    if (res != SANE_STATUS_GOOD)
+      {
+        DBG (DBG_WARN,
+            "BrotherUSBDriver::CheckSensor: failed to send check sensor sequence: %s.\n",
+            devicename);
+          return res;
+      }
+
+      /*
+      * The second response is a bit longer and button specific.
+      *
+      */
+      BrotherButtonStateResponse state_resp;
+
+      DecodeStatus dec_ret = encoder->DecodeButtonStateResp (small_buffer, 9, state_resp);
+
+      if (dec_ret == DECODE_STATUS_GOOD)
+        {
+          status = state_resp.button_value;
+          return SANE_STATUS_GOOD;
+        }
+      /* use INVAL to indicate a "no button pressed" response */
+      else if (dec_ret != DECODE_STATUS_INVAL)
+        {
+          DBG (DBG_WARN, "BrotherUSBDriver::CheckSensor: button info response is invalid.\n");
+          return encoder->DecodeStatusToSaneStatus (dec_ret);
+        }
+      else
+        {
+          usleep(100 * 1000);
+          time_left -= deltaT;
+        }
     }
-
-  status = state_resp.button_value;
-
-  return SANE_STATUS_GOOD;
+  /* If we get here, we got 1/2 packets, but the second one never arrived */
+  return SANE_STATUS_IO_ERROR;
 }
 
 BrotherDriver::BrotherDriver (BrotherFamily family, SANE_Word capabilities) :

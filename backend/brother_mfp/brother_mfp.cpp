@@ -307,7 +307,7 @@ static Brother_Model models[] =
       CAP_ENCODING_HAS_JPEG },
 
 
-    {NULL, NULL, BROTHER_FAMILY_NONE, 0, 0, {0, 0, 0}, {0, 0, 0}, {0}, {0}, 0}
+    {nullptr, nullptr, BROTHER_FAMILY_NONE, 0, 0, {0, 0, 0}, {0, 0, 0}, {0}, {0}, 0}
 };
 
 struct BrotherDevice
@@ -350,9 +350,9 @@ struct BrotherDevice
   BrotherSensor current_sensor_states;
 };
 
-static BrotherDevice *first_dev = NULL;
+static BrotherDevice *first_dev = nullptr;
 static int num_devices = 0;
-static SANE_Device **devlist = NULL;
+static SANE_Device **devlist = nullptr;
 
 static const SANE_Range constraint_brightness_contrast = { -50, +50, 1 };
 
@@ -386,7 +386,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
    * then we wouldn't have to do this as we already know what the model is. d'uh.
    *
    */
-  const Brother_Model *model = NULL;
+  const Brother_Model *model = nullptr;
   for (model = models; model->model; model++)
     {
       if ((model->usb_vendor == vendor) && (model->usb_product == product))
@@ -615,7 +615,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
 static SANE_Status
 attach_with_no_ret (const char *devicename)
 {
-  return attach_with_ret(devicename, NULL);
+  return attach_with_ret(devicename, nullptr);
 }
 
 static size_t
@@ -1501,21 +1501,25 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
               case OPT_SENSOR_EMAIL:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_EMAIL) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_EMAIL;
                 break;
 
               case OPT_SENSOR_OCR:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_OCR) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_OCR;
                 break;
 
               case OPT_SENSOR_FILE:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_FILE) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_FILE;
                 break;
 
               case OPT_SENSOR_IMAGE:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_IMAGE) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_IMAGE;
                 break;
 
               default:
@@ -1796,6 +1800,8 @@ sane_read (SANE_Handle handle, SANE_Byte * data,
   size_t scan_len = 0;
   SANE_Status res = device->driver->ReadScanData(data, (size_t)max_length, &scan_len);
   *length = (SANE_Int)scan_len;
+
+  DBG(DBG_EVENT, "sane_read: Data transferred: %d, return code %d\n", *length, res);
 
   return res;
 }

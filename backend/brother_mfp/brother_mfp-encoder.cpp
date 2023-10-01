@@ -87,6 +87,9 @@
 #define BROTHER_DATA_BLOCK_COVER_OPEN           0xc4
 // unsure as to the meaning of this or how to get it again.
 #define BROTHER_DATA_BLOCK_CLEARING_PAPER       0xc5
+// unsure about this one, too. Only recovery is a printer restart.
+// Can happen when the previous scan was interrupted by a driver crash.
+#define BROTHER_DATA_BLOCK_DEVICE_STUCK         0xc6
 
 /*
  * Other protocol error?
@@ -1922,8 +1925,9 @@ DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data
 
       new_block = true;
       break;
+    /* The first one likely isn't returned anymore, but it doesn't hurt to cover the case */
     case DECODE_STATUS_ENDOFDATA:
-    case DECODE_STATUS_ENDOFFRAME_NO_MORE: /* this one isn't returned by DecodeScanDataHeader */
+    case DECODE_STATUS_ENDOFFRAME_NO_MORE:
     case DECODE_STATUS_ENDOFFRAME_WITH_MORE:
       DBG (DBG_DETAIL,
           "BrotherEncoderFamily4::ProcessNextPacket: Next packet is an EOF: %s\n",
@@ -1962,7 +1966,7 @@ DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data
       else if (orig_dest_data_len > dest_data_len)
         {
           DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Found EOF packet, transmitting final data before sending EOF\n");
-          /* Here we leave current_header.block_type at 0 so we exit the next call early */
+          /* Here we leave current_header.block_type at 0 so we exit the caller's loop early */
           return DECODE_STATUS_GOOD;
         }
         {
@@ -1974,7 +1978,7 @@ DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data
     default:
       /* All the remaining decode statuses are errors of varying severity */
       DBG (DBG_IMPORTANT,
-          "BrotherEncoderFamily4::ProcessNextPacket: Error %s",
+          "BrotherEncoderFamily4::ProcessNextPacket: Error %s\n",
           DecodeStatusToString(ret_status));
   }
   return ret_status;
@@ -2161,6 +2165,8 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanDataHeader (const SANE_Byte *src_d
       return DECODE_STATUS_NO_DOCS;
     }
 
+  /* This case is likely obsolete for being contained in END_OF_FRAME_NO_MORE
+   * below, but it doesn't hurt to keep the code here */
   if (header.block_type == BROTHER_DATA_BLOCK_SCAN_FINISHED)
     {
       *src_data_consumed = 1;
@@ -2180,6 +2186,13 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanDataHeader (const SANE_Byte *src_d
       return DECODE_STATUS_PAPER_JAM;
     }
 
+  if ((header.block_type == BROTHER_DATA_BLOCK_DEVICE_STUCK))
+    {
+      *src_data_consumed = 1;
+      DBG(DBG_IMPORTANT, "BrotherEncoderFamily4::DecodeScanDataHeader: The scanner is stuck and must be turned off and back on.\n");
+      return DECODE_STATUS_ERROR;
+    }
+
   if (header.block_type == BROTHER_DATA_BLOCK_COVER_OPEN)
     {
       *src_data_consumed = 1;
@@ -2188,13 +2201,24 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanDataHeader (const SANE_Byte *src_d
 
   if (header.block_type == BROTHER_DATA_BLOCK_END_OF_FRAME_NO_MORE)
     {
-      if (src_data_len < 10)
+      /* The "end of frame" is unspecific and could be either of
+       * ENDOFFRAME_NO_MORE or ENDOFFRAME_WITH_MORE. To distinguish the cases
+       * we peek ahead to the first byte of the next packet. If it is an
+       * ENDOFDATA, we don't get any additional frames. In any other case,
+       * it marks the beginning of a new frame.
+       * 
+       * Therefore, even though the packet is 10 bytes long, we return
+       * TRUNCATED if we don't have the first byte of the next packet.
+       */
+      if (src_data_len < 10 + 1)
         {
           return DECODE_STATUS_TRUNCATED;
         }
 
       *src_data_consumed = 10;
-      return DECODE_STATUS_ENDOFFRAME_NO_MORE;
+      return (src_data[10] == BROTHER_DATA_BLOCK_SCAN_FINISHED) ?
+        DECODE_STATUS_ENDOFFRAME_NO_MORE :
+        DECODE_STATUS_ENDOFFRAME_WITH_MORE;
     }
 
   /*
@@ -2217,7 +2241,7 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanDataHeader (const SANE_Byte *src_d
 DecodeStatus BrotherEncoderFamily4::DecodeButtonQueryResp (const SANE_Byte *data, size_t data_len,
                                                            BrotherButtonQueryResponse &response)
 {
-  if ((data_len != 4) || (data[0] != 0x04) ||(data[1] != 0x10) || (data[2] != 0x03))
+  if ((data_len != 4) || (data[0] != 0x05 && data[0] != 0x04) ||(data[1] != 0x10) || (data[2] != 0x03))
     {
       return DECODE_STATUS_ERROR;
     }
@@ -2230,7 +2254,19 @@ DecodeStatus BrotherEncoderFamily4::DecodeButtonQueryResp (const SANE_Byte *data
 DecodeStatus BrotherEncoderFamily4::DecodeButtonStateResp (const SANE_Byte *data, size_t data_len,
                                                            BrotherButtonStateResponse &response)
 {
-  if ((data_len != 9) || (memcmp(data, "\x09" "\x10" "\x03" "\x20", 4) != 0))
+  if (data_len != 9)
+    {
+      return DECODE_STATUS_ERROR;
+    }
+  BrotherButtonQueryResponse dummy;
+  if (DecodeButtonQueryResp(data, 4, dummy) == DECODE_STATUS_GOOD)
+    {
+      /* We may get "no button pressed" responses while waiting for the second
+       * packet containing info on which button was pressed. We encode these
+       * intermediate packets by DECODE_STATUS_INVAL. */
+      return DECODE_STATUS_INVAL;
+    }
+  if (memcmp(data, "\x09" "\x10" "\x03" "\x20", 4) != 0)
     {
       return DECODE_STATUS_ERROR;
     }
@@ -3281,8 +3317,11 @@ void BrotherJFIFDecoder::NewPage (const BrotherParameters &params)
    *
    */
   jpeg_abort_decompress(&state.cinfo);
-  state.have_read_header = false;
+  state = {};
   decompress_bytes = 0;
+
+  // Re-initialize the library for a new image
+  InitLibJpeg();
 }
 
 void BrotherJFIFDecoder::InitSource (j_decompress_ptr cinfo)
@@ -3332,6 +3371,14 @@ void BrotherJFIFDecoder::TermSource(j_decompress_ptr cinfo)
   (void)cinfo;
   DBG (DBG_EVENT, "BrotherJFIFDecoder::TermSource.\n");
 
+}
+
+void BrotherJFIFDecoder::OutputMessageHandler(j_common_ptr cinfo)
+{
+  /* based on libjpeg-turbo/jerror.c */
+  char jpegLastErrorMsg[JMSG_LENGTH_MAX];
+  (*cinfo->err->format_message) (cinfo, jpegLastErrorMsg);
+  DBG (DBG_WARN, "BrotherJFIFDecoder::OutputMessageHandler: libjpeg warning=[%s]\n", jpegLastErrorMsg);
 }
 
 void BrotherJFIFDecoder::ErrorExitManager(j_common_ptr cinfo)

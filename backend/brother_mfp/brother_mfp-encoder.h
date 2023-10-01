@@ -331,32 +331,11 @@ public:
   BrotherJFIFDecoder():
     decompress_bytes(0)
   {
-    /*
-     * Not sure if this is a safe way to get the cinfo into
-     * a consistent state but at least all pointers will be NULL.
-     *
-     */
-    (void)memset(&state.cinfo, 0, sizeof(state.cinfo));
-
-    state.cinfo.err = jpeg_std_error(&state.jerr);
-    state.cinfo.err->error_exit = ErrorExitManager;
-
-    jpeg_create_decompress (&state.cinfo);
-
-    /*
-     * Set up source manager.
-     *
-     */
-    state.src_mgr.init_source = InitSource;
-    state.src_mgr.fill_input_buffer = FillInputBuffer;
-    state.src_mgr.skip_input_data = SkipInputData;
-    state.src_mgr.resync_to_restart = jpeg_resync_to_restart;
-    state.src_mgr.term_source = TermSource;
-
-    state.cinfo.src = &state.src_mgr;
+    InitLibJpeg();
   }
 
   static void ErrorExitManager(j_common_ptr cinfo);
+  static void OutputMessageHandler(j_common_ptr cinfo);
 
   ~BrotherJFIFDecoder()
   {
@@ -376,6 +355,34 @@ public:
     }
 
 private:
+  void InitLibJpeg()
+  {
+    /*
+     * Not sure if this is a safe way to get the cinfo into
+     * a consistent state but at least all pointers will be NULL.
+     *
+     */
+    (void)memset(&state.cinfo, 0, sizeof(state.cinfo));
+
+    state.cinfo.err = jpeg_std_error(&state.jerr);
+    state.cinfo.err->error_exit = ErrorExitManager;
+    state.cinfo.err->output_message = OutputMessageHandler;
+
+    jpeg_create_decompress (&state.cinfo);
+
+    /*
+     * Set up source manager.
+     *
+     */
+    state.src_mgr.init_source = InitSource;
+    state.src_mgr.fill_input_buffer = FillInputBuffer;
+    state.src_mgr.skip_input_data = SkipInputData;
+    state.src_mgr.resync_to_restart = jpeg_resync_to_restart;
+    state.src_mgr.term_source = TermSource;
+
+    state.cinfo.src = &state.src_mgr;
+  }
+
   static void InitSource (j_decompress_ptr cinfo);
   static boolean FillInputBuffer(j_decompress_ptr cinfo);
   static void SkipInputData(j_decompress_ptr cinfo, long num_bytes);
