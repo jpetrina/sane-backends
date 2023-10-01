@@ -1714,7 +1714,7 @@ DecodeStatus BrotherEncoderFamily4::DecodeSourceStatusBlockResp (const SANE_Byte
   if (data_len != 1)
     {
       DBG (DBG_SERIOUS,
-           "BrotherEncoderFamily2::DecodeSourceStatusBlockResp: source status response invalid: %zu\n",
+           "BrotherEncoderFamily4::DecodeSourceStatusBlockResp: source status response invalid: %zu\n",
            data_len);
       return DECODE_STATUS_ERROR;
     }
@@ -1771,7 +1771,7 @@ DecodeStatus BrotherEncoderFamily4::DecodeSourceSelectBlockResp (const SANE_Byte
   if (data_len != 1)
     {
       DBG (DBG_SERIOUS,
-           "BrotherEncoderFamily2::DecodeSourceStatusBlockResp: source select response invalid: %zu\n",
+           "BrotherEncoderFamily4::DecodeSourceStatusBlockResp: source select response invalid: %zu\n",
            data_len);
       return DECODE_STATUS_ERROR;
     }
@@ -1869,11 +1869,122 @@ DecodeStatus BrotherEncoderFamily4::EncodeParameterBlock (SANE_Byte *data, size_
   return DECODE_STATUS_GOOD;
 }
 
+
+/*
+ *
+ * This function updates current_header in case the current packet has been processed entirely.
+ * Some special cases are dealt with, including the case where the next packet is an EOF
+ * but there is unprocessed data left in the decoder.
+ * 
+ */
+DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data, size_t &src_data_len,
+                                                   size_t dest_data_len, size_t orig_dest_data_len,
+                                                   bool &new_block)
+{
+    /*
+    * If we are not in a block, then decode the next block.
+    *
+    * We might not have enough bytes to fully decode the header.
+    * In which case, we wait for some more data.
+    *
+    */
+  new_block = false;
+
+
+  if (current_header.block_type != 0)
+    /* The current packet has not been processed completely */
+    return DECODE_STATUS_GOOD;
+  
+  size_t header_consumed = 0;
+  ScanDataHeader next_header = {};
+  DecodeStatus ret_status = DecodeScanDataHeader(src_data, src_data_len, &header_consumed, next_header);
+
+  switch (ret_status)
+  {
+    case DECODE_STATUS_TRUNCATED:
+      /* This means we don't have enough data to decode a header yet.
+      Try again next time if we have read more data. */
+      break;
+    case DECODE_STATUS_CANCEL:
+      DBG (DBG_IMPORTANT, "BrotherEncoderFamily4::ProcessNextPacket: cancel detected\n");
+      break;
+    case DECODE_STATUS_GOOD:
+      current_header = next_header;
+
+      DBG (DBG_IMPORTANT,
+          "BrotherEncoderFamily4::ProcessNextPacket: decoded new block header: 0x%2.2x, length=%zu\n",
+          current_header.block_type,
+          current_header.block_len);
+
+      /* Move the source pointer to the beginning of the packet's payload */
+      src_data += header_consumed;
+      src_data_len -= header_consumed;
+
+      new_block = true;
+      break;
+    case DECODE_STATUS_ENDOFDATA:
+    case DECODE_STATUS_ENDOFFRAME_NO_MORE: /* this one isn't returned by DecodeScanDataHeader */
+    case DECODE_STATUS_ENDOFFRAME_WITH_MORE:
+      DBG (DBG_DETAIL,
+          "BrotherEncoderFamily4::ProcessNextPacket: Next packet is an EOF: %s\n",
+          DecodeStatusToString(ret_status));
+      /*
+       * We have encountered an end of page / end of scan packet. There are three cases here:
+       * 1. There is unprocessed data left in a decoder.
+       *    This happens e.g. when the previous call of sane_read() moved the penultimate packet
+       *    into the JFIF decode buffer, but the output buffer was too small for the entire
+       *    decompressed contents, so some data is left in the decode buffer.
+       *    In this case, the data must be processed first, so we don't consume this header now.
+       *
+       * 2. There is no data in the decoder, but we have produced output.
+       *    This happens when the decode buffer and the penultimate packet were exhausted
+       *    in this call of sane_read(), partially filling the output buffer.
+       *    In this case, we want to return SANE_STATUS_GOOD to transmit the remaining data
+       *    and return SANE_STATUS_EOF on the subsequent call of sane_read().
+       *    Therefore, this header will not be consumed now.
+       * 
+       * 3. There is no data in the decode and we have not produced output.
+       *    In this case, we do want to consume the header and return SANE_STATUS_EOF to indicate
+       *    the end of this frame.
+       *
+       */
+      if (jfif_decoder.HasUnprocessedDecodeData())
+        {
+          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Found EOF packet, unprocessed cached data left\n");
+          /*
+           * We turn the packet back into a JPEG block, even though it has length zero.
+           * This causes the subsequent code to call the JFIF decoder, which in turn drains its decode buffer.
+           * A cleaner solution could be an internal enum for the current state of the decoder.
+           */
+          current_header.block_type = BROTHER_DATA_BLOCK_JPEG;
+          return DECODE_STATUS_GOOD;
+        }
+      else if (orig_dest_data_len > dest_data_len)
+        {
+          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Found EOF packet, transmitting final data before sending EOF\n");
+          /* Here we leave current_header.block_type at 0 so we exit the next call early */
+          return DECODE_STATUS_GOOD;
+        }
+        {
+          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Processing EOF packet\n");
+          /* Consume the header */
+          src_data_len -= header_consumed;
+          break;
+        }
+    default:
+      /* All the remaining decode statuses are errors of varying severity */
+      DBG (DBG_IMPORTANT,
+          "BrotherEncoderFamily4::ProcessNextPacket: Error %s",
+          DecodeStatusToString(ret_status));
+  }
+  return ret_status;
+}
+
 DecodeStatus BrotherEncoderFamily4::DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                                     size_t *src_data_consumed, SANE_Byte *dest_data,
                                                     size_t dest_data_len, size_t *dest_data_written)
 {
-  DBG (DBG_EVENT, "BrotherEncoderFamily4::DecodeScanData: \n");
+  DBG (DBG_EVENT, "BrotherEncoderFamily4::DecodeScanData: Getting %zu bytes of new data\n", src_data_len);
   DecodeStatus ret_status = DECODE_STATUS_GOOD;
 
   *src_data_consumed = 0;
@@ -1899,91 +2010,25 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanData (const SANE_Byte *src_data, s
   for (;;)
     {
       /*
-       * If we are not in a block, then decode the next block.
-       *
-       * We might not have enough bytes to fully decode the header.
-       * In which case, we wait for some more data.
-       *
-       */
-      bool new_block = false;
-
-      if (current_header.block_type == 0)
-	{
-	  size_t header_consumed = 0;
-	  ret_status = DecodeScanDataHeader(src_data, src_data_len, &header_consumed, current_header);
-	  if (ret_status == DECODE_STATUS_TRUNCATED)
-	    {
-	      /*
-	       * This means we don't have enough data to decode a header yet.
-	       * Try again next time if we have read more data.
-	       *
-	       */
-	      ret_status = DECODE_STATUS_GOOD;
-	      break;
-	    }
-
-          if (ret_status == DECODE_STATUS_CANCEL)
-            {
-              DBG (DBG_IMPORTANT, "BrotherEncoderFamily2::DecodeScanData: cancel detected\n");
-              break;
-            }
-
-          /*
-            * Detect special case situations.
-            *
-            */
-          if (ret_status != DECODE_STATUS_GOOD)
-            {
-              DBG (DBG_IMPORTANT,
-                   "BrotherEncoderFamily2::DecodeScanData: %s.\n",
-                   DecodeStatusToString (ret_status));
-
-              current_header.block_type = 0;
-
-              /*
-               * If we have data in hand, then we will send this up first.
-               * Otherwise, send SANE_STATUS_EOF to trigger stop of scan.
-               *
-               * We don't consume this header so we will see it the next time around.
-               *
-               */
-              if (orig_dest_data_len > dest_data_len)
-                {
-                  ret_status = DECODE_STATUS_GOOD;
-                }
-              else
-                {
-                  // Consume the header.
-                  src_data_len -= header_consumed;
-                }
-              break;
-            }
-          if (ret_status != DECODE_STATUS_GOOD)
-            {
-              DBG (DBG_IMPORTANT, "BrotherEncoderFamily4::DecodeScanData: failed to decode header\n");
-              current_header.block_type = 0;
-              break;
-            }
-
-          DBG (DBG_IMPORTANT,
-               "BrotherEncoderFamily4::DecodeScanData: decoded new block header: 0x%2.2x, length=%zu\n",
-               current_header.block_type,
-               current_header.block_len);
-
-          src_data += header_consumed;
-          src_data_len -= header_consumed;
-
-          new_block = true;
-	}
-
-      /*
        * Attempt to decode the data block.
        * We will exit the function if we can only partially
        * decode it, hoping to do more next time.
        *
        */
+      bool new_block = false;
       size_t bytes_consumed = 0;
       size_t bytes_written = 0;
+
+      ret_status = ProcessNextPacket(src_data, src_data_len, dest_data_len, orig_dest_data_len, new_block);
+      if (ret_status != DECODE_STATUS_GOOD || current_header.block_type == 0)
+      {
+        /*
+         * block_type == 0 means that we don't have further data to process,
+         * e.g. because the next packet is an EOF and *dest_data_written > 0.
+         */
+        break;
+      }
+
       size_t in_len = std::min(src_data_len, current_header.block_len);
 
       if (current_header.block_type == BROTHER_DATA_BLOCK_JPEG)
@@ -3317,7 +3362,7 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData (const SANE_Byte *src_data, size
    * decompress as we go until we exhaust the output buffer or the input.
    *
    */
-  while (src_data_len > 0)
+  while (src_data_len > 0 || decompress_bytes > 0)
     {
       /*
        * Append what we can to the decompress buffer.
@@ -3344,6 +3389,17 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData (const SANE_Byte *src_data, size
                                                         dest_data,
                                                         dest_data_len,
                                                         &bytes_written);
+      if (res == DECODE_STATUS_ENDOFFRAME_WITH_MORE)
+        {
+          if (*dest_data_written > 0)
+            {
+              /* We have produced data, which must be returned
+               * before sending EOF
+               */
+              res = DECODE_STATUS_GOOD;
+            }
+          return res;
+        }
 
       if (res != DECODE_STATUS_GOOD)
         {
@@ -3381,6 +3437,24 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
                                                                 size_t dest_data_len,
                                                                 size_t *dest_data_written)
 {
+  if (src_data_len == 0)
+  {
+    DBG(DBG_DETAIL, "BrotherJFIFDecoder::DecodeScanData_CompressBuffer: JFIF decoder was called with an empty buffer. Returning EOF\n");
+    return DECODE_STATUS_ENDOFFRAME_WITH_MORE;
+  }
+
+  /*
+   * Check if the decoder has finished already. While we should not normally get here, this check can catch some spurious errors.
+   * For example, if a slightly invalid number of rows was requested, the scanner returns JFIF data whose header does not always
+   * match the actual number of rows.
+   */
+  if (state.cinfo.output_height > 0 && state.cinfo.output_scanline >= state.cinfo.output_height)
+  {
+    DBG (DBG_SERIOUS,
+      "BrotherJFIFDecoder::DecodeScanData_CompressBuffer: JFIF decoder was called on a finished buffer (data left: %zu)\n",
+      src_data_len);
+    return DECODE_STATUS_ENDOFFRAME_WITH_MORE;
+  }
   DBG (DBG_EVENT,
        "BrotherJFIFDecoder::DecodeScanData_CompressBuffer: src_data_len=%zu dest_data_len=%zu\n",
        src_data_len,
@@ -3534,6 +3608,12 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
    */
   if (state.cinfo.output_scanline >= state.cinfo.output_height)
     {
+      /*
+       * As explained above, *src_data_consumed will not account for all the bytes that have been read
+       * so libjpeg can restart an unfinished decode. In case we are finished, however, we do want
+       * to absorb all the remaining bytes so the caller knows that all the data has been processed.
+       */
+      *src_data_consumed = src_data_len;
       DBG (DBG_EVENT, "BrotherJFIFDecoder::DecodeScanData_CompressBuffer: Converted all scanlines. Finishing.\n");
 
       if (!jpeg_finish_decompress(&state.cinfo))

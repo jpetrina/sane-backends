@@ -174,9 +174,13 @@ struct BrotherSourceStatusResponse
 enum DecodeStatus
 {
   DECODE_STATUS_GOOD,
+  /* The next item (header, line, ...) is not yet complete */
   DECODE_STATUS_TRUNCATED,
+  /* End of scan */
   DECODE_STATUS_ENDOFDATA,
+  /* End of the last frame */
   DECODE_STATUS_ENDOFFRAME_NO_MORE,
+  /* End of a frame, more frames will be coming */
   DECODE_STATUS_ENDOFFRAME_WITH_MORE,
   DECODE_STATUS_CANCEL,
   DECODE_STATUS_ERROR,
@@ -196,6 +200,10 @@ struct ScanDataHeader
     image_number(0)
   {
   }
+  /* 
+   * A code defined by Brother, identifying the type of packet. 
+   * We set it to zero when we have processed all data in this packet.
+   */
   SANE_Byte block_type;
   size_t block_len;
   SANE_Int image_number;
@@ -361,6 +369,11 @@ public:
   DecodeStatus DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
                                size_t *dest_data_written);
+
+  SANE_Bool HasUnprocessedDecodeData()
+    {
+      return decompress_bytes > 0 ? SANE_TRUE : SANE_FALSE;
+    }
 
 private:
   static void InitSource (j_decompress_ptr cinfo);
@@ -682,6 +695,10 @@ private:
   BrotherJFIFDecoder jfif_decoder;
   BrotherGrayRLengthDecoder gray_decoder;
   BrotherGrayRawDecoder gray_raw_decoder;
+
+  DecodeStatus ProcessNextPacket(const SANE_Byte* &src_data, size_t &src_data_len,
+                              size_t dest_data_len, size_t orig_dest_data_len,
+                              bool &new_block);
 };
 
 class BrotherEncoderFamily5 : public BrotherEncoder
