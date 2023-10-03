@@ -136,6 +136,21 @@ typedef struct Brother_Model
 
 static Brother_Model models[] =
   {
+    { "Brother", "DCP-L2500D", BROTHER_FAMILY_4, 0x04f9, 0x0321,
+      { 0, SANE_FIX(211.5), 0 }, // TODO needs verification
+      { 0, SANE_FIX(297), 0 }, // TODO needs verification
+      { 5, 100, 150, 200, 300, 600 }, // TODO needs verification
+      { 7, 100, 150, 200, 300, 600, 1200, 2400 }, // TODO needs verification
+      CAP_MODE_COLOUR |
+      CAP_MODE_GRAY |
+      CAP_MODE_GRAY_DITHER |
+      CAP_MODE_BW |
+      CAP_SOURCE_HAS_FLATBED |
+      CAP_BUTTON_HAS_SCAN_EMAIL |
+      CAP_BUTTON_HAS_SCAN_FILE |
+      CAP_BUTTON_HAS_SCAN_OCR |
+      CAP_BUTTON_HAS_SCAN_IMAGE |
+      CAP_ENCODING_HAS_JPEG },
     { "Brother", "MFC-465CN", BROTHER_FAMILY_2, 0x04f9, 0x01d7,
       { 0, SANE_FIX(210), 0 },
       { 0, SANE_FIX(295), 0 },
