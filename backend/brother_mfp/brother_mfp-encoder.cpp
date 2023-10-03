@@ -697,7 +697,7 @@ DecodeStatus BrotherEncoderFamily2::DecodeScanData (const SANE_Byte *src_data, s
       src_data_len -= bytes_consumed;
       current_header.block_len -= bytes_consumed;
 
-      DBG (DBG_IMPORTANT,
+      DBG (DBG_DETAIL,
            "BrotherEncoderFamily2::DecodeScanData: current block bytes remaining after decode=%zu\n",
            current_header.block_len);
 
@@ -1372,7 +1372,7 @@ DecodeStatus BrotherEncoderFamily3::DecodeScanData (const SANE_Byte *src_data, s
       src_data_len -= bytes_consumed;
       current_header.block_len -= bytes_consumed;
 
-      DBG (DBG_IMPORTANT,
+      DBG (DBG_DETAIL,
            "BrotherEncoderFamily3::DecodeScanData: current block bytes remaining after decode=%zu\n",
            current_header.block_len);
 
@@ -2114,7 +2114,7 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanData (const SANE_Byte *src_data, s
       src_data_len -= bytes_consumed;
       current_header.block_len -= bytes_consumed;
 
-      DBG (DBG_IMPORTANT,
+      DBG (DBG_DETAIL,
            "BrotherEncoderFamily4::DecodeScanData: current block bytes remaining after decode=%zu\n",
            current_header.block_len);
 

@@ -1748,6 +1748,7 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters * params)
    *
    */
   device->params = *params;
+  device->driver->params = *params;
 
   DBG (DBG_IMPORTANT,
        "sane_get_parameters: params: format:%d last_frame:%d bytes_per_line:%d "
