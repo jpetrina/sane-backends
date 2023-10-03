@@ -150,6 +150,8 @@ static Brother_Model models[] =
       CAP_BUTTON_HAS_SCAN_FILE |
       CAP_BUTTON_HAS_SCAN_OCR |
       CAP_BUTTON_HAS_SCAN_IMAGE |
+      CAP_ENCODING_HAS_RAW |
+      CAP_ENCODING_RAW_IS_CrYCb |
       CAP_ENCODING_HAS_JPEG },
     { "Brother", "MFC-465CN", BROTHER_FAMILY_2, 0x04f9, 0x01d7,
       { 0, SANE_FIX(210), 0 },

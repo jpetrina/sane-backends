@@ -1849,8 +1849,10 @@ DecodeStatus BrotherEncoderFamily4::EncodeParameterBlock (SANE_Byte *data, size_
                       (unsigned int) scan_params.param_x_res,
                       (unsigned int) scan_params.param_y_res,
                       mode_text,
+                      /* A few brother4 scanners support uncompressed color */
                       (scan_params.param_scan_mode == BROTHER_SCAN_MODE_COLOR) ?
-                          "C=JPEG\nJ=MID" : "C=RLENGTH",
+                          (scan_params.param_compression ? "C=JPEG\nJ=MID" : "C=NONE") :
+                          "C=RLENGTH",
                       (unsigned int) (scan_params.param_brightness + 50),
                       (unsigned int) (scan_params.param_contrast + 50),
                       (unsigned int) (scan_params.param_pixel_x_offset),
@@ -2076,6 +2078,22 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanData (const SANE_Byte *src_data, s
                                                         dest_data,
                                                         dest_data_len,
                                                         &bytes_written);
+        }
+      else if ((current_header.block_type == BROTHER_DATA_BLOCK_RED_RAW)
+          || (current_header.block_type == BROTHER_DATA_BLOCK_GREEN_RAW)
+          || (current_header.block_type == BROTHER_DATA_BLOCK_BLUE_RAW))
+        {
+          if (new_block)
+            {
+              colour_decoder.NewBlock ();
+            }
+
+          ret_status = colour_decoder.DecodeScanData (src_data,
+                                                      in_len,
+                                                      &bytes_consumed,
+                                                      dest_data,
+                                                      dest_data_len,
+                                                      &bytes_written);
         }
       else
         {

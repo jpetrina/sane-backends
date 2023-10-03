@@ -636,9 +636,9 @@ private:
 class BrotherEncoderFamily4 : public BrotherEncoder
 {
 public:
-  explicit BrotherEncoderFamily4(SANE_Word capabilities)
+  explicit BrotherEncoderFamily4(SANE_Word capabilities):
+    colour_decoder(capabilities)
   {
-    (void)capabilities;
   }
 
   ~BrotherEncoderFamily4 ()
@@ -652,6 +652,7 @@ public:
     jfif_decoder.NewPage(scan_params);
     gray_decoder.NewPage (scan_params);
     gray_raw_decoder.NewPage (scan_params);
+    colour_decoder.NewPage (scan_params);
   }
 
   DecodeStatus EncodeQueryBlock (SANE_Byte *data, size_t data_len, size_t *length) override;
@@ -702,6 +703,7 @@ private:
   BrotherJFIFDecoder jfif_decoder;
   BrotherGrayRLengthDecoder gray_decoder;
   BrotherGrayRawDecoder gray_raw_decoder;
+  BrotherInterleavedRGBColourDecoder colour_decoder;
 
   DecodeStatus ProcessNextPacket(const SANE_Byte* &src_data, size_t &src_data_len,
                               size_t dest_data_len, size_t orig_dest_data_len,
