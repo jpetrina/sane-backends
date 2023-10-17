@@ -1900,6 +1900,7 @@ DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data
     /* The current packet has not been processed completely */
     return DECODE_STATUS_GOOD;
   
+  /* The number of bytes we consume in this method call */
   size_t header_consumed = 0;
   ScanDataHeader next_header = {};
   DecodeStatus ret_status = DecodeScanDataHeader(src_data, src_data_len, &header_consumed, next_header);
@@ -1909,10 +1910,12 @@ DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data
     case DECODE_STATUS_TRUNCATED:
       /* This means we don't have enough data to decode a header yet.
       Try again next time if we have read more data. */
+      header_consumed = 0;
       break;
     case DECODE_STATUS_CANCEL:
       DBG (DBG_IMPORTANT, "BrotherEncoderFamily4::ProcessNextPacket: cancel detected\n");
-      break;
+      /* in this case we can return early, no more processing needed */
+      return ret_status;
     case DECODE_STATUS_GOOD:
       current_header = next_header;
 
@@ -1920,10 +1923,6 @@ DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data
           "BrotherEncoderFamily4::ProcessNextPacket: decoded new block header: 0x%2.2x, length=%zu\n",
           current_header.block_type,
           current_header.block_len);
-
-      /* Move the source pointer to the beginning of the packet's payload */
-      src_data += header_consumed;
-      src_data_len -= header_consumed;
 
       new_block = true;
       break;
@@ -1934,55 +1933,65 @@ DecodeStatus BrotherEncoderFamily4::ProcessNextPacket(const SANE_Byte* &src_data
       DBG (DBG_DETAIL,
           "BrotherEncoderFamily4::ProcessNextPacket: Next packet is an EOF: %s\n",
           DecodeStatusToString(ret_status));
-      /*
-       * We have encountered an end of page / end of scan packet. There are three cases here:
-       * 1. There is unprocessed data left in a decoder.
-       *    This happens e.g. when the previous call of sane_read() moved the penultimate packet
-       *    into the JFIF decode buffer, but the output buffer was too small for the entire
-       *    decompressed contents, so some data is left in the decode buffer.
-       *    In this case, the data must be processed first, so we don't consume this header now.
-       *
-       * 2. There is no data in the decoder, but we have produced output.
-       *    This happens when the decode buffer and the penultimate packet were exhausted
-       *    in this call of sane_read(), partially filling the output buffer.
-       *    In this case, we want to return SANE_STATUS_GOOD to transmit the remaining data
-       *    and return SANE_STATUS_EOF on the subsequent call of sane_read().
-       *    Therefore, this header will not be consumed now.
-       * 
-       * 3. There is no data in the decode and we have not produced output.
-       *    In this case, we do want to consume the header and return SANE_STATUS_EOF to indicate
-       *    the end of this frame.
-       *
-       */
+      /* These are handled below */
+      break;
+    default:
+      /* All the remaining decode statuses are errors of varying severity */
+      DBG (DBG_IMPORTANT,
+          "BrotherEncoderFamily4::ProcessNextPacket: Error %s\n",
+          DecodeStatusToString(ret_status));
+      /* In this case we can also return early since the scan will be aborted */
+      return ret_status;
+  }
+
+  if (ret_status != DECODE_STATUS_GOOD)
+    /*
+     * Multiple scenarios lead here. For example, ret_status could be one of the EOFs
+     * or STATUS_TRUNCATED. There are three cases here:
+     * 1. There is unprocessed data left in a decoder.
+     *    This happens e.g. when the previous call of sane_read() moved the penultimate packet
+     *    into the JFIF decode buffer, but the output buffer was too small for the entire
+     *    decompressed contents, so some data is left in the decode buffer.
+     *    In this case, the data must be processed first, so we don't consume this header now.
+     *
+     * 2. There is no data in the decoder, but the calling DecodeScanData() has produced some output.
+     *    This happens when the decode buffer and the penultimate packet were exhausted
+     *    in this call of sane_read(), partially filling the output buffer.
+     *    In this case, we want to return SANE_STATUS_GOOD to transmit the remaining data
+     *    and return SANE_STATUS_EOF on the subsequent call of sane_read().
+     *    Therefore, this header will not be consumed now.
+     * 
+     * 3. There is no data in the decode and we have not produced output.
+     *    In this case, we do want to consume the header and return ret_status.
+     *
+     */
+    {
       if (jfif_decoder.HasUnprocessedDecodeData())
         {
-          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Found EOF packet, unprocessed cached data left\n");
+          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Processing cached data before handling next packet\n");
           /*
            * We turn the packet back into a JPEG block, even though it has length zero.
            * This causes the subsequent code to call the JFIF decoder, which in turn drains its decode buffer.
            * A cleaner solution could be an internal enum for the current state of the decoder.
            */
           current_header.block_type = BROTHER_DATA_BLOCK_JPEG;
-          return DECODE_STATUS_GOOD;
+          /* The header will be consumed at a later point */
+          header_consumed = 0;
+          ret_status = DECODE_STATUS_GOOD;
         }
       else if (orig_dest_data_len > dest_data_len)
         {
-          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Found EOF packet, transmitting final data before sending EOF\n");
+          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Transmitting generated data before handling next packet\n");
+          header_consumed = 0;
           /* Here we leave current_header.block_type at 0 so we exit the caller's loop early */
-          return DECODE_STATUS_GOOD;
+          ret_status = DECODE_STATUS_GOOD;
         }
-        {
-          DBG (DBG_DEBUG, "BrotherEncoderFamily4::ProcessNextPacket: Processing EOF packet\n");
-          /* Consume the header */
-          src_data_len -= header_consumed;
-          break;
-        }
-    default:
-      /* All the remaining decode statuses are errors of varying severity */
-      DBG (DBG_IMPORTANT,
-          "BrotherEncoderFamily4::ProcessNextPacket: Error %s\n",
-          DecodeStatusToString(ret_status));
-  }
+    }
+
+  /* Move the source pointer to the beginning of the packet's payload */
+  src_data += header_consumed;
+  src_data_len -= header_consumed;
+
   return ret_status;
 }
 
