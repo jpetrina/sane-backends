@@ -485,13 +485,28 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
 
     }
 
-  res = PollDataFromScanner();
-  if (res != SANE_STATUS_GOOD)
+  /* First we try to fill the output buffer from scanned data. 
+   * No need to read from USB when we still have plenty of data to process. */
+  DecodeStatus dec_ret = DecodeReadBuffer(data, max_length, length);
+  if (*length > 0)
     {
-      return res;
+      /* We could call DecodeReadBuffer() again if there is space for at least
+       * one more scanline, but that requires even more careful EOF and buffer
+       * handling. */
+      DBG(DBG_DETAIL, "BrotherUSBDriver::ReadScanData: Filled the output buffer by processing data, not pulling from USB\n");
+    }
+  else
+    {
+      /* In this case we read from USB to further fill `data`. */
+      res = PollDataFromScanner();
+      if (res != SANE_STATUS_GOOD)
+        {
+          return res;
+        }
+
+      dec_ret = DecodeReadBuffer(data, max_length, length);
     }
 
-  auto dec_ret = DecodeReadBuffer(data, max_length, length);
   res = encoder->DecodeStatusToSaneStatus(dec_ret);
 
   if ((dec_ret == DECODE_STATUS_ENDOFDATA) || (dec_ret == DECODE_STATUS_ENDOFFRAME_NO_MORE)
