@@ -639,8 +639,8 @@ DecodeStatus BrotherEncoderFamily234Base::ProcessNextPacket(const SANE_Byte* &sr
       break;
     default:
       /* All the remaining decode statuses are errors of varying severity */
-      DBG (DBG_IMPORTANT,
-          "BrotherEncoderFamily4::ProcessNextPacket: Error %s\n",
+      FDBG (DBG_IMPORTANT,
+          "Error %s\n",
           DecodeStatusToString(ret_status));
       /* In this case we can also return early since the scan will be aborted */
       return ret_status;
@@ -1032,6 +1032,16 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanDataHeader (const SANE_Byte *src_d
   header.block_len = src_data[10] + (src_data[11] << 8);
   header.image_number = src_data[3] + (src_data[4] << 8);
 
+  return DECODE_STATUS_GOOD;
+}
+
+DecodeStatus BrotherEncoderFamily4::EncodeParameterBlockBlank (SANE_Byte *data, size_t data_len,
+                                                               size_t *length)
+{
+  /* Sending blank X commands after the first page is unnecessary on family4 and slows down the scan */
+  (void)data;
+  (void)data_len;
+  *length = 0;
   return DECODE_STATUS_GOOD;
 }
 

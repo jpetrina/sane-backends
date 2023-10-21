@@ -1152,7 +1152,7 @@ SANE_Status BrotherUSBDriver::StartScan ()
       /*
        * If this is not the first image, then we merely need
        * to ask for another image. We do this with a blank parameter block.
-       *
+       * This is not necessary on all families.
        */
       size_t packet_len = 0;
       DecodeStatus dec_ret = encoder->EncodeParameterBlockBlank (small_buffer,
@@ -1167,24 +1167,27 @@ SANE_Status BrotherUSBDriver::StartScan ()
           return SANE_STATUS_INVAL;
         }
 
-      size_t buf_size = packet_len;
-      res = sanei_usb_write_bulk (fd, small_buffer, &buf_size);
-      if (res != SANE_STATUS_GOOD)
-        {
-          DBG (DBG_SERIOUS,
-               "BrotherUSBDriver::StartScan: failed to send parameter block: %d\n",
-               res);
-          (void) CancelScan ();
-          return res;
-        }
+      /* packet_len == 0 encodes that no package should be sent */
+      if (packet_len > 0)
+      {
+        size_t buf_size = packet_len;
+        res = sanei_usb_write_bulk (fd, small_buffer, &buf_size);
+        if (res != SANE_STATUS_GOOD)
+          {
+            DBG (DBG_SERIOUS,
+                 "BrotherUSBDriver::StartScan: failed to send parameter block: %d\n",
+                 res);
+            (void) CancelScan ();
+            return res;
+          }
 
-      if (buf_size != packet_len)
-        {
-          DBG (DBG_SERIOUS, "BrotherUSBDriver::StartScan: failed to write parameter block\n");
-          (void) CancelScan ();
-          return SANE_STATUS_IO_ERROR;
-        }
-
+        if (buf_size != packet_len)
+          {
+            DBG (DBG_SERIOUS, "BrotherUSBDriver::StartScan: failed to write parameter block\n");
+            (void) CancelScan ();
+            return SANE_STATUS_IO_ERROR;
+          }
+      }
     }
 
   /*

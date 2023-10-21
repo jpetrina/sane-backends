@@ -600,6 +600,9 @@ protected:
 class BrotherEncoderFamily4 : public BrotherEncoderFamily234Base
 {
   using BrotherEncoderFamily234Base::BrotherEncoderFamily234Base;
+
+  DecodeStatus EncodeParameterBlockBlank (SANE_Byte *data, size_t data_len,
+                                          size_t *length) override;
 protected:
   DecodeStatus DecodeScanDataHeader (const SANE_Byte *src_data, size_t src_data_len,
                                      size_t *src_data_consumed, ScanDataHeader &header) override;
