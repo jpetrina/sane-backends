@@ -2285,9 +2285,12 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
                                                                 size_t dest_data_len,
                                                                 size_t *dest_data_written)
 {
+  *src_data_consumed = 0;
+  *dest_data_written = 0;
   if (src_data_len == 0)
   {
-    FDBGNP(DBG_DETAIL, "JFIF decoder was called with an empty buffer. Returning EOF");
+    // TODO: Is this desired behaviour? What is the scenario here?
+    FDBGNP(DBG_DETAIL, "JFIF decoder was called on an empty buffer. Returning EOF");
     return DECODE_STATUS_ENDOFFRAME_WITH_MORE;
   }
 
@@ -2299,9 +2302,12 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
   if (state.cinfo.output_height > 0 && state.cinfo.output_scanline >= state.cinfo.output_height)
   {
     FDBG (DBG_SERIOUS,
-      "JFIF decoder was called on a finished buffer (data left: %zu)",
+      "WARNING: JFIF decoder was called on a finished buffer (data left: %zu). This can happen when the scanner returns more data than announced",
       src_data_len);
-    return DECODE_STATUS_ENDOFFRAME_WITH_MORE;
+    // Skip the remaining data on this page by absorbing it
+    *src_data_consumed = src_data_len;
+    // return STATUS_GOOD so we can process an EOF packet on the next turn
+    return DECODE_STATUS_GOOD;
   }
   FDBG (DBG_EVENT,
        "src_data_len=%zu dest_data_len=%zu",
@@ -2413,6 +2419,16 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
        * potentially. :(
        *
        */
+
+      /* Check if we have read all scanlines before attempting to read.
+       * This suppresses a spurious error message.
+       */
+      if (state.cinfo.output_scanline >= state.cinfo.output_height)
+        {
+          FDBGNP (DBG_DETAIL, "converted all scanlines, exiting JFIF decode loop");
+          break;
+        }
+
       JDIMENSION converted = jpeg_read_scanlines (&state.cinfo, &output_ptr, 1);
 
       if (converted == 0)
@@ -2467,7 +2483,13 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
         {
           FDBGNP (DBG_WARN,
                "Failed to finish JPEG decompress.");
-          return DECODE_STATUS_ERROR;
+          /* This can happen under some circumstances which are not entirely clear to me.
+           * It may have to do with the fact that the device sometimes returns invalid JFIF
+           * in the sense that the size in the header doesn't match the image size.
+           * We don't want to abort the whole scan here. Just log the error, set cinfo to zero,
+           * and hope we don't leak too much memory.
+           */
+          memset(&state.cinfo, 0, sizeof(state.cinfo));
         }
     }
 
