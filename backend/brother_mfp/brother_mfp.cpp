@@ -35,6 +35,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <unordered_map>
+#include <memory>
 
 #include "brother_mfp-common.h"
 
@@ -315,7 +317,7 @@ static Brother_Model models[] =
 struct BrotherDevice
 {
   BrotherDevice () :
-      next (nullptr),
+      seen_in_probe (true),
       model (nullptr),
       sane_device {nullptr, nullptr, nullptr, nullptr},
       name (nullptr),
@@ -330,7 +332,14 @@ struct BrotherDevice
   {
         (void)memset(opt, 0, sizeof(opt));
   }
-  struct BrotherDevice *next;
+  ~BrotherDevice ()
+  {
+    if (name)
+      free(name);
+    if (driver)
+      delete driver;
+  }
+  bool seen_in_probe;
 
   const Brother_Model *model;
   SANE_Device sane_device;
@@ -352,9 +361,8 @@ struct BrotherDevice
   BrotherSensor current_sensor_states;
 };
 
-static BrotherDevice *first_dev = nullptr;
-static int num_devices = 0;
-static SANE_Device **devlist = nullptr;
+static std::unordered_map<std::string, std::unique_ptr<BrotherDevice>> devices;
+static const SANE_Device **devlist = nullptr;
 
 static const SANE_Range constraint_brightness_contrast = { -50, +50, 1 };
 
@@ -366,9 +374,8 @@ enum BrotherDeviceCommsType
 };
 
 static SANE_Status
-attach_with_ret (const char *devicename, BrotherDevice **dev)
+attach (const char *devicename)
 {
-  BrotherDevice *device;
   SANE_Status status;
 
   FDBG (DBG_EVENT, "%s", devicename);
@@ -407,23 +414,18 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
    * See if we already know about the device.
    *
    */
-  for (device = first_dev; device; device = device->next)
-    {
-      if (strcmp (device->sane_device.name, devicename) == 0)
-        {
-          if (dev)
-            {
-              *dev = device;
-            }
-          return SANE_STATUS_GOOD;
-        }
-    }
+  auto it = devices.find(devicename);
+  if (it != devices.end())
+  {
+    it->second->seen_in_probe = true;
+    return SANE_STATUS_GOOD;
+  }
 
   /*
    * Create a new entry for this device.
    *
    */
-  device = new BrotherDevice;
+  std::unique_ptr<BrotherDevice> device (new BrotherDevice());
   if (!device)
     {
       FDBG (DBG_SERIOUS, "failed to allocate device entry %zu", sizeof(*device));
@@ -492,14 +494,8 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
       device->sources[num_sources++] = SANE_VALUE_SOURCE_ADF_DUPLEX;
     }
 
-  ++num_devices;
-  device->next = first_dev;
-  first_dev = device;
+  devices[devicename] = std::move(device);
 
-  if (dev)
-    {
-      *dev = device;
-    }
 
   return SANE_STATUS_GOOD;
 }
@@ -614,10 +610,66 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
 //}
 //
 
-static SANE_Status
-attach_with_no_ret (const char *devicename)
+SANE_Status probe_devices ()
 {
-  return attach_with_ret(devicename, nullptr);
+  /*
+   * Probe for supported USB devices.
+   * This is achieved by iterating the list of supported devices.
+   */
+  FDBGNP(DBG_DETAIL, "");
+  /*
+   * Mark all known devices as "not seen".
+   * Then we later delete all the ones we haven't seen on this scan.
+   */
+  for (auto &dev: devices)
+    {
+      if (dev.second)
+        dev.second->seen_in_probe = false;
+    }
+
+  SANE_Status status;
+  for (Brother_Model *model = models; model->model; model++)
+    {
+      FDBG (DBG_EVENT, "Checking for device: %s", model->model);
+
+      status = sanei_usb_find_devices (model->usb_vendor, model->usb_product, attach);
+      if (status != SANE_STATUS_GOOD)
+        break;
+    }
+
+  if (status != SANE_STATUS_GOOD)
+  {
+    FDBG (DBG_SERIOUS, "Error scanning USB devices: %s", sane_strstatus(status));
+  }
+
+  for (auto it = devices.cbegin(); it != devices.cend(); )
+    {
+      if (it->second && !it->second->seen_in_probe)
+        {
+          FDBG(DBG_EVENT, "Device '%s' cannot be found and will be removed.", it->second->name);
+          status = it->second->driver->Disconnect();
+          if (status != SANE_STATUS_GOOD)
+            {
+              FDBG(DBG_IMPORTANT, "Failed to close USB device: %s", sane_strstatus(status));
+              status = SANE_STATUS_GOOD;
+            }
+          it = devices.erase(it);
+        }
+      else
+        {
+          it++;
+        }
+    }
+  /*
+   * Probe for network devices.
+   * TODO: In the future we want to return SANE_STATUS_GOOD if either USB or network succeeds.
+   * If one of them fails, we may still use the other one.
+   */
+#if 0
+  BrotherDevice *device;
+  attach_with_ret_network ("NetworkDevice", &models[0], &device);
+#endif
+  return status;
 }
 
 static size_t
@@ -637,7 +689,7 @@ max_string_size (const SANE_String_Const strings[])
 
 
 static SANE_Status
-init_options (BrotherDevice *device)
+init_options (std::unique_ptr<BrotherDevice> &device)
 {
   SANE_Option_Descriptor *od;
 
@@ -1001,54 +1053,22 @@ SANE_Status sane_init (SANE_Int * version_code, SANE_Auth_Callback authorize)
     }
   sanei_usb_init ();
 
-  /*
-   * Probe for supported USB devices.
-   * This is achieved by iterating the list of supported devices.
-   *
-   * TODO; We probably should not be doing this here.
-   * Let's wait until someone asks for a device list before doing the probe.
-   *
-   */
-  for (Brother_Model *model = models; model->model; model++)
-    {
-      FDBG (DBG_EVENT, "Checking for device: %s", model->model);
-
-      sanei_usb_find_devices (model->usb_vendor, model->usb_product, attach_with_no_ret);
-    }
-
-  /*
-   * Probe for network devices.
-   *
-   */
-#if 0
-  BrotherDevice *device;
-  attach_with_ret_network ("NetworkDevice", &models[0], &device);
-#endif
-
-
-
-
-
   return SANE_STATUS_GOOD;
 }
 
 void
 sane_exit (void)
 {
-  BrotherDevice *dev, *next;
-
   FDBGNP (DBG_EVENT, "");
 
-  for (dev = first_dev; dev; dev = next)
-    {
-      next = dev->next;
-      free (dev->name);
-      delete dev->driver;
-      free (dev);
-    }
+  /* This calls destructors on all objects automatically */
+  devices.clear();
 
   if (devlist)
     free (devlist);
+
+  /* Reset static variables to prevent a segfault on a subsequent sane_init() */
+  devlist = nullptr;
 
   sanei_usb_exit();
 
@@ -1058,26 +1078,23 @@ sane_exit (void)
 SANE_Status
 sane_get_devices (const SANE_Device *** device_list, SANE_Bool local_only)
 {
-  BrotherDevice *dev;
-  int i;
-
   FDBG (DBG_EVENT, "local_only = %s", local_only? "Yes": "No");
 
   if (devlist)
     free (devlist);
 
-  devlist = (SANE_Device **)malloc ((num_devices + 1) * sizeof (devlist[0]));
+  size_t device_list_size = (devices.size() + 1) * sizeof (devlist[0]);
+  devlist = (const SANE_Device **)malloc (device_list_size);
   if (!devlist)
     {
       FDBG (DBG_SERIOUS,
            "failed to allocate devices list: %zu.",
-           (num_devices + 1) * sizeof(devlist[0]));
+           device_list_size);
       return SANE_STATUS_NO_MEM;
     }
-  i = 0;
-
-  for (dev = first_dev; i < num_devices; dev = dev->next)
-    devlist[i++] = &dev->sane_device;
+  int i = 0;
+  for (const auto &dev: devices)
+    devlist[i++] = &dev.second->sane_device;
 
   devlist[i++] = 0;
 
@@ -1086,10 +1103,30 @@ sane_get_devices (const SANE_Device *** device_list, SANE_Bool local_only)
   return SANE_STATUS_GOOD;
 }
 
+SANE_Status open_device (std::unique_ptr<BrotherDevice> &dev, SANE_Handle * handle)
+{
+  SANE_Status status = dev->driver->Connect();
+
+  if (status != SANE_STATUS_GOOD)
+    {
+      FDBG (DBG_SERIOUS, "failed to open device: %s", dev->name);
+      return status;
+    }
+
+  status = init_options (dev);
+  if (status != SANE_STATUS_GOOD)
+    {
+      FDBG (DBG_SERIOUS, "failed to initialize device: %s", dev->name);
+    }
+
+  *handle = dev.get();
+  return status;
+}
+
 SANE_Status
 sane_open (SANE_String_Const devicename, SANE_Handle * handle)
 {
-  BrotherDevice *dev;
+  std::unique_ptr<BrotherDevice> dev;
   SANE_Status status = SANE_STATUS_GOOD;
 
   FDBG (DBG_EVENT, "%s", devicename);
@@ -1098,62 +1135,37 @@ sane_open (SANE_String_Const devicename, SANE_Handle * handle)
    * Select the device.
    *
    */
-  if (devicename[0]) /* search for devicename */
+  if (devicename[0])
     {
       FDBG (DBG_EVENT, "devicename=%s", devicename);
 
-      for (dev = first_dev; dev; dev = dev->next)
-        {
-          if (strcmp (dev->sane_device.name, devicename) == 0)
-            {
-              break;
-            }
-        }
-
-      if (!dev)
-        {
-          status = attach_with_ret(devicename, &dev);
-
-          if (status != SANE_STATUS_GOOD)
-            {
-              FDBG (DBG_SERIOUS, "failed to attach device: %s", devicename);
-              return status;
-            }
-        }
+      auto it = devices.find(devicename);
+      if (it != devices.end())
+      {
+        return open_device(it->second, handle);
+      } else {
+        status = attach(devicename);
+        if (status != SANE_STATUS_GOOD)
+          {
+            FDBG (DBG_SERIOUS, "failed to attach device: %s", devicename);
+            return status;
+          }
+        return open_device(devices.at(devicename), handle);
+      }
     }
   else
     {
       FDBGNP (DBG_DETAIL, "no devicename, opening first device");
-      dev = first_dev;
+      if (!devices.empty())
+        {
+          return open_device(devices.begin()->second, handle);
+        }
+      else 
+        {
+          FDBGNP (DBG_DETAIL, "no device available");
+          return SANE_STATUS_INVAL;
+        }
     }
-
-  if (!dev)
-    {
-      FDBG (DBG_WARN, "unknown device: %s", devicename);
-      return SANE_STATUS_INVAL;
-    }
-
-  /*
-   * Open device internally.
-   *
-   */
-  status = dev->driver->Connect();
-
-  if (status != SANE_STATUS_GOOD)
-    {
-      FDBG (DBG_SERIOUS, "failed to open device: %s", devicename);
-      return status;
-    }
-
-  status = init_options (dev);
-  if (status != SANE_STATUS_GOOD)
-    {
-      FDBG (DBG_SERIOUS, "failed to initialize device: %s", devicename);
-    }
-
-  *handle = dev;
-
-  return status;
 }
 
 void
@@ -1170,17 +1182,17 @@ sane_close (SANE_Handle handle)
    * Check is a valid device handle by running through our list of devices.
    *
    */
-  BrotherDevice *check_dev;
-
-  for (check_dev = first_dev; check_dev; check_dev = check_dev->next)
+  bool found = false;
+  for (const auto &dev: devices)
+  {
+    if (dev.second.get() == device)
     {
-      if (device == check_dev)
-        {
-          break;
-        }
+      found = true;
+      break;
     }
+  }
 
-  if (NULL == check_dev)
+  if (!found)
     {
       FDBGNP (DBG_SERIOUS, "invalid handle specified.");
       return;
