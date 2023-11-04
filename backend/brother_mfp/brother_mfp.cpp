@@ -627,6 +627,9 @@ SANE_Status probe_devices ()
         dev.second->seen_in_probe = false;
     }
 
+  /* Update sane's USB device cache (in case a device was unplugged / replugged) */
+  sanei_usb_scan_devices();
+
   SANE_Status status;
   for (Brother_Model *model = models; model->model; model++)
     {
@@ -1082,6 +1085,10 @@ sane_get_devices (const SANE_Device *** device_list, SANE_Bool local_only)
 
   if (devlist)
     free (devlist);
+
+  SANE_Status ret = probe_devices ();
+  if (ret != SANE_STATUS_GOOD)
+    return ret;
 
   size_t device_list_size = (devices.size() + 1) * sizeof (devlist[0]);
   devlist = (const SANE_Device **)malloc (device_list_size);
