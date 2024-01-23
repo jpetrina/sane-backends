@@ -209,15 +209,6 @@ static int isSupportedDevice(struct device __sane_unused__ *dev)
 #ifdef HAVE_LIBJPEG
     /* Checking device which supports JPEG Lossy compression for color scanning*/
     if (dev->compressionTypes & (1 << 6)) {
-        /* blacklist malfunctioning device(s) */
-        if (!strncmp (dev->sane.model, "SCX-4500W", 9)
-            || !strncmp (dev->sane.model, "C460", 4)
-            || !!strstr (dev->sane.model, "WorkCentre 3225")
-            || !!strstr (dev->sane.model, "CLX-3170")
-            || !!strstr (dev->sane.model, "4x24")
-            || !!strstr (dev->sane.model, "4x28")
-            || !strncmp (dev->sane.model, "M288x", 5))
-            return 0;
         return 1;
     } else
         return 0;
@@ -878,7 +869,17 @@ dev_inquiry(struct device *dev)
                       dev->res[0x3e] << 8 |
                       dev->res[0x3f];
     dev->line_order = dev->res[0x31];
+
     dev->compressionTypes = dev->res[0x32];
+    /* blacklist malfunctioning device(s) */
+    if (!!strstr(dev->sane.model, "SCX-4500W") ||
+	!strncmp(dev->sane.model, "C460", 4) ||
+	!!strstr(dev->sane.model, "CLX-3170") ||
+	!!strstr(dev->sane.model, "4x24") ||
+	!!strstr(dev->sane.model, "4x28") ||
+	!strncmp(dev->sane.model, "M288x", 5))
+	    dev->compressionTypes &= ~(1 << 6);
+
     dev->doc_loaded = (dev->res[0x35] == 0x02) &&
                       (dev->res[0x26] & 0x03);
 
