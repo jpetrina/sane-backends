@@ -41,8 +41,8 @@
 #define BACKEND_BUILD 13
 #define XEROX_CONFIG_FILE "xerox_mfp.conf"
 
-static const SANE_Device **devlist = NULL;	/* sane_get_devices array */
-static struct device *devices_head = NULL;	/* sane_get_devices list */
+static const SANE_Device **devlist = NULL;  /* sane_get_devices array */
+static struct device *devices_head = NULL;  /* sane_get_devices list */
 
 enum { TRANSPORT_USB, TRANSPORT_TCP, TRANSPORTS_MAX };
 transport available_transports[TRANSPORTS_MAX] = {
@@ -80,14 +80,14 @@ static int resolv_state(int state)
 static char *str_cmd(int cmd)
 {
     switch (cmd) {
-    case CMD_ABORT:		return "ABORT";
-    case CMD_INQUIRY:		return "INQUIRY";
-    case CMD_RESERVE_UNIT:	return "RESERVE_UNIT";
-    case CMD_RELEASE_UNIT:	return "RELEASE_UNIT";
-    case CMD_SET_WINDOW:	return "SET_WINDOW";
-    case CMD_READ:		return "READ";
-    case CMD_READ_IMAGE:	return "READ_IMAGE";
-    case CMD_OBJECT_POSITION:	return "OBJECT_POSITION";
+    case CMD_ABORT:             return "ABORT";
+    case CMD_INQUIRY:           return "INQUIRY";
+    case CMD_RESERVE_UNIT:      return "RESERVE_UNIT";
+    case CMD_RELEASE_UNIT:      return "RELEASE_UNIT";
+    case CMD_SET_WINDOW:        return "SET_WINDOW";
+    case CMD_READ:              return "READ";
+    case CMD_READ_IMAGE:        return "READ_IMAGE";
+    case CMD_OBJECT_POSITION:   return "OBJECT_POSITION";
     }
     return "unknown";
 }
@@ -163,17 +163,17 @@ static int copy_decompress_data(struct device *dev, unsigned char *pDest, int ma
     int data_size = 0;
 
     if (destLen)
-	*destLen = 0;
+        *destLen = 0;
     if (!dev->decDataSize)
         return 0;
     data_size = dev->decDataSize - dev->currentDecDataIndex;
     if (data_size > maxlen)
         data_size = maxlen;
     if (data_size && pDest) {
-	memcpy(pDest, dev->decData + dev->currentDecDataIndex, data_size);
-	if (destLen)
-	    *destLen = data_size;
-	dev->currentDecDataIndex += data_size;
+        memcpy(pDest, dev->decData + dev->currentDecDataIndex, data_size);
+        if (destLen)
+            *destLen = data_size;
+        dev->currentDecDataIndex += data_size;
     }
     if (dev->decDataSize == dev->currentDecDataIndex) {
         dev->currentDecDataIndex = 0;
@@ -261,8 +261,8 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
     SANE_Byte *res = dev->res;
 
 
-    assert(reqlen <= sizeof(dev->res));	/* requested len */
-    dev->reslen = sizeof(dev->res);	/* doing full buffer to flush stalled commands */
+    assert(reqlen <= sizeof(dev->res)); /* requested len */
+    dev->reslen = sizeof(dev->res);     /* doing full buffer to flush stalled commands */
 
     if (cmd[2] == CMD_SET_WINDOW) {
         /* Set Window have wrong packet length, huh. */
@@ -296,7 +296,7 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
         dev->state = SANE_STATUS_IO_ERROR;
         return 0;
     } else {
-        size_t pktlen;		/* len specified in packet */
+        size_t pktlen;      /* len specified in packet */
 
         if (DBG_LEVEL > 3)
             dbg_dump(dev);
@@ -801,8 +801,8 @@ static int dev_set_window(struct device *dev)
     cmd[0x0a] = dev->win_len >> 16;
     cmd[0x0b] = dev->win_len >> 8;
     cmd[0x0c] = dev->win_len;
-    cmd[0x0d] = dev->resolution;		/* x */
-    cmd[0x0e] = dev->resolution;		/* y */
+    cmd[0x0d] = dev->resolution;        /* x */
+    cmd[0x0e] = dev->resolution;        /* y */
     cmd[0x0f] = (SANE_Byte)floor(dev->win_off_x);
     cmd[0x10] = (SANE_Byte)((dev->win_off_x - floor(dev->win_off_x)) * 100);
     cmd[0x11] = (SANE_Byte)floor(dev->win_off_y);
@@ -853,7 +853,7 @@ dev_inquiry(struct device *dev)
         /* skip spaces */;
 
     dev->sane.model = optr = (SANE_Char *) malloc(33);
-    xptr = optr;			/* is last non space character + 1 */
+    xptr = optr;            /* is last non space character + 1 */
     for (; ptr < &dev->res[0x24] && *ptr;) {
         if (*ptr != ' ')
             xptr = optr + 1;
@@ -1356,8 +1356,8 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
             int bufLen = (diff < maxlen) ? diff : maxlen;
             if (diff &&
                 copy_decompress_data(dev, buf, bufLen, lenp)) {
-		if (lenp)
-		    dev->total_out_size += *lenp;
+                if (lenp)
+                    dev->total_out_size += *lenp;
                 return SANE_STATUS_GOOD;
             }
         } else if (dev->composition != MODE_RGB24) {
@@ -1563,17 +1563,17 @@ sane_start(SANE_Handle h)
 
     if (isJPEGEnabled(dev) &&
         dev->composition == MODE_RGB24) {
-	int fd;
+        int fd;
         remove(encTmpFileName);
 
-	/* Precreate temporary file in exclusive mode. */
-	fd = open(encTmpFileName, O_CREAT|O_EXCL, 0600);
-	if (fd == -1) {
-	    DBG(3, "%s: %p, can't create temporary file %s: %s\n", __func__,
-		(void *)dev, encTmpFileName, strerror(errno));
-	    return ret_cancel(dev, SANE_STATUS_ACCESS_DENIED);
-	}
-	close(fd);
+        /* Precreate temporary file in exclusive mode. */
+        fd = open(encTmpFileName, O_CREAT|O_EXCL, 0600);
+        if (fd == -1) {
+            DBG(3, "%s: %p, can't create temporary file %s: %s\n", __func__,
+                (void *)dev, encTmpFileName, strerror(errno));
+            return ret_cancel(dev, SANE_STATUS_ACCESS_DENIED);
+        }
+        close(fd);
     }
     dev->currentDecDataIndex = 0;
 
