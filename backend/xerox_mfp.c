@@ -1414,6 +1414,38 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
         dev->blocks++;
     }
 
+    /* Receive the on-device raw image data into a cyclic aka circular buffer.
+     *
+     * The circular buffer implementation is as follows:
+     *  - buffer::{data[DATASIZE], dataoff, datalen};
+     *  - data storage is preallocated to a fixed capacity: DATASIZE;
+     *  - dataoff is used to track the data start (for read);
+     *  - datalen is the stored data's length;
+     *  - DATATAIL() macro is to track the data end position (for write);
+     *  - Both start and end positions may be wrapped around at the DATASIZE,
+     *    (& DATAMASK);
+     *  - DATAROOM() macro is used to determine the currently available
+     *    length of the __contiguous__ storage after the data end (from DATATAIL)
+     *  - write is allowed only into the remaining capacity, overwriting of the
+     *    the buffered but not consumed data is not allowed;
+     *  - once data has been consumed, the dataoff and datalen must be adjusted
+     *    accordingly; dataoff may wrap around (& DATAMASK);
+     *  - when DATAROOM() returns 0, the data must be consumed before any more
+     *    data could be buffered.
+     *
+     *  NOTE: the DATAROOM() does not wrap around and yields the length
+     *  from DATATAIL() up to the DATASIZE position. So the returned length may
+     *  be shorter than the actual remaining capacity, that is there may be
+     *  more unoccupied space from the beginning of the buffer till dataoff.
+     *
+     *  This is because the buffer's storage pointer at the write position is passed
+     *  directly to the IO receive call, so it's expected to be contiguous and can't
+     *  wrap around. Thus in such cases this may result in extra IO receive call in
+     *  order to first fill the residual length till DATASIZE, and then continue
+     *  filling from the start of the buffer.
+     *
+     *  It's all manual and requires some discipline but it does the job.
+     */
     do {
         size_t datalen;
         int clrlen; /* cleared lines len */
