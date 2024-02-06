@@ -1451,10 +1451,32 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
         int clrlen; /* cleared lines len */
         int olen; /* output len */
 
-        /* read as much data into the buffer */
-        datalen = MIN(dev->blocklen, DATAROOM(dev) & USB_BLOCK_MASK);
+        /* set up to read as much data as room left in the buffer */
+        datalen = DATAROOM(dev);
         while (datalen && dev->blocklen) {
             SANE_Byte *rbuf = dev->data + DATATAIL(dev);
+            /* USB 2.0 spec requires 512 byte packet max size for bulk transfers
+             * with high-speed endpoints. Smaller max sizes are allowed
+             * for slower endpoints (64, 32, 16, 8 for full-speed).
+             * Some Samsung MFP scanners require requests for at least the
+             * defined max size, when there are sufficient data available;
+             * otherwise successfully return 0 bytes.
+             * For example,
+             * - requesting 256 bytes with more than 256 bytes data available
+             *   will return 0 bytes;
+             * - requesting at least 512 will properly fulfill the request;
+             * - requesting 8 bytes with 16 bytes remaining will return 0 bytes;
+             *   yet requesting 16 bytes (or more) will correctly return the
+             *   remaining 16 bytes.
+             */
+            int usb_datalen = datalen & USB_BLOCK_MASK;
+
+            if (usb_datalen)
+                datalen = usb_datalen;
+            else if (strcmp(dev->io->ttype, "usb") == 0)
+                break;
+
+            datalen = MIN((size_t)dev->blocklen, datalen);
 
             DBG(9, "<> request len: %zu, [%d, %d; %d]\n",
                 datalen, dev->dataoff, DATATAIL(dev), dev->datalen);
@@ -1463,7 +1485,7 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
                 SANE_STATUS_GOOD)
                 return status;
 
-            dev->datalen += datalen;
+            dev->datalen += datalen; /* of actually received data */
             dev->blocklen -= datalen;
 
             DBG(9, "<> got %zu, [%d, %d; %d]\n",
@@ -1472,7 +1494,7 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
             if (dev->blocklen < 0)
                 return ret_cancel(dev, SANE_STATUS_IO_ERROR);
 
-            datalen = MIN(dev->blocklen, DATAROOM(dev) & USB_BLOCK_MASK);
+            datalen = DATAROOM(dev);
         }
 
         if (buf && lenp) { /* read mode */
