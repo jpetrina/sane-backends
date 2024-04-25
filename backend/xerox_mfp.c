@@ -213,6 +213,7 @@ static int isSupportedDevice(struct device __sane_unused__ *dev)
         if (!strncmp (dev->sane.model, "SCX-4500W", 9)
             || !strncmp (dev->sane.model, "C460", 4)
             || !!strstr(dev->sane.model, "SCX-472")
+            || !!strstr (dev->sane.model, "WorkCentre 3220")
             || !!strstr (dev->sane.model, "WorkCentre 3225")
             || !!strstr (dev->sane.model, "CLX-3170")
             || !!strstr (dev->sane.model, "4x24")
@@ -612,9 +613,11 @@ static void init_options(struct device *dev)
     dev->opt[OPT_JPEG].cap |= SANE_CAP_ADVANCED;
 #ifdef HAVE_LIBJPEG
     dev->compressionEnabled = SANE_TRUE;
-    if (!isSupportedDevice(dev))
-        dev->opt[OPT_JPEG].cap |= SANE_CAP_INACTIVE;
     dev->val[OPT_JPEG].b = SANE_TRUE;
+    if (!isSupportedDevice(dev)) {
+        dev->opt[OPT_JPEG].cap |= SANE_CAP_INACTIVE;
+        dev->val[OPT_JPEG].b = SANE_FALSE;
+    }
 #else
     dev->opt[OPT_JPEG].cap |= SANE_CAP_INACTIVE;
     dev->val[OPT_JPEG].b = SANE_FALSE;
