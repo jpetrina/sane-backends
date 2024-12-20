@@ -643,12 +643,16 @@ AC_SUBST(locksanedir)
 configdir="${sysconfdir}/sane.d"
 AC_SUBST(configdir)
 
+defaultconfigdir="${prefix}/lib/sane.d"
+AC_SUBST(defaultconfigdir)
+
 dnl ***********************************************************************
 dnl enable/disable backends and features based on previous tests and user's
 dnl choice
 dnl ***********************************************************************
 
 PATH_FLAGS="-DPATH_SANE_CONFIG_DIR=\\\"\$(configdir)\\\" \
+	  -DPATH_SANE_DEFAULT_CONFIG_DIR=\\\"\$(defaultconfigdir)\\\" \
 	  -DPATH_SANE_DATA_DIR=\\\"\$(datadir)\\\" \
 	  -DPATH_SANE_LOCK_DIR=\\\"\$(locksanedir)\\\""
 
@@ -846,7 +850,7 @@ echo AM_CXXFLAGS=\"${AM_CXXFLAGS}\"
 echo AM_LDFLAGS=\"${AM_LDFLAGS}\"
 echo LIBS=\"${LIBS}\"
 echo "-> Installation directories:"
-echo "Configuration: `eval eval echo ${sysconfdir}`"
+echo "Configuration: `eval eval echo ${defaultconfigdir}` and `eval eval echo ${configdir}`"
 echo "Libraries:     `eval eval echo ${libdir}`"
 echo "Binaries:      `eval eval echo ${bindir}` and `eval eval echo ${sbindir}`"
 echo "Manpages:      `eval eval echo ${mandir}`"
