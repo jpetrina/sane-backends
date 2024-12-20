@@ -115,15 +115,15 @@ install-becfg: becfg
 	@# installed library in $(execsanelibdir) to libsane.*, which
 	@# causes a conflict with the actual libsane.* in $(libdir).
 	-rm -f $(DESTDIR)$(execsanelibdir)/libsane.*
-	test -z "$(configdir)" || $(MKDIR_P) "$(DESTDIR)$(configdir)"
-	test -z "$(configdir)/dll.d" || $(MKDIR_P) "$(DESTDIR)$(configdir)/dll.d"
+	test -z "$(defaultconfigdir)" || $(MKDIR_P) "$(DESTDIR)$(defaultconfigdir)"
+	test -z "$(defaultconfigdir)/dll.d" || $(MKDIR_P) "$(DESTDIR)$(defaultconfigdir)/dll.d"
 	@list="$(BACKEND_CONFS_ENABLED) saned.conf dll.conf"; for cfg in $$list; do \
 	  if test ! -r $${cfg}; then continue; fi; \
-	  if test -f $(DESTDIR)$(configdir)/$${cfg}; then \
-	  echo NOT overwriting $${cfg} in $(configdir)...; \
+	  if test -f $(DESTDIR)$(defaultconfigdir)/$${cfg}; then \
+	  echo NOT overwriting $${cfg} in $(defaultconfigdir)...; \
 	  else \
-	  echo installing $${cfg} in $(configdir)/$${cfg}...; \
-	  $(INSTALL_DATA) $${cfg} $(DESTDIR)$(configdir)/$${cfg} \
+	  echo installing $${cfg} in $(defaultconfigdir)/$${cfg}...; \
+	  $(INSTALL_DATA) $${cfg} $(DESTDIR)$(defaultconfigdir)/$${cfg} \
 	  || exit 1; \
 	  fi; \
 	  done
@@ -137,7 +137,7 @@ install-lockpath:
 	$(mkinstalldirs) -m 775 $(DESTDIR)$(locksanedir)
 
 uninstall-hook:
-	rm -rf $(DESTDIR)$(libdir)/sane $(DESTDIR)$(configdir) $(DESTDIR)$(locksanedir)
+	rm -rf $(DESTDIR)$(libdir)/sane $(DESTDIR)$(defaultconfigdir) $(DESTDIR)$(locksanedir)
 	rm -f $(DESTDIR)$(libdir)/libsane.*
 	-for dir in $(FIRMWARE_DIRS) ; do \
 	  rmdir $(DESTDIR)$(datadir)/sane/$${dir} ; \
