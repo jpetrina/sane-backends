@@ -59,8 +59,11 @@ extern "C" {
  *
  * The following directory list is used:
  *	1st: SANE_CONFIG_DIR environment variable.
- *	2nd: PATH_SANE_CONFIG_DIR set during configuration.
- *	3rd: Current directory.
+ *	2nd: PATH_SANE_CONFIG_DIR with admin-managed files (usually
+ *	     /etc/sane.d).
+ *	3rd: PATH_SANE_DEFAULT_CONFIG_DIR with distro-managed files (usually
+ *	     /usr/lib/sane).
+ *	4th: Current directory.
  * @param name filename with extension but without path (such as "mustek.conf")
  *
  * @return file pointer, or NULL if not found
