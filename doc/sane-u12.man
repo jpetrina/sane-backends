@@ -115,6 +115,9 @@ If there's no configuration file, the backend defaults to
 .I @CONFIGDIR@/u12.conf
 The backend configuration file
 .TP
+.I @DEFAULTCONFIGDIR@/u12.conf
+The backend default configuration file
+.TP
 .I @LIBDIR@/libsane\-u12.a
 The static library implementing this backend.
 .TP
@@ -130,8 +133,10 @@ contain the configuration file.  On *NIX systems, the directories are
 separated by a colon (`:'), under OS/2, they are separated by a
 semi-colon (`;').  If this variable is not set, the configuration file
 is searched in two default directories: first, the current working
-directory (".") and then in
-.IR @CONFIGDIR@ .
+directory ("."), then in
+.IR @CONFIGDIR@
+and then in
+.IR @DEFAULTCONFIGDIR@ .
 If the value of the
 environment variable ends with the directory separator character, then
 the default directories are searched after the explicitly specified
@@ -140,8 +145,9 @@ directories.  For example, setting
 to "/tmp/config:" would result in directories
 .IR tmp/config ,
 .IR . ,
+.IR @CONFIGDIR@ ,
 and
-.I @CONFIGDIR@
+.I @DEFAULTCONFIGDIR@
 being searched (in this order).
 .TP
 .B SANE_DEBUG_U12

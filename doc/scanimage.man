@@ -144,7 +144,8 @@ is used to include an ICC profile into a TIFF file.
 requests a (partial) list of devices that are available.  The
 list may not be complete since some devices may be available, but are not
 listed in any of the configuration files (which are typically stored
-in directory
+in
+.IR @DEFAULTCONFIGDIR@ and
 .IR @CONFIGDIR@ ).
 This is particularly the case when accessing scanners through the network.  If
 a device is not listed in a configuration file, the only way to access it is
@@ -484,8 +485,9 @@ filename
 The default device-name.
 .SH FILES
 .TP
-.I @CONFIGDIR@
-This directory holds various configuration files.  For details, please
+.IR @CONFIGDIR@ , \ \&\c
+.I @DEFAULTCONFIGDIR@
+These directories holds various configuration files.  For details, please
 refer to the manual pages listed below.
 .TP
 .I ~/.sane/pass

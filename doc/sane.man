@@ -752,7 +752,11 @@ that work is not duplicated.
 .SH "FILES"
 .TP
 .I @CONFIGDIR@/*.conf
-The backend configuration files.
+The backend configuration files (preferred to the default configuration
+files, if present).
+.TP
+.I @DEFAULTCONFIGDIR@/*.conf
+The backend default configuration files (read-only).
 .TP
 .I @LIBDIR@/libsane\-*.a
 The static libraries implementing the backends.
