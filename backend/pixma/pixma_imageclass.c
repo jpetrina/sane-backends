@@ -75,6 +75,7 @@
 #define D480_PID   0x26ed
 #define MF4320_PID 0x26ee
 #define D420_PID   0x26ef
+/* also used for MF3228 */
 #define MF3200_PID 0x2684
 #define MF6500_PID 0x2686
 #define IR1018_PID 0x269d
@@ -371,7 +372,7 @@ static int
 read_image_block (pixma_t * s, uint8_t * data, unsigned size)
 {
   iclass_t *mf = (iclass_t *) s->subdriver;
-  int error;
+  int error, i;
   unsigned maxchunksize, chunksize, count = 0;
 
   maxchunksize = MAX_CHUNK_SIZE * ((mf->generation >= 2 ||
@@ -387,7 +388,20 @@ read_image_block (pixma_t * s, uint8_t * data, unsigned size)
       	chunksize = size;
       else
       	chunksize = size - (size % MIN_CHUNK_SIZE);
-      error = pixma_read (s->io, data, chunksize);
+      for (i=0; i<15; i++) {
+        error = pixma_read (s->io, data, chunksize);
+        if (s->cfg->pid == MF3200_PID) {
+          PDBG (pixma_dbg
+              (1, "Using increased timeout for MF3228\n"));
+          if (error == PIXMA_ETIMEDOUT) {
+            PDBG (pixma_dbg
+              (1, "Timeout in read_image_block, waiting 100ms and trying again\n"));
+            pixma_sleep (100000);
+            continue;
+          }
+        }
+        break;
+      }
       if (error < 0)
       	return count;
       count += error;
