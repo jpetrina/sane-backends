@@ -53,7 +53,7 @@ memory_callback_s(void *contents, size_t size, size_t nmemb, void *userp)
 
     char *str = realloc(mem->memory, mem->size + realsize + 1);
     if (str == NULL) {
-        DBG(1, "not enough memory (realloc returned NULL)\n");
+        DBG(10, "not enough memory (realloc returned NULL)\n");
         return (0);
     }
     mem->memory = str;
@@ -225,7 +225,7 @@ reload:
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
     CURLcode res = curl_easy_perform(curl_handle);
     if (res != CURLE_OK) {
-        DBG( 1, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
+        DBG( 10, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
         status = SANE_STATUS_INVAL;
         goto clean_data;
     }
@@ -375,7 +375,7 @@ escl_reset_all_jobs(ESCL_Device *device)
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
     CURLcode res = curl_easy_perform(curl_handle);
     if (res != CURLE_OK) {
-        DBG( 1, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
+        DBG( 10, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
         status = SANE_STATUS_INVAL;
         goto clean_data1;
     }

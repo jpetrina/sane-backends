@@ -100,6 +100,12 @@
 :status :untested
 :comment "Testers needed!"
 
+:model "PIXMA E3600 Series"
+:interface "USB"
+:usbid "0x04a9" "0x1157"
+:status :untested
+:comment "Testers needed!"
+
 :model "PIXMA E4200 Series"
 :interface "USB WiFi"
 :usbid "0x04a9" "0x1855"
@@ -196,6 +202,18 @@
 :status :untested
 :comment "Testers needed!"
 
+:model "G3080 series"
+:interface "USB"
+:usbid "0x04a9" "0x114d"
+:status :untested
+:comment "Testers needed!"
+
+:model "G3090 series"
+:interface "USB"
+:usbid "0x04a9" "0x114c"
+:status :untested
+:comment "Testers needed!"
+
 :model "PIXMA G4000 Series"
 :interface "USB WiFi"
 :usbid "0x04a9" "0x181d"
@@ -211,6 +229,18 @@
 :model "G4070 series"
 :interface "USB"
 :usbid "0x04a9" "0x18f3"
+:status :untested
+:comment "Testers needed!"
+
+:model "G4070 series"
+:interface "USB"
+:usbid "0x04a9" "0x18f3"
+:status :untested
+:comment "Testers needed!"
+
+:model "G4090 series"
+:interface "USB"
+:usbid "0x04a9" "0x114b"
 :status :untested
 :comment "Testers needed!"
 
@@ -1139,6 +1169,18 @@
 :status :untested
 :comment "Testers needed!"
 
+:model "PIXMA TS3600 Series"
+:interface "USB"
+:usbid "0x04a9" "0x1156"
+:status :untested
+:comment "Testers needed!"
+
+:model "PIXMA TS3700 Series"
+:interface "USB"
+:usbid "0x04a9" "0x1158"
+:status :untested
+:comment "Testers needed!"
+
 :model "PIXMA TS5000 Series"
 :interface "USB WiFi"
 :usbid "0x04a9" "0x1802"
@@ -1146,7 +1188,13 @@
 :comment "All resolutions supported (up to 1200DPI). WiFi not working."
 
 :model "PIXMA TS5100 Series"
-:interface "USB WiFi"
+:interface "USB"
+:usbid "0x04a9" "0x1825"
+:status :good
+:comment "All resolutions supported (up to 1200DPI). WiFi not working."
+
+:model "PIXMA TS5150 Series"
+:interface "USB"
 :usbid "0x04a9" "0x1825"
 :status :good
 :comment "All resolutions supported (up to 1200DPI). WiFi not working."
@@ -1391,6 +1439,12 @@
 :status :untested
 :comment "Testers needed!"
 
+:model "PIXMA TS8800 series"
+:interface "USB WiFi"
+:usbid "0x04a9" "0x1159"
+:status :untested
+:comment "Testers needed!"
+
 :model "PIXMA TS9000 Series"
 :interface "USB WiFi"
 :usbid "0x04a9" "0x179f"
@@ -1472,6 +1526,12 @@
 :model "PIXUS XK120 Series"
 :interface "USB WiFi"
 :usbid "0x04a9" "0x1119"
+:status :untested
+:comment "Testers needed!"
+
+:model "PIXUS XK130 Series"
+:interface "USB WiFi"
+:usbid "0x04a9" "0x115a"
 :status :untested
 :comment "Testers needed!"
 

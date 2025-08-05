@@ -61,25 +61,6 @@ static const SANE_Device **devlist = NULL;
 static ESCL_Device *list_devices_primary = NULL;
 static int num_devices = 0;
 
-#ifdef CURL_SSLVERSION_MAX_DEFAULT
-static int proto_tls[] = {
-        CURL_SSLVERSION_MAX_DEFAULT,
-   #ifdef CURL_SSLVERSION_MAX_TLSv1_3
-        CURL_SSLVERSION_MAX_TLSv1_3,
-   #endif
-   #ifdef CURL_SSLVERSION_MAX_TLSv1_2
-        CURL_SSLVERSION_MAX_TLSv1_2,
-   #endif
-   #ifdef CURL_SSLVERSION_MAX_TLSv1_1
-        CURL_SSLVERSION_MAX_TLSv1_1,
-   #endif
-   #ifdef CURL_SSLVERSION_MAX_TLSv1_0
-        CURL_SSLVERSION_MAX_TLSv1_0,
-   #endif
-        -1
-};
-#endif
-
 
 typedef struct Handled {
     struct Handled *next;
@@ -120,17 +101,15 @@ escl_free_device(ESCL_Device *current)
 }
 
 
-#ifdef CURL_SSLVERSION_MAX_DEFAULT
 static int
-escl_tls_protocol_supported(char *url, int proto)
+escl_tls_protocol_supported(char *url)
 {
    CURLcode res = CURLE_UNSUPPORTED_PROTOCOL;
    CURL *curl = curl_easy_init();
    if(curl) {
       curl_easy_setopt(curl, CURLOPT_URL, url);
 
-      /* ask libcurl to use TLS version 1.0 or later */
-      curl_easy_setopt(curl, CURLOPT_SSLVERSION, proto);
+      curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
       curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
       curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
       curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -145,33 +124,17 @@ escl_tls_protocol_supported(char *url, int proto)
 static int
 escl_is_tls(char * url, char *type)
 {
-    int tls_version = 0;
     if(!strcmp(type, "_uscans._tcp") ||
        !strcmp(type, "https"))
       {
-         while(proto_tls[tls_version] != -1)
-          {
-                if (escl_tls_protocol_supported(url, proto_tls[tls_version]) == CURLE_OK)
+                if (escl_tls_protocol_supported(url) == CURLE_OK)
                 {
-                        DBG(10, "curl tls compatible (%d)\n", proto_tls[tls_version]);
-                        break;
+                        DBG(10, "curl tls compatible\n");
+                        return 1;
                 }
-                tls_version++;
-          }
-         if (proto_tls[tls_version] < 1)
-            return 0;
       }
-      return proto_tls[tls_version];
-}
-#else
-static int
-escl_is_tls(char * url, char *type)
-{
-    (void)url;
-    (void)type;
     return 0;
 }
-#endif
 
 void
 escl_free_handler(escl_sane_t *handler)
@@ -416,7 +379,7 @@ convertFromESCLDev(ESCL_Device *cdev)
              unix_path, cdev->https ? "s" : "", cdev->ip_address, cdev->port_nb);
     sdev->name = tmp;
 
-    DBG( 1, "Escl add device : %s\n", tmp);
+    DBG( 10, "Escl add device : %s\n", tmp);
     sdev->vendor = get_vendor(cdev->model_name);
 
     if (!sdev->vendor)
@@ -523,7 +486,7 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
         line = sanei_config_get_string(line + 6, &name_str);
         DBG (10, "New Escl_Device URL [%s].\n", (name_str ? name_str : "VIDE"));
         if (!name_str || !*name_str) {
-            DBG (1, "Escl_Device URL missing.\n");
+            DBG(10, "Escl_Device URL missing.\n");
             return SANE_STATUS_INVAL;
         }
         if (*line) {
@@ -1163,19 +1126,19 @@ escl_parse_name(SANE_String_Const name, ESCL_Device *device)
         device->type = strdup("http");
         host = name + 7;
     } else {
-        DBG(1, "Unknown URL scheme in %s", name);
+        DBG(10, "Unknown URL scheme in %s", name);
         return SANE_STATUS_INVAL;
     }
 
     port_str = strchr(host, ':');
     if (port_str == NULL) {
-        DBG(1, "Port missing from URL: %s", name);
+        DBG(10, "Port missing from URL: %s", name);
         return SANE_STATUS_INVAL;
     }
     port_str++;
     device->port_nb = atoi(port_str);
     if (device->port_nb < 1 || device->port_nb > 65535) {
-        DBG(1, "Invalid port number in URL: %s", name);
+        DBG(10, "Invalid port number in URL: %s", name);
         return SANE_STATUS_INVAL;
     }
 
@@ -1201,7 +1164,7 @@ _get_hack(SANE_String_Const name, ESCL_Device *device)
   fp = sanei_config_open (ESCL_CONFIG_FILE);
   if (!fp)
     {
-      DBG (2, "_get_hack: couldn't access %s\n", ESCL_CONFIG_FILE);
+      DBG(4, "_get_hack: couldn't access %s\n", ESCL_CONFIG_FILE);
       DBG (3, "_get_hack: exit\n");
     }
 
@@ -1236,7 +1199,7 @@ _get_blacklist_pdf(void)
   fp = sanei_config_open (ESCL_CONFIG_FILE);
   if (!fp)
     {
-      DBG (2, "_get_blacklit: couldn't access %s\n", ESCL_CONFIG_FILE);
+      DBG(4, "_get_blacklit: couldn't access %s\n", ESCL_CONFIG_FILE);
       DBG (3, "_get_blacklist: exit\n");
     }
 
@@ -1558,7 +1521,7 @@ sane_start(SANE_Handle h)
     int bps = 0;
 
     if (handler->device == NULL) {
-        DBG(1, "Missing handler device.\n");
+        DBG(10, "Missing handler device.\n");
         return (SANE_STATUS_INVAL);
     }
     handler->cancel = SANE_FALSE;
@@ -1888,24 +1851,23 @@ escl_curl_url(CURL *handle, const ESCL_Device *device, SANE_String_Const path)
              (device->https ? "https" : "http"), device->ip_address,
              device->port_nb, path);
 
-    DBG( 1, "escl_curl_url: URL: %s\n", url );
+    DBG( 10, "escl_curl_url: URL: %s\n", url );
     curl_easy_setopt(handle, CURLOPT_URL, url);
     free(url);
-    DBG( 1, "Before use hack\n");
+    DBG( 10, "Before use hack\n");
     if (device->hack) {
-        DBG( 1, "Use hack\n");
+        DBG( 10, "Use hack\n");
         curl_easy_setopt(handle, CURLOPT_HTTPHEADER, device->hack);
     }
-    DBG( 1, "After use hack\n");
+    DBG( 10, "After use hack\n");
     if (device->https) {
-        DBG( 1, "Ignoring safety certificates, use https\n");
+        DBG( 10, "Ignoring safety certificates, use https\n");
+        curl_easy_setopt(handle, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
         curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 0L);
-        if (device->tls > 0)
-           curl_easy_setopt(handle, CURLOPT_SSLVERSION, device->tls);
     }
     if (device->unix_socket != NULL) {
-        DBG( 1, "Using local socket %s\n", device->unix_socket );
+        DBG( 10, "Using local socket %s\n", device->unix_socket );
         curl_easy_setopt(handle, CURLOPT_UNIX_SOCKET_PATH,
                          device->unix_socket);
     }

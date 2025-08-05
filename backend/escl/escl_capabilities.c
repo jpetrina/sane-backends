@@ -48,7 +48,7 @@ header_callback(void *str, size_t size, size_t nmemb, void *userp)
     char *content = realloc(header->memory, header->size + realsize + 1);
 
     if (content == NULL) {
-        DBG( 1, "Not enough memory (realloc returned NULL)\n");
+        DBG( 10, "Not enough memory (realloc returned NULL)\n");
         return (0);
     }
     header->memory = content;
@@ -234,7 +234,7 @@ find_valor_of_array_variables(xmlNode *node, capabilities_t *scanner, int type)
 	       scanner->caps[type].have_png = i;
             }
 #endif
-#if(defined HAVE_TIFFIO_H)
+#if(defined HAVE_LIBTIFF)
             else if(type == PLATEN && !strcmp(scanner->caps[type].DocumentFormats[i], "image/tiff"))
             {
                have_tiff = SANE_TRUE;
@@ -568,9 +568,9 @@ escl_capabilities(ESCL_Device *device, char *blacklist, SANE_Status *status)
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
     CURLcode res = curl_easy_perform(curl_handle);
     if (res == CURLE_OK)
-        DBG( 1, "Create NewJob : the scanner header responded : [%s]\n", header->memory);
+        DBG( 10, "Create NewJob : the scanner header responded : [%s]\n", header->memory);
     if (res != CURLE_OK) {
-        DBG( 1, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
+        DBG( 10, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
         *status = SANE_STATUS_INVAL;
         goto clean_data;
     }

@@ -122,7 +122,7 @@
 #define MF640_PID  0x27fe
 #define MF645_PID  0x27fd
 #define MF440_PID  0x2823
-
+#define MF650_PID  0x287b
 
 enum iclass_state_t
 {
@@ -953,6 +953,7 @@ const pixma_config_t pixma_iclass_devices[] = {
   DEV ("Canon i-SENSYS MF4700 Series", "MF4700", MF4700_PID, 600, 0, 640, 1050, PIXMA_CAP_ADF),
   DEV ("Canon i-SENSYS MF4800 Series", "MF4800", MF4800_PID, 600, 0, 640, 1050, PIXMA_CAP_ADF),
   DEV ("Canon imageCLASS MF4570dw", "MF4570dw", MF4570_PID, 600, 0, 640, 877, 0),
+  DEV ("Canon imageClass MF4500w Series", "MF4500w", MF4570_PID, 600, 0, 640, 877, 0),
   DEV ("Canon i-SENSYS MF8200C Series", "MF8200C", MF8200_PID, 600, 300, 640, 1050, PIXMA_CAP_ADF),
   DEV ("Canon i-SENSYS MF8300 Series", "MF8300", MF8300_PID, 600, 0, 640, 1050, PIXMA_CAP_ADF),
   DEV ("Canon imageCLASS D530", "D530", D530_PID, 600, 0, 640, 877, 0),
@@ -989,10 +990,12 @@ const pixma_config_t pixma_iclass_devices[] = {
   DEV ("Canon i-SENSYS MF420 Series", "MF420", MF420_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF260 Series", "MF260", MF260_PID, 600, 0, 640, 1050, PIXMA_CAP_JPEG | PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF740 Series", "MF740", MF740_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
+  DEV ("Canon i-SENSYS MF742C/744C", "MF742C/744C", MF740_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF741C/743C", "MF741C/743C", MF743_PID, 600, 300, 640, 1050, PIXMA_CAP_ADFDUP),       /* ADFDUP restricted to 300dpi */
   DEV ("Canon i-SENSYS MF750 Series", "MF750C", MF750_PID, 600, 300, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF640 Series", "MF642C/643C/644C", MF640_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF645C", "MF645C", MF645_PID, 600, 0, 637, 877, PIXMA_CAP_ADFDUP),                    /* max. w = 216mm */
+  DEV ("Canon i-SENSYS MF650C", "MF650C", MF650_PID, 600, 0, 637, 1050, PIXMA_CAP_ADFDUP),                    /* max. w = 216mm */
   DEV ("Canon i-SENSYS MF440 Series", "MF440", MF440_PID, 600, 300, 637, 877, PIXMA_CAP_ADFDUP),
   DEV (NULL, NULL, 0, 0, 0, 0, 0, 0)
 };

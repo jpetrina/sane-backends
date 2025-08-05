@@ -116,6 +116,7 @@ SANE_CHECK_IEEE1284
 SANE_CHECK_PTHREAD
 SANE_CHECK_LOCKING
 SANE_CHECK_GPHOTO2
+SANE_CHECK_SSL
 
 dnl **************************************************************
 dnl Check for V4L availability
@@ -200,7 +201,7 @@ AC_CHECK_HEADERS(fcntl.h unistd.h libc.h sys/dsreq.h sys/select.h \
     sys/socket.h sys/io.h sys/hw.h sys/types.h linux/ppdev.h \
     dev/ppbus/ppi.h machine/cpufunc.h sys/sem.h poll.h \
     windows.h be/kernel/OS.h limits.h sys/ioctl.h asm/types.h\
-    netinet/in.h tiffio.h ifaddrs.h pwd.h getopt.h)
+    netinet/in.h ifaddrs.h pwd.h getopt.h)
 AC_CHECK_HEADERS([asm/io.h],,,[#include <sys/types.h>])
 
 SANE_CHECK_MISSING_HEADERS
@@ -313,6 +314,7 @@ AC_FUNC_MMAP
 AC_CHECK_FUNCS(atexit ioperm i386_set_ioperm \
     mkdir strftime strstr strtod  \
     cfmakeraw tcsendbreak strcasecmp strncasecmp _portaccess \
+    pidfd_open \
     getaddrinfo getnameinfo poll setitimer iopl getuid getpass)
 
 dnl sys/io.h might provide ioperm but not inb,outb (like for
@@ -862,6 +864,15 @@ echo "Avahi support: `eval eval echo ${with_avahi}`"
 echo "cURL support:  `eval eval echo ${with_libcurl}`"
 echo "POPPLER_GLIB support:  `eval eval echo ${with_poppler_glib}`"
 echo "SNMP support:  `eval eval echo ${with_snmp}`"
+echo -n "SSL support:   "
+if test "x$SSL_LIBS" != "x"; then
+	echo "yes"
+else
+	echo "no"
+fi
+
+
+
 echo "-> The following backends will be built:"
 for backend in ${BACKENDS} ; do
   echo $ECHO_N "${backend} "
