@@ -418,10 +418,12 @@ sanei_magicolor_net_close(struct Magicolor_Scanner *s)
 
 #define SANE_MAGICOLOR_VENDOR_ID	(0x132b)
 #define SANE_EPSON_VENDOR_ID		(0x04b8)
+#define SANE_TOSHIBA_VENDOR_ID		(0x08a6)
 
 SANE_Word sanei_magicolor_usb_product_ids[] = {
   0x2089, /* magicolor 1690MF */
   0x2079, /* magicolor 4690MF */
+  0x8056, /* toshiba e-studio2323 */
   0x0868, /* epson AL CX16NF */
   0				/* last entry - this is used for devices that are specified
 				   in the config file as "usb <vendor> <product>" */
@@ -433,6 +435,13 @@ sanei_magicolor_getNumberOfUSBProductIds (void)
   return sizeof (sanei_magicolor_usb_product_ids) / sizeof (SANE_Word);
 }
 
+static SANE_Bool
+vendor_is_supported (int vendor)
+{
+	return (vendor == SANE_MAGICOLOR_VENDOR_ID ||
+		vendor == SANE_EPSON_VENDOR_ID ||
+		vendor == SANE_TOSHIBA_VENDOR_ID);
+}
 
 
 
@@ -1735,7 +1744,7 @@ detect_usb(struct Magicolor_Scanner *s)
 	}
 
 	/* check the vendor ID to see if we are dealing with an MAGICOLOR device */
-	if (vendor != SANE_MAGICOLOR_VENDOR_ID && vendor != SANE_EPSON_VENDOR_ID) {
+	if (!vendor_is_supported(vendor)) {
 		/* this is not a supported vendor ID */
 		DBG(1, "not an Magicolor device at %s (vendor id=0x%x)\n",
 		    s->hw->sane.name, vendor);
@@ -2230,7 +2239,7 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
 
 		int numIds = sanei_magicolor_getNumberOfUSBProductIds();
 
-		if (vendor != SANE_MAGICOLOR_VENDOR_ID && vendor != SANE_EPSON_VENDOR_ID)
+		if (!vendor_is_supported(vendor))
 			return SANE_STATUS_INVAL; /* this is not a KONICA MINOLTA device */
 
 		sanei_magicolor_usb_product_ids[numIds - 1] = product;
@@ -2242,8 +2251,20 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
 		numIds = sanei_magicolor_getNumberOfUSBProductIds();
 
 		for (i = 0; i < numIds; i++) {
-			sanei_usb_find_devices(SANE_MAGICOLOR_VENDOR_ID,
-					       sanei_magicolor_usb_product_ids[i], attach_one_usb);
+			product = sanei_magicolor_usb_product_ids[i];
+
+			switch (product) {
+			case 0x0868:
+				vendor = SANE_EPSON_VENDOR_ID;
+				break;
+			case 0x8056:
+				vendor = SANE_TOSHIBA_VENDOR_ID;
+				break;
+			default:
+				vendor = SANE_MAGICOLOR_VENDOR_ID;
+			}
+
+			sanei_usb_find_devices(vendor, product, attach_one_usb);
 		}
 
 	} else if (strncmp(line, "net", 3) == 0) {
