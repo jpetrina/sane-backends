@@ -961,6 +961,7 @@ const pixma_config_t pixma_iclass_devices[] = {
   /* FIXME: the following capabilities all need updating/verifying */
   DEV ("Canon imageCLASS MF8170c", "MF8170c", MF8100_PID, 600, 0, 640, 877, PIXMA_CAP_ADF),
   DEV ("Canon imageClass MF8030", "MF8030", MF8030_PID, 600, 0, 640, 877, PIXMA_CAP_ADF),
+  DEV ("Canon imageClass MF8000 Series", "MF8000", MF8030_PID, 600, 0, 640, 877, PIXMA_CAP_ADF),
   DEV ("Canon i-SENSYS MF5880dn", "MF5880", MF5880_PID, 600, 0, 640, 877, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF6680dn", "MF6680", MF6680_PID, 600, 0, 640, 877, PIXMA_CAP_ADFDUP),
   DEV ("Canon imageRUNNER 1133", "iR1133", IR1133_PID, 600, 0, 637, 877, PIXMA_CAP_ADFDUP),                  /* max. w = 216mm */
