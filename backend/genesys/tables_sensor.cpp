@@ -3429,6 +3429,7 @@ void genesys_init_sensor_tables()
     // the 7400 v1 is mostly an opticfilm 7300, but with different DPI support
     // and a sensor more like the opticfilm 7400 v2.
     sensor.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_7400_V1;
+    sensor.exposure = SensorExposure(0xabe0, 0x80e8, 0x2af8);
 
     {
         struct CustomSensorSettings
