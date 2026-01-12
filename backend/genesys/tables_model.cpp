@@ -2523,6 +2523,8 @@ void genesys_init_usb_device_tables()
     // same as 7300, same USB ID as 7400-v2
     model.name = "plustek-opticfilm-7400-v1";
     model.model = "OpticFilm 7400 (v1)";
+    model.flags = ModelFlag::WARMUP |
+                 ModelFlag::DISABLE_SHADING_CALIBRATION;
     model.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_7400_V1;
     model.bpp_gray_values = {8, 16};
     model.bpp_color_values = {8, 16};
@@ -2533,9 +2535,9 @@ void genesys_init_usb_device_tables()
             {7200, 3600, 2400, 1200, 900, 600},
         }};
 
-    model.x_offset_ta = 0.3;
-    model.y_offset_ta = 29;
-    model.x_size_ta = 37;
+    model.x_offset_ta = 1;
+    model.y_offset_ta = 29.5;
+    model.x_size_ta = 36.25;
     model.y_size_ta = 25;
 
     model.y_offset_calib_white_ta = 0.0;
