@@ -140,6 +140,8 @@ struct epsonds_device
 	SANE_Bool has_adf;		/* adf */
 	SANE_Range adf_x_range;	        /* x range */
 	SANE_Range adf_y_range;	        /* y range */
+	SANE_Range adf_x_range_large;	/* x range in largest scan mode (low DPI) */
+	SANE_Range adf_y_range_large;	/* y range in largest scan mode (low DPI) */
 	SANE_Bool adf_is_duplex;	/* supports duplex mode */
 	SANE_Bool adf_singlepass;	/* supports single pass duplex */
 	SANE_Bool adf_has_skew;		/* supports skew correction */

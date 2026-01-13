@@ -1597,11 +1597,16 @@ device_detect(const char *name, int type, SANE_Status *status)
 		dev->alignment = dev->fbf_alignment;
 
 	} else if (s->hw->has_adf) {
+		if (dev->adf_x_range_large.max > 0) {
+			dev->x_range = &dev->adf_x_range_large;
+			dev->y_range = &dev->adf_y_range_large;
+		} else {
+			DBG(17, "ADF AMAX was not sent by scanner, using AREA instead\n");
+			dev->x_range = &dev->adf_x_range;
+			dev->y_range = &dev->adf_y_range;
+		}
 
-		dev->x_range = &dev->adf_x_range;
-		dev->y_range = &dev->adf_y_range;
 		dev->alignment = dev->adf_alignment;
-
 	} else {
 		DBG(0, "unable to lay on the flatbed or feed the feeder. is that a scanner??\n");
 	}
@@ -2209,9 +2214,21 @@ change_source(epsonds_scanner *s, SANE_Int optindex, char *value)
 		force_max = SANE_TRUE;
 	}
 
+	SANE_Word min_resolution =
+		(s->hw->dpi_range.quant) ? s->hw->dpi_range.min : s->hw->res_list[1];
+	SANE_Bool in_min_resolution = (s->val[OPT_RESOLUTION].w == min_resolution);
+
 	if (strcmp(STRING_ADFFRONT, value) == 0 || strcmp(STRING_ADFDUPLEX, value) == 0) {
-		s->hw->x_range = &s->hw->adf_x_range;
-		s->hw->y_range = &s->hw->adf_y_range;
+		if (s->hw->adf_x_range_large.max > 0 && in_min_resolution) {
+			s->hw->x_range = &s->hw->adf_x_range_large;
+			s->hw->y_range = &s->hw->adf_y_range_large;
+		} else {
+			if(!in_min_resolution) DBG(17, "ADF AMAX was not sent by scanner, using AREA instead\n");
+			else                   DBG(17, "Not allowed to use AMAX due to DPI, using AREA instead\n");
+			s->hw->x_range = &s->hw->adf_x_range;
+			s->hw->y_range = &s->hw->adf_y_range;
+		}
+
 		s->hw->alignment = s->hw->adf_alignment;
 
 
@@ -2317,8 +2334,37 @@ setvalue(SANE_Handle handle, SANE_Int option, void *value, SANE_Int *info)
 
 	switch (option) {
 
-	case OPT_ADF_SKEW:
 	case OPT_RESOLUTION:
+		/* Note: this includes an assumption that only the lowest DPI supports
+		 * the large ADF area. This assumption holds true on at least the ES-50
+		 * and friends, but other scanners need to be tested to see if this is
+		 * universally true or not.
+		 */
+		if (strcmp(source_list[s->val[OPT_SOURCE].w], STRING_ADFFRONT) == 0 || strcmp(source_list[s->val[OPT_SOURCE].w], STRING_ADFDUPLEX) == 0) {
+			SANE_Word min_resolution =
+				(s->hw->dpi_range.quant) ? s->hw->dpi_range.min : s->hw->res_list[1];
+
+			if (*((SANE_Word *) value) == min_resolution) {
+				DBG(17, "DPI change, setting ADF to large area\n");
+				s->hw->x_range = &s->hw->adf_x_range_large;
+				s->hw->y_range = &s->hw->adf_y_range_large;
+			} else {
+				DBG(17, "DPI change, setting ADF to normal area\n");
+				s->hw->x_range = &s->hw->adf_x_range;
+				s->hw->y_range = &s->hw->adf_y_range;
+			}
+
+			s->opt[OPT_BR_X].constraint.range = s->hw->x_range;
+			s->opt[OPT_BR_Y].constraint.range = s->hw->y_range;
+
+			if (s->val[OPT_BR_X].w > s->hw->x_range->max)
+				s->val[OPT_BR_X].w = s->hw->x_range->max;
+
+			if (s->val[OPT_BR_Y].w > s->hw->y_range->max)
+				s->val[OPT_BR_Y].w = s->hw->y_range->max;
+		}
+		// fall through
+	case OPT_ADF_SKEW:
 	case OPT_ADF_CRP:
 		sval->w = *((SANE_Word *) value);
 		reload = SANE_TRUE;
@@ -2822,6 +2868,13 @@ sane_start(SANE_Handle handle)
 	char buf[65]; /* add one more byte to correct buffer overflow issue */
 	char cmd[CMD_BUF_SIZE]; /* take care not to overflow */
 	SANE_Status status = 0;
+
+	/* A pending cancel will interfere with sane_get_parameters, so process it first. */
+	if (s->canceling)
+	{
+		DBG(5, "Cancel request in progress at start of scan.\n");
+		esci2_can(s);
+	}
 
 	s->pages++;
 
@@ -3588,6 +3641,7 @@ sane_read(SANE_Handle handle, SANE_Byte *data, SANE_Int max_length, SANE_Int *le
 	{
 		esci2_can(s);
 		*length = 0;
+		s->canceling = 0;
 		return SANE_STATUS_CANCELLED;
 	}
 
@@ -3631,6 +3685,7 @@ sane_cancel(SANE_Handle handle)
 {
 	DBG(1, "** %s\n", __func__);
 	((epsonds_scanner *)handle)->canceling = SANE_TRUE;
+	((epsonds_scanner *)handle)->scanning  = SANE_FALSE;
 }
 
 /*
