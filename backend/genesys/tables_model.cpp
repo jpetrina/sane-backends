@@ -2535,10 +2535,10 @@ void genesys_init_usb_device_tables()
             {7200, 3600, 2400, 1200, 900, 600},
         }};
 
-    model.x_offset_ta = 1;
-    model.y_offset_ta = 29.5;
-    model.x_size_ta = 36.25;
-    model.y_size_ta = 25;
+    model.x_offset_ta = 0.0;
+    model.y_offset_ta = 29.0;
+    model.x_size_ta = 39.0;
+    model.y_size_ta = 25.5;
 
     model.y_offset_calib_white_ta = 0.0;
     model.y_offset_calib_black_ta = 7;
