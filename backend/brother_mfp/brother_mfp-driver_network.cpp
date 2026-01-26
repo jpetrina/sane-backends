@@ -287,16 +287,16 @@ SANE_Status BrotherNetworkDriver::ReadScanData (SANE_Byte *data, size_t max_leng
 BrotherNetworkDriver::BrotherNetworkDriver (const char *devicename, BrotherFamily family,
                                             SANE_Word capabilities) :
     BrotherDriver (family, capabilities),
-    is_open (false),
-    in_session (false),
-    is_scanning (false),
-    was_cancelled (false),
+//    is_open (false),
+//    in_session (false),
+//    is_scanning (false),
+//    was_cancelled (false),
     devicename (nullptr),
-    next_frame_number (0),
+//    next_frame_number (0),
     small_buffer { 0 },
     data_buffer (nullptr),
-    data_buffer_bytes (0),
-    out_of_docs (false),
+//    data_buffer_bytes (0),
+//    out_of_docs (false),
     sockfd (0)
  {
    this->devicename = strdup(devicename);

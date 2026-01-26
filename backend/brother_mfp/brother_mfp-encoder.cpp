@@ -920,7 +920,7 @@ DecodeStatus BrotherEncoderFamily234Base::DecodeScanDataHeader (const SANE_Byte 
       return DECODE_STATUS_PAPER_JAM;
     }
 
-  if ((header.block_type == BROTHER_DATA_BLOCK_DEVICE_STUCK))
+  if (header.block_type == BROTHER_DATA_BLOCK_DEVICE_STUCK)
     {
       *src_data_consumed = 1;
       FDBGNP(DBG_IMPORTANT, "The scanner is stuck and must be turned off and back on.");

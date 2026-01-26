@@ -239,18 +239,18 @@ private:
 //  SANE_Status PollForReadFlush (useconds_t max_time);
 //  SANE_Status PollForRead (SANE_Byte *buffer, size_t *buf_len,
 //                           useconds_t *max_time);
-  bool is_open;
-  bool in_session;
-  bool is_scanning;
-  bool was_cancelled;
+//  bool is_open;
+//  bool in_session;
+//  bool is_scanning;
+//  bool was_cancelled;
   char *devicename;
-  SANE_Int next_frame_number;
+//  SANE_Int next_frame_number;
 
   SANE_Byte small_buffer[1024];
   SANE_Byte *data_buffer;
-  size_t data_buffer_bytes;
+//  size_t data_buffer_bytes;
 
-  bool out_of_docs;
+//  bool out_of_docs;
 
   int sockfd;
 
