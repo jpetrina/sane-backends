@@ -331,7 +331,7 @@ SANE_Status BrotherUSBDriver::ExecStopSession ()
   return SANE_STATUS_GOOD;
 }
 
-/* 
+/*
  * Fill `data_buffer` by reading from the USB device.
  */
 SANE_Status BrotherUSBDriver::PollDataFromScanner()
@@ -379,10 +379,10 @@ SANE_Status BrotherUSBDriver::PollDataFromScanner()
   return SANE_STATUS_GOOD;
 }
 
-/* 
+/*
  * Try to fill `data` with scanlines by decoding `data_buffer`. Successfully
  * decoded data will be removed from `data_buffer`.
- * 
+ *
  */
 DecodeStatus BrotherUSBDriver::DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length)
 {
@@ -459,7 +459,7 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
         }
       else
         {
-          /* 
+          /*
            * The code that set pad_or_crop_in_progress has already absorbed
            * the EOF block.
            */
@@ -485,7 +485,7 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
 
     }
 
-  /* First we try to fill the output buffer from scanned data. 
+  /* First we try to fill the output buffer from scanned data.
    * No need to read from USB when we still have plenty of data to process. */
   DecodeStatus dec_ret = DecodeReadBuffer(data, max_length, length);
   if (*length > 0)
@@ -544,12 +544,12 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
       *length = bytes_per_frame - bytes_written_this_page;
       SANE_Byte *unused_data_buffer = data + *length;
       size_t dummy_length = 0;
-      do 
+      do
         {
           res = PollDataFromScanner();
           if (res != SANE_STATUS_GOOD)
               return res;
-          auto dec_ret = DecodeReadBuffer(unused_data_buffer,
+          dec_ret = DecodeReadBuffer(unused_data_buffer,
                                           max_length - *length,
                                           &dummy_length);
           res = encoder->DecodeStatusToSaneStatus(dec_ret);
@@ -1248,7 +1248,7 @@ SANE_Status BrotherUSBDriver::CheckSensor (BrotherSensor &status)
   */
   useconds_t time_left = TIMEOUT_SECS(2);
   static const useconds_t deltaT = TIMEOUT_MILLISECS(100);
-  
+
   while (time_left > deltaT)
     {
       res = sanei_usb_control_msg (fd, USB_DIR_IN | USB_TYPE_VENDOR,

@@ -578,7 +578,7 @@ char const* BrotherEncoderFamily4::GetFamilySpecificParameterBlock ()
  * This function updates current_header in case the current packet has been processed entirely.
  * Some special cases are dealt with, including the case where the next packet is an EOF
  * but there is unprocessed data left in the decoder.
- * 
+ *
  */
 DecodeStatus BrotherEncoderFamily234Base::ProcessNextPacket(const SANE_Byte* &src_data, size_t &src_data_len,
                                                    size_t dest_data_len, size_t orig_dest_data_len,
@@ -597,7 +597,7 @@ DecodeStatus BrotherEncoderFamily234Base::ProcessNextPacket(const SANE_Byte* &sr
   if (current_header.block_type != 0)
     /* The current packet has not been processed completely */
     return DECODE_STATUS_GOOD;
-  
+
   /* The number of bytes we consume in this method call */
   size_t header_consumed = 0;
   ScanDataHeader next_header = {};
@@ -658,7 +658,7 @@ DecodeStatus BrotherEncoderFamily234Base::ProcessNextPacket(const SANE_Byte* &sr
      *    In this case, we want to return SANE_STATUS_GOOD to transmit the remaining data
      *    and return SANE_STATUS_EOF on the subsequent call of sane_read().
      *    Therefore, this header will not be consumed now.
-     * 
+     *
      * 3. There is no data in the decode and we have not produced output.
      *    In this case, we do want to consume the header and return ret_status.
      *
@@ -993,13 +993,13 @@ DecodeStatus BrotherEncoderFamily4::DecodeScanDataHeader (const SANE_Byte *src_d
 
   if (header.block_type == BROTHER_DATA_BLOCK_END_OF_FRAME_NO_MORE)
     {
-      /* Family4 devices never return END_OF_FRAME_MORE. Therefore, 
+      /* Family4 devices never return END_OF_FRAME_MORE. Therefore,
        * the "end of frame" is unspecific and could be either of
        * ENDOFFRAME_NO_MORE or ENDOFFRAME_WITH_MORE. To distinguish the cases
        * we peek ahead to the first byte of the next packet. If it is a
        * SCAN_FINISHED, we won't get any additional frames. In any other case
        * it marks the beginning of a new frame.
-       * 
+       *
        * Therefore, even though the packet is 10 bytes long, we return
        * TRUNCATED if we don't have the first byte of the next packet yet.
        */

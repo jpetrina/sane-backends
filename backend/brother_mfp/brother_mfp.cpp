@@ -1167,7 +1167,7 @@ sane_open (SANE_String_Const devicename, SANE_Handle * handle)
         {
           return open_device(devices.begin()->second, handle);
         }
-      else 
+      else
         {
           FDBGNP (DBG_DETAIL, "no device available");
           return SANE_STATUS_INVAL;

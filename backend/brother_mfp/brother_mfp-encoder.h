@@ -200,8 +200,8 @@ struct ScanDataHeader
     image_number(0)
   {
   }
-  /* 
-   * A code defined by Brother, identifying the type of packet. 
+  /*
+   * A code defined by Brother, identifying the type of packet.
    * We set it to zero when we have processed all data in this packet.
    */
   SANE_Byte block_type;
@@ -234,7 +234,7 @@ public:
 
   SANE_Status DecodeStatusToSaneStatus(DecodeStatus dec_ret)
   {
-    static SANE_Status status_lookup[] =
+    static const SANE_Status status_lookup[] =
         {
             SANE_STATUS_GOOD,
             SANE_STATUS_GOOD,
