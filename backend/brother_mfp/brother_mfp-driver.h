@@ -76,6 +76,10 @@ public:
 
   virtual ~BrotherDriver();
 
+  // TODO: I don't like the fact that multiple are being passed around.
+  // Maybe use a shared smart pointer?
+  SANE_Parameters params;
+
   /*
    *  Will include the INIT sequence.
    *
@@ -180,6 +184,13 @@ private:
   SANE_Status PollForReadFlush (useconds_t max_time);
   SANE_Status PollForRead (SANE_Byte *buffer, size_t *buf_len,
                            useconds_t *max_time);
+
+  SANE_Status PollDataFromScanner();
+
+  DecodeStatus DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length);
+
+  void RepeatPreviousScanline(SANE_Byte *data, size_t max_length, size_t *length);
+
   bool is_open;
   bool in_session;
   bool is_scanning;
@@ -192,7 +203,11 @@ private:
   SANE_Byte *data_buffer;
   size_t data_buffer_bytes;
 
+  size_t bytes_written_this_page;
+  SANE_Byte *previous_scanline;
+
   bool out_of_docs;
+  bool pad_or_crop_in_progress;
 
 };
 

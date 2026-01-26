@@ -35,6 +35,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <unordered_map>
+#include <memory>
 
 #include "brother_mfp-common.h"
 
@@ -136,6 +138,23 @@ typedef struct Brother_Model
 
 static Brother_Model models[] =
   {
+    { "Brother", "DCP-L2500D", BROTHER_FAMILY_4, 0x04f9, 0x0321,
+      { 0, SANE_FIX(211.5), 0 }, // TODO needs verification
+      { 0, SANE_FIX(297), 0 }, // TODO needs verification
+      { 5, 100, 150, 200, 300, 600 }, // TODO needs verification
+      { 7, 100, 150, 200, 300, 600, 1200, 2400 }, // TODO needs verification
+      CAP_MODE_COLOUR |
+      CAP_MODE_GRAY |
+      CAP_MODE_GRAY_DITHER |
+      CAP_MODE_BW |
+      CAP_SOURCE_HAS_FLATBED |
+      CAP_BUTTON_HAS_SCAN_EMAIL |
+      CAP_BUTTON_HAS_SCAN_FILE |
+      CAP_BUTTON_HAS_SCAN_OCR |
+      CAP_BUTTON_HAS_SCAN_IMAGE |
+      CAP_ENCODING_HAS_RAW |
+      CAP_ENCODING_RAW_IS_CrYCb |
+      CAP_ENCODING_HAS_JPEG },
     { "Brother", "MFC-465CN", BROTHER_FAMILY_2, 0x04f9, 0x01d7,
       { 0, SANE_FIX(210), 0 },
       { 0, SANE_FIX(295), 0 },
@@ -292,13 +311,13 @@ static Brother_Model models[] =
       CAP_ENCODING_HAS_JPEG },
 
 
-    {NULL, NULL, BROTHER_FAMILY_NONE, 0, 0, {0, 0, 0}, {0, 0, 0}, {0}, {0}, 0}
+    {nullptr, nullptr, BROTHER_FAMILY_NONE, 0, 0, {0, 0, 0}, {0, 0, 0}, {0}, {0}, 0}
 };
 
 struct BrotherDevice
 {
   BrotherDevice () :
-      next (nullptr),
+      seen_in_probe (true),
       model (nullptr),
       sane_device {nullptr, nullptr, nullptr, nullptr},
       name (nullptr),
@@ -313,7 +332,14 @@ struct BrotherDevice
   {
         (void)memset(opt, 0, sizeof(opt));
   }
-  struct BrotherDevice *next;
+  ~BrotherDevice ()
+  {
+    if (name)
+      free(name);
+    if (driver)
+      delete driver;
+  }
+  bool seen_in_probe;
 
   const Brother_Model *model;
   SANE_Device sane_device;
@@ -335,9 +361,8 @@ struct BrotherDevice
   BrotherSensor current_sensor_states;
 };
 
-static BrotherDevice *first_dev = NULL;
-static int num_devices = 0;
-static SANE_Device **devlist = NULL;
+static std::unordered_map<std::string, std::unique_ptr<BrotherDevice>> devices;
+static const SANE_Device **devlist = nullptr;
 
 static const SANE_Range constraint_brightness_contrast = { -50, +50, 1 };
 
@@ -349,19 +374,18 @@ enum BrotherDeviceCommsType
 };
 
 static SANE_Status
-attach_with_ret (const char *devicename, BrotherDevice **dev)
+attach (const char *devicename)
 {
-  BrotherDevice *device;
   SANE_Status status;
 
-  DBG (DBG_EVENT, "attach_one: %s\n", devicename);
+  FDBG (DBG_EVENT, "%s", devicename);
 
   SANE_Word vendor;
   SANE_Word product;
   status = sanei_usb_get_vendor_product_byname (devicename, &vendor, &product);
   if (status != SANE_STATUS_GOOD)
     {
-      DBG (DBG_SERIOUS, "ERROR: attach_one: failed to get USB vendor/product for device %s\n", devicename);
+      FDBG (DBG_SERIOUS, "ERROR: failed to get USB vendor/product for device %s", devicename);
       return status;
     }
 
@@ -371,7 +395,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
    * then we wouldn't have to do this as we already know what the model is. d'uh.
    *
    */
-  const Brother_Model *model = NULL;
+  const Brother_Model *model = nullptr;
   for (model = models; model->model; model++)
     {
       if ((model->usb_vendor == vendor) && (model->usb_product == product))
@@ -382,7 +406,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
 
   if (NULL == model)
     {
-      DBG (DBG_SERIOUS, "ERROR: attach_one: failed to determine model from usb params: %s\n", devicename);
+      FDBG (DBG_SERIOUS, "ERROR: failed to determine model from usb params: %s", devicename);
       return status;
     }
 
@@ -390,30 +414,25 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
    * See if we already know about the device.
    *
    */
-  for (device = first_dev; device; device = device->next)
-    {
-      if (strcmp (device->sane_device.name, devicename) == 0)
-        {
-          if (dev)
-            {
-              *dev = device;
-            }
-          return SANE_STATUS_GOOD;
-        }
-    }
+  auto it = devices.find(devicename);
+  if (it != devices.end())
+  {
+    it->second->seen_in_probe = true;
+    return SANE_STATUS_GOOD;
+  }
 
   /*
    * Create a new entry for this device.
    *
    */
-  device = new BrotherDevice;
+  std::unique_ptr<BrotherDevice> device (new BrotherDevice());
   if (!device)
     {
-      DBG (DBG_SERIOUS, "attach_with_ret: failed to allocate device entry %zu\n", sizeof(*device));
+      FDBG (DBG_SERIOUS, "failed to allocate device entry %zu", sizeof(*device));
       return SANE_STATUS_NO_MEM;
     }
 
-  DBG (DBG_EVENT, "attach_scanner: opening %s\n", devicename);
+  FDBG (DBG_EVENT, "opening %s", devicename);
 
   device->name = strdup (devicename);
   device->sane_device.name = device->name;
@@ -429,7 +448,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
   device->driver = new BrotherUSBDriver(devicename, model->family, model->capabilities);
   if (nullptr == device->driver)
     {
-      DBG (DBG_SERIOUS, "attach_with_ret: failed to create Brother driver: %s\n", devicename);
+      FDBG (DBG_SERIOUS, "failed to create Brother driver: %s", devicename);
       return SANE_STATUS_NO_MEM;
     }
 
@@ -475,14 +494,8 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
       device->sources[num_sources++] = SANE_VALUE_SOURCE_ADF_DUPLEX;
     }
 
-  ++num_devices;
-  device->next = first_dev;
-  first_dev = device;
+  devices[devicename] = std::move(device);
 
-  if (dev)
-    {
-      *dev = device;
-    }
 
   return SANE_STATUS_GOOD;
 }
@@ -495,7 +508,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
 //  BrotherDevice *device;
 //  SANE_Status status;
 //
-//  DBG (DBG_EVENT, "attach_with_ret_network: %s\n", devicename);
+//  FDBG (DBG_EVENT, "%s", devicename);
 //
 //  /*
 //   * See if we already know about the device.
@@ -520,7 +533,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
 //  device = new BrotherDevice;
 //  if (!device)
 //    {
-//      DBG (DBG_SERIOUS, "attach_with_ret_network: failed to allocate device entry %zu\n", sizeof(*device));
+//      FDBG (DBG_SERIOUS, "failed to allocate device entry %zu", sizeof(*device));
 //      return SANE_STATUS_NO_MEM;
 //    }
 //
@@ -538,7 +551,7 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
 //  device->driver = new BrotherNetworkDriver(devicename, model->family, model->capabilities);
 //  if (nullptr == device->driver)
 //    {
-//      DBG (DBG_SERIOUS, "attach_with_ret_network: failed to create Brother driver: %s\n", devicename);
+//      FDBG (DBG_SERIOUS, "failed to create Brother driver: %s", devicename);
 //      return SANE_STATUS_NO_MEM;
 //    }
 //
@@ -597,10 +610,69 @@ attach_with_ret (const char *devicename, BrotherDevice **dev)
 //}
 //
 
-static SANE_Status
-attach_with_no_ret (const char *devicename)
+SANE_Status probe_devices ()
 {
-  return attach_with_ret(devicename, NULL);
+  /*
+   * Probe for supported USB devices.
+   * This is achieved by iterating the list of supported devices.
+   */
+  FDBGNP(DBG_DETAIL, "");
+  /*
+   * Mark all known devices as "not seen".
+   * Then we later delete all the ones we haven't seen on this scan.
+   */
+  for (auto &dev: devices)
+    {
+      if (dev.second)
+        dev.second->seen_in_probe = false;
+    }
+
+  /* Update sane's USB device cache (in case a device was unplugged / replugged) */
+  sanei_usb_scan_devices();
+
+  SANE_Status status;
+  for (Brother_Model *model = models; model->model; model++)
+    {
+      FDBG (DBG_EVENT, "Checking for device: %s", model->model);
+
+      status = sanei_usb_find_devices (model->usb_vendor, model->usb_product, attach);
+      if (status != SANE_STATUS_GOOD)
+        break;
+    }
+
+  if (status != SANE_STATUS_GOOD)
+  {
+    FDBG (DBG_SERIOUS, "Error scanning USB devices: %s", sane_strstatus(status));
+  }
+
+  for (auto it = devices.cbegin(); it != devices.cend(); )
+    {
+      if (it->second && !it->second->seen_in_probe)
+        {
+          FDBG(DBG_EVENT, "Device '%s' cannot be found and will be removed.", it->second->name);
+          status = it->second->driver->Disconnect();
+          if (status != SANE_STATUS_GOOD)
+            {
+              FDBG(DBG_IMPORTANT, "Failed to close USB device: %s", sane_strstatus(status));
+              status = SANE_STATUS_GOOD;
+            }
+          it = devices.erase(it);
+        }
+      else
+        {
+          it++;
+        }
+    }
+  /*
+   * Probe for network devices.
+   * TODO: In the future we want to return SANE_STATUS_GOOD if either USB or network succeeds.
+   * If one of them fails, we may still use the other one.
+   */
+#if 0
+  BrotherDevice *device;
+  attach_with_ret_network ("NetworkDevice", &models[0], &device);
+#endif
+  return status;
 }
 
 static size_t
@@ -620,11 +692,11 @@ max_string_size (const SANE_String_Const strings[])
 
 
 static SANE_Status
-init_options (BrotherDevice *device)
+init_options (std::unique_ptr<BrotherDevice> &device)
 {
   SANE_Option_Descriptor *od;
 
-  DBG (2, "init_options: device=%s\n", device->name);
+  FDBG (2, "device=%s", device->name);
 
   /* opt_num_opts */
   od = &device->opt[OPT_NUM_OPTS];
@@ -668,7 +740,7 @@ init_options (BrotherDevice *device)
       device->val[OPT_SOURCE].s = new char[1];
       if (NULL == device->val[OPT_SOURCE].s)
         {
-          DBG (DBG_SERIOUS, "init_options: failed to allocate source storage %zu\n", (size_t) od->size);
+          FDBG (DBG_SERIOUS, "failed to allocate source storage %zu", (size_t) od->size);
           return SANE_STATUS_NO_MEM;
         }
       (void) strcpy (device->val[OPT_SOURCE].s, "");
@@ -679,7 +751,7 @@ init_options (BrotherDevice *device)
       device->val[OPT_SOURCE].s = new char[od->size];
       if (NULL == device->val[OPT_SOURCE].s)
         {
-          DBG (DBG_SERIOUS, "init_options: failed to allocate source storage %zu\n", (size_t) od->size);
+          FDBG (DBG_SERIOUS, "failed to allocate source storage %zu", (size_t) od->size);
           return SANE_STATUS_NO_MEM;
         }
       (void) strcpy (device->val[OPT_SOURCE].s, device->sources[0]);
@@ -699,7 +771,7 @@ init_options (BrotherDevice *device)
   device->val[OPT_MODE].s = new char[od->size];
   if (NULL == device->val[OPT_MODE].s)
     {
-      DBG (DBG_SERIOUS, "init_options: failed to allocate mode storage %zu\n", (size_t)od->size);
+      FDBG (DBG_SERIOUS, "failed to allocate mode storage %zu", (size_t)od->size);
       return SANE_STATUS_NO_MEM;
     }
   (void)strcpy(device->val[OPT_MODE].s, device->modes[0]);
@@ -960,7 +1032,7 @@ init_options (BrotherDevice *device)
     od->cap = SANE_CAP_INACTIVE;
   device->val[OPT_SENSOR_OCR].b = SANE_FALSE;
 
-  DBG (2, "end init_options: dev=%s\n", device->name);
+  FDBG (DBG_SERIOUS, "dev=%s", device->name);
 
   return SANE_STATUS_GOOD;
 }
@@ -971,11 +1043,11 @@ SANE_Status sane_init (SANE_Int * version_code, SANE_Auth_Callback authorize)
 {
   DBG_INIT();
 
-  DBG (DBG_EVENT, "sane_init\n");
+  FDBGNP (DBG_EVENT, "");
 
-  DBG (DBG_IMPORTANT, "sane_init: version_code %s 0, authorize %s 0\n",
+  FDBG (DBG_IMPORTANT, "version_code %s 0, authorize %s 0",
        version_code == 0 ? "=" : "!=", authorize == 0 ? "=" : "!=");
-  DBG (DBG_IMPORTANT, "sane_init: SANE Brother MFP backend version %d.%d.%d from %s\n",
+  FDBG (DBG_IMPORTANT, "SANE Brother MFP backend version %d.%d.%d from %s",
        SANE_CURRENT_MAJOR, SANE_CURRENT_MINOR, BUILD, PACKAGE_STRING);
 
   if (version_code)
@@ -984,54 +1056,22 @@ SANE_Status sane_init (SANE_Int * version_code, SANE_Auth_Callback authorize)
     }
   sanei_usb_init ();
 
-  /*
-   * Probe for supported USB devices.
-   * This is achieved by iterating the list of supported devices.
-   *
-   * TODO; We probably should not be doing this here.
-   * Let's wait until someone asks for a device list before doing the probe.
-   *
-   */
-  for (Brother_Model *model = models; model->model; model++)
-    {
-      DBG (DBG_EVENT, "sane_init: Checking for device: %s\n", model->model);
-
-      sanei_usb_find_devices (model->usb_vendor, model->usb_product, attach_with_no_ret);
-    }
-
-  /*
-   * Probe for network devices.
-   *
-   */
-#if 0
-  BrotherDevice *device;
-  attach_with_ret_network ("NetworkDevice", &models[0], &device);
-#endif
-
-
-
-
-
   return SANE_STATUS_GOOD;
 }
 
 void
 sane_exit (void)
 {
-  BrotherDevice *dev, *next;
+  FDBGNP (DBG_EVENT, "");
 
-  DBG (DBG_EVENT, "sane_exit\n");
-
-  for (dev = first_dev; dev; dev = next)
-    {
-      next = dev->next;
-      free (dev->name);
-      delete dev->driver;
-      free (dev);
-    }
+  /* This calls destructors on all objects automatically */
+  devices.clear();
 
   if (devlist)
     free (devlist);
+
+  /* Reset static variables to prevent a segfault on a subsequent sane_init() */
+  devlist = nullptr;
 
   sanei_usb_exit();
 
@@ -1041,26 +1081,27 @@ sane_exit (void)
 SANE_Status
 sane_get_devices (const SANE_Device *** device_list, SANE_Bool local_only)
 {
-  BrotherDevice *dev;
-  int i;
-
-  DBG (DBG_EVENT, "sane_get_devices(local_only = %s)\n", local_only? "Yes": "No");
+  FDBG (DBG_EVENT, "local_only = %s", local_only? "Yes": "No");
 
   if (devlist)
     free (devlist);
 
-  devlist = (SANE_Device **)malloc ((num_devices + 1) * sizeof (devlist[0]));
+  SANE_Status ret = probe_devices ();
+  if (ret != SANE_STATUS_GOOD)
+    return ret;
+
+  size_t device_list_size = (devices.size() + 1) * sizeof (devlist[0]);
+  devlist = (const SANE_Device **)malloc (device_list_size);
   if (!devlist)
     {
-      DBG (DBG_SERIOUS,
-           "sane_get_devices: failed to allocate devices list: %zu.\n",
-           (num_devices + 1) * sizeof(devlist[0]));
+      FDBG (DBG_SERIOUS,
+           "failed to allocate devices list: %zu.",
+           device_list_size);
       return SANE_STATUS_NO_MEM;
     }
-  i = 0;
-
-  for (dev = first_dev; i < num_devices; dev = dev->next)
-    devlist[i++] = &dev->sane_device;
+  int i = 0;
+  for (const auto &dev: devices)
+    devlist[i++] = &dev.second->sane_device;
 
   devlist[i++] = 0;
 
@@ -1069,74 +1110,69 @@ sane_get_devices (const SANE_Device *** device_list, SANE_Bool local_only)
   return SANE_STATUS_GOOD;
 }
 
-SANE_Status
-sane_open (SANE_String_Const devicename, SANE_Handle * handle)
+SANE_Status open_device (std::unique_ptr<BrotherDevice> &dev, SANE_Handle * handle)
 {
-  BrotherDevice *dev;
-  SANE_Status status = SANE_STATUS_GOOD;
-
-  DBG (DBG_EVENT, "sane_open: %s\n", devicename);
-
-  /*
-   * Select the device.
-   *
-   */
-  if (devicename[0]) /* search for devicename */
-    {
-      DBG (DBG_EVENT, "sane_open: devicename=%s\n", devicename);
-
-      for (dev = first_dev; dev; dev = dev->next)
-        {
-          if (strcmp (dev->sane_device.name, devicename) == 0)
-            {
-              break;
-            }
-        }
-
-      if (!dev)
-        {
-          status = attach_with_ret(devicename, &dev);
-
-          if (status != SANE_STATUS_GOOD)
-            {
-              DBG (DBG_SERIOUS, "sane_open: failed to attach device: %s\n", devicename);
-              return status;
-            }
-        }
-    }
-  else
-    {
-      DBG (DBG_DETAIL, "sane_open: no devicename, opening first device\n");
-      dev = first_dev;
-    }
-
-  if (!dev)
-    {
-      DBG (DBG_WARN, "sane_open: unknown device: %s\n", devicename);
-      return SANE_STATUS_INVAL;
-    }
-
-  /*
-   * Open device internally.
-   *
-   */
-  status = dev->driver->Connect();
+  SANE_Status status = dev->driver->Connect();
 
   if (status != SANE_STATUS_GOOD)
     {
-      DBG (DBG_SERIOUS, "sane_open: failed to open device: %s\n", devicename);
+      FDBG (DBG_SERIOUS, "failed to open device: %s", dev->name);
       return status;
     }
 
   status = init_options (dev);
   if (status != SANE_STATUS_GOOD)
     {
-      DBG (DBG_SERIOUS, "sane_open: failed to initialize device: %s\n", devicename);
+      FDBG (DBG_SERIOUS, "failed to initialize device: %s", dev->name);
     }
 
-  *handle = dev;
-
+  *handle = dev.get();
   return status;
+}
+
+SANE_Status
+sane_open (SANE_String_Const devicename, SANE_Handle * handle)
+{
+  std::unique_ptr<BrotherDevice> dev;
+  SANE_Status status = SANE_STATUS_GOOD;
+
+  FDBG (DBG_EVENT, "%s", devicename);
+
+  /*
+   * Select the device.
+   *
+   */
+  if (devicename[0])
+    {
+      FDBG (DBG_EVENT, "devicename=%s", devicename);
+
+      auto it = devices.find(devicename);
+      if (it != devices.end())
+      {
+        return open_device(it->second, handle);
+      } else {
+        status = attach(devicename);
+        if (status != SANE_STATUS_GOOD)
+          {
+            FDBG (DBG_SERIOUS, "failed to attach device: %s", devicename);
+            return status;
+          }
+        return open_device(devices.at(devicename), handle);
+      }
+    }
+  else
+    {
+      FDBGNP (DBG_DETAIL, "no devicename, opening first device");
+      if (!devices.empty())
+        {
+          return open_device(devices.begin()->second, handle);
+        }
+      else 
+        {
+          FDBGNP (DBG_DETAIL, "no device available");
+          return SANE_STATUS_INVAL;
+        }
+    }
 }
 
 void
@@ -1145,7 +1181,7 @@ sane_close (SANE_Handle handle)
   BrotherDevice *device;
   SANE_Status status;
 
-  DBG (DBG_EVENT, "sane_close\n");
+  FDBGNP (DBG_EVENT, "");
 
   device = static_cast<BrotherDevice *>(handle);
 
@@ -1153,19 +1189,19 @@ sane_close (SANE_Handle handle)
    * Check is a valid device handle by running through our list of devices.
    *
    */
-  BrotherDevice *check_dev;
-
-  for (check_dev = first_dev; check_dev; check_dev = check_dev->next)
+  bool found = false;
+  for (const auto &dev: devices)
+  {
+    if (dev.second.get() == device)
     {
-      if (device == check_dev)
-        {
-          break;
-        }
+      found = true;
+      break;
     }
+  }
 
-  if (NULL == check_dev)
+  if (!found)
     {
-      DBG (DBG_SERIOUS, "sane_close: invalid handle specified.\n");
+      FDBGNP (DBG_SERIOUS, "invalid handle specified.");
       return;
     }
 
@@ -1177,7 +1213,7 @@ sane_close (SANE_Handle handle)
 
   if (status != SANE_STATUS_GOOD)
     {
-      DBG (DBG_SERIOUS, "sane_close: failed to close device: %s.\n", device->name);
+      FDBG (DBG_SERIOUS, "failed to close device: %s.", device->name);
       return;
     }
 
@@ -1189,10 +1225,10 @@ sane_get_option_descriptor (SANE_Handle handle, SANE_Int option)
 {
   BrotherDevice *device = static_cast<BrotherDevice *>(handle);
 
-  DBG (DBG_EVENT, "sane_get_option_descriptor: device=%s, option = %d\n", device->name, option);
+  FDBG (DBG_EVENT, "device=%s, option = %d", device->name, option);
   if (option < 0 || option >= NUM_OPTIONS)
     {
-      DBG (DBG_WARN, "sane_get_option_descriptor: option < 0 || option > num_options\n");
+      FDBGNP (DBG_WARN, "option < 0 || option > num_options");
       return 0;
     }
 
@@ -1205,29 +1241,29 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
 {
   BrotherDevice *device = static_cast<BrotherDevice *>(handle);
 
-  DBG (DBG_EVENT, "sane_control_option\n");
+  FDBGNP (DBG_EVENT, "");
 
   SANE_Int myinfo = 0;
   SANE_Status status;
 
-  DBG (DBG_EVENT, "sane_control_option: handle=%s, opt=%d, act=%d, val=%p, info=%p\n",
+  FDBG (DBG_EVENT, "handle=%s, opt=%d, act=%d, val=%p, info=%p",
        device->name, option, action, (void *) value, (void *) info);
 
   if (option < 0 || option >= NUM_OPTIONS)
     {
-      DBG (DBG_SERIOUS, "sane_control_option: option < 0 || option > num_options\n");
+      FDBGNP (DBG_SERIOUS, "option < 0 || option > num_options");
       return SANE_STATUS_INVAL;
     }
 
   if (!SANE_OPTION_IS_ACTIVE (device->opt[option].cap))
     {
-      DBG (DBG_WARN, "sane_control_option: option is inactive\n");
+      FDBGNP (DBG_WARN, "option is inactive");
       return SANE_STATUS_INVAL;
     }
 
   if (device->opt[option].type == SANE_TYPE_GROUP)
     {
-      DBG (DBG_WARN, "sane_control_option: option is a group\n");
+      FDBGNP (DBG_WARN, "option is a group");
       return SANE_STATUS_INVAL;
     }
 
@@ -1236,13 +1272,13 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
     case SANE_ACTION_SET_VALUE:
       if (!SANE_OPTION_IS_SETTABLE (device->opt[option].cap))
 	{
-	  DBG (DBG_WARN, "sane_control_option: option is not setable\n");
+	  FDBGNP (DBG_WARN, "option is not setable");
 	  return SANE_STATUS_INVAL;
 	}
       status = sanei_constrain_value (&device->opt[option], value, &myinfo);
       if (status != SANE_STATUS_GOOD)
 	{
-	  DBG (DBG_WARN, "sane_control_option: sanei_constrain_value returned %s\n",
+	  FDBG (DBG_WARN, "sanei_constrain_value returned %s",
 	       sane_strstatus (status));
 	  return status;
 	}
@@ -1254,13 +1290,13 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
 	case OPT_BR_Y:
 	  if (device->val[option].w == *(SANE_Fixed *) value)
 	    {
-	      DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+	      FDBG (DBG_DETAIL, "option %d (%s) not changed",
 		   option, device->opt[option].name);
 	      break;
 	    }
 	  device->val[option].w = *(SANE_Fixed *) value;
 	  myinfo |= SANE_INFO_RELOAD_PARAMS;
-	  DBG (DBG_DETAIL, "sane_control_option: set option %d (%s) to %.0f %s\n",
+	  FDBG (DBG_DETAIL, "set option %d (%s) to %.0f %s",
 	       option, device->opt[option].name,
 	       SANE_UNFIX (*(SANE_Fixed *) value),
 	       device->opt[option].unit == SANE_UNIT_MM ? "mm" : "dpi");
@@ -1271,14 +1307,14 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_Y_RESOLUTION:
           if (device->val[option].w == *(SANE_Int *) value)
             {
-              DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+              FDBG (DBG_DETAIL, "option %d (%s) not changed",
                    option, device->opt[option].name);
               break;
             }
           device->val[option].w = *(SANE_Int *) value;
           myinfo |= SANE_INFO_RELOAD_PARAMS;
           myinfo |= SANE_INFO_RELOAD_OPTIONS;
-          DBG (4, "sane_control_option: set option %d (%s) to %d\n",
+          FDBG (4, "set option %d (%s) to %d",
                option, device->opt[option].name, *(SANE_Int *) value);
           break;
 
@@ -1286,12 +1322,12 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_BRIGHTNESS:
           if (device->val[option].w == *(SANE_Word *) value)
             {
-              DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+              FDBG (DBG_DETAIL, "option %d (%s) not changed",
                    option, device->opt[option].name);
               break;
             }
           device->val[option].w = *(SANE_Word *) value;
-          DBG (DBG_DETAIL, "sane_control_option: set option %d (%s) to %d\n",
+          FDBG (DBG_DETAIL, "set option %d (%s) to %d",
                option, device->opt[option].name, *(SANE_Word *) value);
 
           status = SANE_STATUS_GOOD;
@@ -1300,12 +1336,12 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_COMPRESSION:
           if (device->val[option].b == *(SANE_Bool *) value)
             {
-              DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+              FDBG (DBG_DETAIL, "option %d (%s) not changed",
                    option, device->opt[option].name);
               break;
             }
           device->val[option].b = *(SANE_Bool *) value;
-          DBG (DBG_DETAIL, "sane_control_option: set option %d (%s) to %s\n",
+          FDBG (DBG_DETAIL, "set option %d (%s) to %s",
                option, device->opt[option].name, *(SANE_Bool *) value? "TRUE": "FALSE");
 
           status = SANE_STATUS_GOOD;
@@ -1314,7 +1350,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_SPLIT_RESOLUTION:
           if (device->val[option].b == *(SANE_Bool *) value)
             {
-              DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+              FDBG (DBG_DETAIL, "option %d (%s) not changed",
                    option, device->opt[option].name);
               break;
             }
@@ -1335,7 +1371,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
               device->opt[OPT_Y_RESOLUTION].cap |= SANE_CAP_INACTIVE;
             }
 
-          DBG (DBG_DETAIL, "sane_control_option: set option %d (%s) to %s\n",
+          FDBG (DBG_DETAIL, "set option %d (%s) to %s",
                option, device->opt[option].name, *(SANE_Bool *) value? "TRUE": "FALSE");
 
           status = SANE_STATUS_GOOD;
@@ -1344,12 +1380,12 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_PREVIEW:
           if (device->val[option].b == *(SANE_Bool *) value)
             {
-              DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+              FDBG (DBG_DETAIL, "option %d (%s) not changed",
                    option, device->opt[option].name);
               break;
             }
           device->val[option].b = *(SANE_Bool *) value;
-          DBG (DBG_DETAIL, "sane_control_option: set option %d (%s) to %s\n",
+          FDBG (DBG_DETAIL, "set option %d (%s) to %s",
                option, device->opt[option].name, *(SANE_Bool *) value? "TRUE": "FALSE");
 
           status = SANE_STATUS_GOOD;
@@ -1358,7 +1394,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_MODE:
           if (strcmp (device->val[option].s, (SANE_String)value) == 0)
             {
-              DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+              FDBG (DBG_DETAIL, "option %d (%s) not changed",
                    option, device->opt[option].name);
               break;
             }
@@ -1366,7 +1402,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
 
           myinfo |= SANE_INFO_RELOAD_PARAMS;
           myinfo |= SANE_INFO_RELOAD_OPTIONS;
-          DBG (DBG_DETAIL, "sane_control_option: set option %d (%s) to %s\n",
+          FDBG (DBG_DETAIL, "set option %d (%s) to %s",
                option, device->opt[option].name, (SANE_String) value);
 
           /*
@@ -1392,7 +1428,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_SOURCE:
           if (strcmp (device->val[option].s, (SANE_String)value) == 0)
             {
-              DBG (DBG_DETAIL, "sane_control_option: option %d (%s) not changed\n",
+              FDBG (DBG_DETAIL, "option %d (%s) not changed",
                    option, device->opt[option].name);
               break;
             }
@@ -1400,12 +1436,12 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
 
           myinfo |= SANE_INFO_RELOAD_PARAMS;
           myinfo |= SANE_INFO_RELOAD_OPTIONS;
-          DBG (DBG_DETAIL, "sane_control_option: set option %d (%s) to %s\n",
+          FDBG (DBG_DETAIL, "set option %d (%s) to %s",
                option, device->opt[option].name, (SANE_String) value);
           break;
 
 	default:
-	  DBG (DBG_SERIOUS, "sane_control_option: trying to set unexpected option\n");
+	  FDBGNP (DBG_SERIOUS, "trying to set unexpected option");
 	  return SANE_STATUS_INVAL;
 	}
       break;
@@ -1415,7 +1451,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
 	{
 	case OPT_NUM_OPTS:
 	  *(SANE_Word *) value = NUM_OPTIONS;
-	  DBG (DBG_DETAIL, "sane_control_option: get option 0, value = %d\n", NUM_OPTIONS);
+	  FDBG (DBG_DETAIL, "get option 0, value = %d", NUM_OPTIONS);
 	  break;
 	case OPT_TL_X:		/* Fixed options */
 	case OPT_TL_Y:
@@ -1423,8 +1459,8 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_BR_Y:
           {
             *(SANE_Fixed*) value = device->val[option].w;
-            DBG (4,
-                 "sane_control_option: get option %d (%s), value=%.1f %s\n",
+            FDBG (4,
+                 "get option %d (%s), value=%.1f %s",
                  option,
                  device->opt[option].name,
                  SANE_UNFIX(*(SANE_Fixed* ) value),
@@ -1435,7 +1471,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_MODE:          /* String (list) options */
         case OPT_SOURCE:
           strcpy ((SANE_String)value, device->val[option].s);
-          DBG (DBG_DETAIL, "sane_control_option: get option %d (%s), value=`%s'\n",
+          FDBG (DBG_DETAIL, "get option %d (%s), value=`%s'",
                option, device->opt[option].name, (SANE_String) value);
           break;
 
@@ -1445,25 +1481,25 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
         case OPT_BRIGHTNESS:
         case OPT_CONTRAST:
           *(SANE_Int *) value = device->val[option].w;
-          DBG (DBG_DETAIL, "sane_control_option: get option %d (%s), value=%d\n",
+          FDBG (DBG_DETAIL, "get option %d (%s), value=%d",
                option, device->opt[option].name, *(SANE_Int *) value);
           break;
 
         case OPT_COMPRESSION:
           *(SANE_Bool *) value = device->val[option].b;
-          DBG (DBG_DETAIL, "sane_control_option: get option %d (%s), value=%s\n",
+          FDBG (DBG_DETAIL, "get option %d (%s), value=%s",
                option, device->opt[option].name, *(SANE_Bool *) value? "TRUE": "FALSE");
           break;
 
         case OPT_SPLIT_RESOLUTION:
           *(SANE_Bool *) value = device->val[option].b;
-          DBG (DBG_DETAIL, "sane_control_option: get option %d (%s), value=%s\n",
+          FDBG (DBG_DETAIL, "get option %d (%s), value=%s",
                option, device->opt[option].name, *(SANE_Bool *) value? "TRUE": "FALSE");
           break;
 
         case OPT_PREVIEW:
           *(SANE_Bool *) value = device->val[option].b;
-          DBG (DBG_DETAIL, "sane_control_option: get option %d (%s), value=%s\n",
+          FDBG (DBG_DETAIL, "get option %d (%s), value=%s",
                option, device->opt[option].name, *(SANE_Bool *) value? "TRUE": "FALSE");
           break;
 
@@ -1486,21 +1522,25 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
               case OPT_SENSOR_EMAIL:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_EMAIL) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_EMAIL;
                 break;
 
               case OPT_SENSOR_OCR:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_OCR) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_OCR;
                 break;
 
               case OPT_SENSOR_FILE:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_FILE) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_FILE;
                 break;
 
               case OPT_SENSOR_IMAGE:
                 *(SANE_Bool*) value =
                     (device->current_sensor_states & BROTHER_SENSOR_IMAGE) ? SANE_TRUE : SANE_FALSE;
+                device->current_sensor_states &= ~BROTHER_SENSOR_IMAGE;
                 break;
 
               default:
@@ -1508,17 +1548,17 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
             }
           }
 
-          DBG (DBG_DETAIL, "sane_control_option: get option %d (%s), value=%s\n",
+          FDBG (DBG_DETAIL, "get option %d (%s), value=%s",
                option, device->opt[option].name, *(SANE_Bool *) value? "TRUE": "FALSE");
           break;
 
         default:
-	  DBG (DBG_SERIOUS, "sane_control_option: trying to get unexpected option\n");
+	  FDBGNP (DBG_SERIOUS, "trying to get unexpected option");
 	  return SANE_STATUS_INVAL;
 	}
       break;
     default:
-      DBG (DBG_SERIOUS, "sane_control_option: trying unexpected action %d\n", action);
+      FDBG (DBG_SERIOUS, "trying unexpected action %d", action);
       return SANE_STATUS_INVAL;
     }
 
@@ -1534,7 +1574,7 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters * params)
   BrotherDevice *device = static_cast<BrotherDevice *>(handle);
   SANE_Status rc = SANE_STATUS_GOOD;
 
-  DBG (DBG_EVENT, "sane_get_parameters\n");
+  FDBGNP (DBG_EVENT, "");
 
   /*
    * Determine the resolutions to use.
@@ -1544,13 +1584,13 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters * params)
    */
   SANE_Int x_res = device->val[OPT_RESOLUTION].w;
   SANE_Int y_res = device->val[OPT_RESOLUTION].w;
-  DBG (DBG_EVENT, "sane_get_parameters: XXXX default of %u/%u\n", (unsigned int)x_res, (unsigned int)y_res);
+  FDBG (DBG_EVENT, "XXXX default of %u/%u", (unsigned int)x_res, (unsigned int)y_res);
 
   if (device->val[OPT_PREVIEW].b)
     {
       x_res = device->model->x_res_list[1];
       y_res = device->model->y_res_list[1];
-      DBG (DBG_EVENT, "sane_get_parameters: XXXX preview of %u/%u\n", (unsigned int)x_res, (unsigned int)y_res);
+      FDBG (DBG_EVENT, "XXXX preview of %u/%u", (unsigned int)x_res, (unsigned int)y_res);
     }
   else
     {
@@ -1558,11 +1598,11 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters * params)
         {
           x_res = device->val[OPT_X_RESOLUTION].w;
           y_res = device->val[OPT_Y_RESOLUTION].w;
-          DBG (DBG_EVENT, "sane_get_parameters: XXXX split of %u/%u\n", (unsigned int)x_res, (unsigned int)y_res);
+          FDBG (DBG_EVENT, "XXXX split of %u/%u", (unsigned int)x_res, (unsigned int)y_res);
         }
       else
         {
-          DBG (DBG_EVENT, "sane_get_parameters: XXXX no change of %u/%u\n", (unsigned int)x_res, (unsigned int)y_res);
+          FDBG (DBG_EVENT, "XXXX no change of %u/%u", (unsigned int)x_res, (unsigned int)y_res);
         }
     }
 
@@ -1623,8 +1663,8 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters * params)
   params->lines = pixel_y_height;
   params->last_frame = SANE_TRUE;
 
-  DBG (DBG_DETAIL,
-        "sane_get_parameters: Selected image dimensions: width=%zu height=%zu\n",
+  FDBG (DBG_DETAIL,
+        "Selected image dimensions: width=%zu height=%zu",
         (size_t)pixel_x_width, (size_t)pixel_y_height);
 
   rc = device->driver->SetScanDimensions (pixel_x_offset,
@@ -1727,10 +1767,11 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters * params)
    *
    */
   device->params = *params;
+  device->driver->params = *params;
 
-  DBG (DBG_IMPORTANT,
-       "sane_get_parameters: params: format:%d last_frame:%d bytes_per_line:%d "
-       "pixels_per_line: %d lines:%d depth:%d\n",
+  FDBG (DBG_IMPORTANT,
+       "params: format:%d last_frame:%d bytes_per_line:%d "
+       "pixels_per_line: %d lines:%d depth:%d",
        params->format,
        params->last_frame,
        params->bytes_per_line,
@@ -1748,7 +1789,7 @@ sane_start (SANE_Handle handle)
   BrotherDevice *device = static_cast<BrotherDevice *>(handle);
   SANE_Status res;
 
-  DBG (DBG_EVENT, "sane_start\n");
+  FDBGNP (DBG_EVENT, "");
 
   /*
    * We manually call sane_get_parameters because there are computations and driver
@@ -1760,7 +1801,7 @@ sane_start (SANE_Handle handle)
 
   if (res != SANE_STATUS_GOOD)
     {
-      DBG (DBG_SERIOUS, "sane_start: failed to generate parameters: %d\n", res);
+      FDBG (DBG_SERIOUS, "failed to generate parameters: %d", res);
       return res;
     }
 
@@ -1774,13 +1815,15 @@ sane_read (SANE_Handle handle, SANE_Byte * data,
 {
   BrotherDevice *device = static_cast<BrotherDevice *>(handle);
 
-  DBG (DBG_EVENT, "sane_read\n");
+  FDBGNP (DBG_EVENT, "");
 
   *length = 0;
 
   size_t scan_len = 0;
   SANE_Status res = device->driver->ReadScanData(data, (size_t)max_length, &scan_len);
   *length = (SANE_Int)scan_len;
+
+  FDBG(DBG_EVENT, "Data transferred: %d, return code %d", *length, res);
 
   return res;
 }
@@ -1791,13 +1834,13 @@ sane_cancel (SANE_Handle handle)
   SANE_Status res;
   BrotherDevice *device = static_cast<BrotherDevice *>(handle);
 
-  DBG (DBG_EVENT, "sane_cancel\n");
+  FDBGNP (DBG_EVENT, "");
 
   res = device->driver->CancelScan();
 
   if (res != SANE_STATUS_GOOD)
     {
-      DBG (DBG_EVENT, "sane_cancel: scan failed to cancel.\n");
+      FDBGNP (DBG_EVENT, "scan failed to cancel.");
     }
 }
 
@@ -1808,7 +1851,7 @@ sane_set_io_mode (SANE_Handle handle, SANE_Bool non_blocking)
   (void)handle;
   (void)non_blocking;
 
-  DBG (DBG_EVENT, "sane_set_io_mode\n");
+  FDBGNP (DBG_EVENT, "");
 
   return SANE_STATUS_UNSUPPORTED;
 }
@@ -1820,7 +1863,7 @@ sane_get_select_fd (SANE_Handle handle, SANE_Int * fd)
   (void) handle;
   (void) fd;
 
-  DBG (DBG_EVENT, "sane_get_select_fd\n");
+  FDBGNP (DBG_EVENT, "");
   return SANE_STATUS_UNSUPPORTED;
 }
 

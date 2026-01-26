@@ -121,7 +121,7 @@ SANE_Status BrotherNetworkDriver::Connect ()
 
   if (init_res != SANE_STATUS_GOOD)
     {
-      DBG (DBG_SERIOUS, "BrotherUSBDriver::Connect: failed to send init session: %d\n", init_res);
+      FDBG (DBG_SERIOUS, "failed to send init session: %d", init_res);
       Disconnect ();
     }
 
@@ -244,7 +244,7 @@ SANE_Status BrotherNetworkDriver::SNMPRegisterButtons ()
 
 SANE_Status BrotherNetworkDriver::Disconnect ()
 {
-  DBG (DBG_EVENT, "BrotherNetworkDriver::Disconnect: `%s'\n", devicename);
+  FDBG (DBG_EVENT, "`%s'", devicename);
 
   if (sockfd)
     {

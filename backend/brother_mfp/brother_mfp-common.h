@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include<string>
+
 #define BACKEND_NAME            brother_mfp
 #define BROTHER_MFP_CONFIG_FILE "brother_mfp.conf"
 
@@ -64,3 +66,15 @@
 #define DBG_EVENT       4
 #define DBG_DETAIL      5
 #define DBG_DEBUG       6
+
+
+/* based on https://stackoverflow.com/a/29856690 */
+/* a constexpr would be great, but std::string_view is a C++17 feature */
+const std::string computeMethodName(const std::string& function, const std::string& prettyFunction);
+
+#define __COMPACT_PRETTY_FUNCTION__ computeMethodName(__FUNCTION__,__PRETTY_FUNCTION__).c_str() //c_str() is optional
+
+/* Unfortunately, in C++11 there is no nice way to handle these cases in a single macro that I am aware of */
+#define FDBG(LEVEL, TEXT, ...) DBG(LEVEL, "%s: " TEXT "\n", __COMPACT_PRETTY_FUNCTION__, __VA_ARGS__)
+/* no parameter version */
+#define FDBGNP(LEVEL, TEXT) DBG(LEVEL, "%s: " TEXT "\n", __COMPACT_PRETTY_FUNCTION__)

@@ -383,10 +383,11 @@ EXTRA_DIST += bh.conf.in
 
 
 libbrother_mfp_la_SOURCES = \
+		brother_mfp/brother_mfp-common.cpp \
+		brother_mfp/brother_mfp-common.h \
         brother_mfp/brother_mfp-driver_usb.cpp \
         brother_mfp/brother_mfp-driver_network.cpp \
 		brother_mfp/brother_mfp-driver.h \
-		brother_mfp/brother_mfp-common.h \
 		brother_mfp/brother_mfp-encoder.cpp \
 		brother_mfp/brother_mfp-encoder.h \
 		brother_mfp/brother_mfp.cpp
