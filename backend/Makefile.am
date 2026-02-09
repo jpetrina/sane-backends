@@ -79,7 +79,7 @@ BACKEND_CONFS= abaton.conf agfafocus.conf apple.conf artec.conf \
                ma1509.conf magicolor.conf \
 	       matsushita.conf microtek2.conf microtek.conf mustek.conf \
 	       mustek_pp.conf mustek_usb.conf nec.conf net.conf \
-	       p5.conf \
+	       oki.conf p5.conf \
 	       pie.conf pieusb.conf pixma.conf plustek.conf plustek_pp.conf \
 	       qcam.conf ricoh.conf rts8891.conf s9036.conf sceptre.conf \
 	       sharp.conf sm3840.conf snapscan.conf sp15c.conf \
@@ -177,7 +177,7 @@ be_convenience_libs = libabaton.la libagfafocus.la \
     libmatsushita.la libmicrotek.la libmicrotek2.la \
     libmustek.la libmustek_pp.la libmustek_usb.la \
     libmustek_usb2.la libnec.la libnet.la \
-    libniash.la libp5.la \
+    libniash.la liboki.la libp5.la \
     libpie.la libpieusb.la libpint.la libpixma.la \
     libplustek.la libplustek_pp.la libpnm.la \
     libqcam.la libricoh.la libricoh2.la librts8891.la \
@@ -212,7 +212,7 @@ be_dlopen_libs = libsane-abaton.la libsane-agfafocus.la \
     libsane-matsushita.la libsane-microtek.la libsane-microtek2.la \
     libsane-mustek.la libsane-mustek_pp.la libsane-mustek_usb.la \
     libsane-mustek_usb2.la libsane-nec.la libsane-net.la \
-    libsane-niash.la libsane-p5.la \
+    libsane-niash.la libsane-oki.la libsane-p5.la \
     libsane-pie.la libsane-pieusb.la libsane-pint.la libsane-pixma.la \
     libsane-plustek.la libsane-plustek_pp.la libsane-pnm.la \
     libsane-qcam.la libsane-ricoh.la libsane-ricoh2.la libsane-rts8891.la \
@@ -1379,6 +1379,22 @@ libsane_niash_la_LIBADD = $(COMMON_LIBS) \
     $(MATH_LIB) $(USB_LIBS) $(RESMGR_LIBS)
 # TODO: Why are these distributed but not compiled?
 EXTRA_DIST += niash_core.c niash_core.h niash_xfer.c niash_xfer.h
+
+liboki_la_SOURCES = oki.c
+liboki_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=oki
+
+nodist_libsane_oki_la_SOURCES = oki-s.c
+libsane_oki_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=oki
+libsane_oki_la_LDFLAGS = $(DIST_SANELIBS_LDFLAGS)
+libsane_oki_la_LIBADD = $(COMMON_LIBS) \
+    liboki.la \
+    ../sanei/sanei_init_debug.lo \
+    ../sanei/sanei_constrain_value.lo \
+    ../sanei/sanei_config.lo \
+    ../sanei/sanei_usb.lo \
+    sane_strstatus.lo \
+    $(USB_LIBS)
+EXTRA_DIST += oki.conf.in
 
 libpie_la_SOURCES = pie.c pie-scsidef.h
 libpie_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=pie
