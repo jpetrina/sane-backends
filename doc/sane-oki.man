@@ -1,0 +1,63 @@
+.TH sane\-oki 5 "10 Feb 2026" "@PACKAGEVERSION@" "SANE Scanner Access Now Easy"
+.IX sane\-oki
+.SH NAME
+sane\-oki \- SANE backend for OKI MFP scanners
+.SH DESCRIPTION
+The
+.B sane\-oki
+library implements a SANE (Scanner Access Now Easy) backend that provides
+access to OKI multifunction printer (MFP) scanners.
+.PP
+The following scanner families are supported:
+.PP
+.RS
+MB series (MB441, MB451, MB461, MB471, MB472, MB491, MB492, MB562)
+.br
+MC series (MC332, MC342, MC351, MC352, MC361, MC362, MC561, MC562, MC563, MC573, MC851, MC852, MC853, MC860, MC861, MC862, MC863, MC873, MC883)
+.br
+ES series (ES3451, ES3452, ES3461, ES4161, ES4172LP, ES4191, ES4192, ES5162, ES5162LP, ES5461, ES5462, ES5463, ES5473, ES8451, ES8453, ES8460, ES8461, ES8462, ES8463, ES8473, ES8483)
+.br
+CX/MPS series (CX2633, CX2731, MPS2731mc, MPS4200mb, MPS4700mb)
+.RE
+.SH CONFIGURATION
+The contents of the
+.I oki.conf
+file is a list of USB device lines of the form:
+.PP
+.RS
+.B usb
+.I vendor_id product_id
+.RE
+.PP
+Empty lines and lines starting with a hash mark (#) are ignored.
+See
+.BR sane\-usb (5)
+for details.
+.SH FILES
+.TP
+.I @CONFIGDIR@/oki.conf
+The backend configuration file.
+.TP
+.I @LIBDIR@/libsane\-oki.a
+The static library implementing this backend.
+.TP
+.I @LIBDIR@/libsane\-oki.so
+The shared library implementing this backend (present on systems that
+support dynamic loading).
+.SH ENVIRONMENT
+.TP
+.B SANE_DEBUG_OKI
+If the library was compiled with debug support enabled, this
+environment variable controls the debug level for this backend. Higher
+debug levels increase the verbosity of the output.
+
+Example:
+.br
+SANE_DEBUG_OKI=4 scanimage \-L
+.SH "SEE ALSO"
+.BR sane (7),
+.BR sane\-usb (5),
+.BR sane\-find\-scanner (1),
+.BR scanimage (1)
+.SH AUTHOR
+SANE Developers

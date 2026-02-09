@@ -33,7 +33,7 @@ BACKEND_5MANS = sane-abaton.5 sane-agfafocus.5 sane-apple.5 sane-as6e.5 \
         sane-teco1.5 sane-teco2.5 sane-teco3.5 sane-test.5 sane-sp15c.5 \
 	sane-coolscan2.5 sane-hpsj5s.5 sane-gt68xx.5 sane-artec_eplus48u.5 \
 	sane-ma1509.5 sane-ibm.5 sane-hp5400.5 sane-plustek_pp.5 sane-u12.5 \
-	sane-niash.5 sane-sm3840.5 sane-genesys.5 sane-hp4200.5 \
+	sane-niash.5 sane-oki.5 sane-sm3840.5 sane-genesys.5 sane-hp4200.5 \
 	sane-mustek_usb2.5 sane-hp3500.5 sane-pixma.5 sane-stv680.5 \
 	sane-hp5590.5 sane-hpljm1005.5 sane-cardscan.5 sane-hp3900.5 \
 	sane-epjitsu.5 sane-hs2p.5 sane-canon_dr.5 sane-xerox_mfp.5 \
@@ -58,7 +58,7 @@ EXTRA_DIST += sane-abaton.man sane-agfafocus.man sane-apple.man sane-as6e.man \
 	sane-teco3.man sane-test.man sane-sp15c.man sane-coolscan2.man \
 	sane-hpsj5s.man sane-gt68xx.man sane-artec_eplus48u.man \
 	sane-ma1509.man sane-ibm.man sane-hp5400.man sane-plustek_pp.man \
-	sane-u12.man sane-niash.man sane-sm3840.man sane-genesys.man \
+	sane-u12.man sane-niash.man sane-oki.man sane-sm3840.man sane-genesys.man \
 	sane-hp4200.man sane-mustek_usb2.man sane-hp3500.man \
 	sane-pixma.man sane-stv680.man sane-hp5590.man sane-hpljm1005.man \
 	sane-cardscan.man sane-hp3900.man sane-epjitsu.man sane-hs2p.man \
@@ -175,7 +175,7 @@ DESC_FILES = descriptions/abaton.desc descriptions/agfafocus.desc \
   descriptions/microtek.desc descriptions/mustek.desc \
   descriptions/mustek_pp.desc descriptions/mustek_usb2.desc \
   descriptions/mustek_usb.desc descriptions/nec.desc descriptions/net.desc \
-  descriptions/niash.desc descriptions/pie.desc descriptions/pieusb.desc descriptions/pint.desc \
+  descriptions/niash.desc descriptions/oki.desc descriptions/pie.desc descriptions/pieusb.desc descriptions/pint.desc \
   descriptions/p5.desc descriptions/pixma.desc descriptions/plustek.desc \
   descriptions/plustek_pp.desc descriptions/pnm.desc descriptions/qcam.desc \
   descriptions/ricoh.desc descriptions/ricoh2.desc \
