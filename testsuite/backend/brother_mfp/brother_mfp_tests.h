@@ -20,6 +20,7 @@
 
 #pragma once
 
+extern void test_family5();
 extern void test_family4();
 extern void test_family3();
 extern void test_family2();

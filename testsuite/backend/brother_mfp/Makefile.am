@@ -22,6 +22,7 @@ AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include -I$(top_srcdir)/include
 brother_mfp_unit_tests_SOURCES = \
 	brother_mfp_tests.cpp \
 	brother_mfp_tests.h	\
+	brother_mfp_tests_family5.cpp \
 	brother_mfp_tests_family4.cpp \
 	brother_mfp_tests_family3.cpp \
 	brother_mfp_tests_family2.cpp \

@@ -28,6 +28,7 @@ int main ()
 {
   DBG_INIT ();
 
+  test_family5 ();
   test_family4 ();
   test_family3 ();
   test_family2 ();

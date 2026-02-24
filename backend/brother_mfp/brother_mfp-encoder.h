@@ -616,8 +616,18 @@ protected:
 class BrotherImageCache
 {
 public:
-  BrotherImageCache();
-  ~BrotherImageCache();
+  BrotherImageCache():
+    cache_file(nullptr),
+    has_read(false)
+  {
+  }
+
+  ~BrotherImageCache()
+  {
+    fclose(cache_file);
+    cache_file = nullptr;
+  }
+
   bool WriteData(const SANE_Byte *buffer, size_t buffer_len);
   bool ReadData(SANE_Byte *buffer, size_t buffer_len, size_t &data_written);
 
@@ -625,12 +635,6 @@ private:
   FILE *cache_file;
   bool has_read;
 };
-
-
-
-
-
-
 
 class BrotherEncoderFamily5 : public BrotherEncoder
 {

@@ -2627,21 +2627,9 @@ DecodeStatus BrotherGrayRawDecoder::DecodeScanData (const SANE_Byte *src_data, s
  *
  * This will primarily be stored in a temporary file.
  *
- * One reading has occurred, writing is not longer permitted.
+ * Once reading has occurred, writing is not longer permitted.
  *
  */
-BrotherImageCache::BrotherImageCache():
-  cache_file(nullptr),
-  has_read(false)
-{
-}
-
-BrotherImageCache::~BrotherImageCache()
-{
-  fclose(cache_file);
-  cache_file = nullptr;
-}
-
 bool BrotherImageCache::WriteData(const SANE_Byte *buffer, size_t buffer_len)
 {
   if (has_read)
@@ -2682,6 +2670,16 @@ bool BrotherImageCache::ReadData(SANE_Byte *buffer, size_t buffer_len, size_t &d
       return false;
     }
 
+  if (!has_read)
+    {
+      has_read = true;
+      if (fseek(cache_file, 0, SEEK_SET) != 0)
+	{
+	  FDBG (DBG_SERIOUS, "An error occurred reading the image cache [%s].", strerror(errno));
+	  return false;
+	}
+    }
+
   data_written = fread(buffer, 1, buffer_len, cache_file);
   if (ferror(cache_file) != 0)
     {
@@ -2691,5 +2689,3 @@ bool BrotherImageCache::ReadData(SANE_Byte *buffer, size_t buffer_len, size_t &d
 
   return true;
 }
-
-
