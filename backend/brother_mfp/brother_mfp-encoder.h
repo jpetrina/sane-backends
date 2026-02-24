@@ -613,6 +613,25 @@ protected:
   char const* GetFamilySpecificParameterBlock () override;
 };
 
+class BrotherImageCache
+{
+public:
+  BrotherImageCache();
+  ~BrotherImageCache();
+  bool WriteData(const SANE_Byte *buffer, size_t buffer_len);
+  bool ReadData(SANE_Byte *buffer, size_t buffer_len, size_t &data_written);
+
+private:
+  FILE *cache_file;
+  bool has_read;
+};
+
+
+
+
+
+
+
 class BrotherEncoderFamily5 : public BrotherEncoder
 {
 public:

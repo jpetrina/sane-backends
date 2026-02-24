@@ -55,10 +55,9 @@
  *
  */
 // Brother 5 codes
+#define BROTHER_DATA_BLOCK_NONE                 0x00
 #define BROTHER_DATA_BLOCK_RLENGTH5             0x01
 #define BROTHER_DATA_BLOCK_JPEG5                0x02
-
-#define BROTHER_DATA_BLOCK_END_OF_FRAME_NO_MORE5  0x21
 
 // Brother 2, 3, 4 codes
 #define BROTHER_DATA_BLOCK_GRAY_RAW             0x40
@@ -72,15 +71,22 @@
 /*
  * Termination codes.
  */
+// Brother 2, 3, 4 codes
 #define BROTHER_DATA_BLOCK_SCAN_FINISHED        0x80
 #define BROTHER_DATA_BLOCK_END_OF_FRAME_MORE    0x81
 #define BROTHER_DATA_BLOCK_END_OF_FRAME_NO_MORE 0x82
 #define BROTHER_DATA_BLOCK_CANCEL               0x86
 
+// Brother 5 codes
+#define BROTHER_DATA_BLOCK_END_OF_FRAME_5	0x21 // 0x00 21 nn nn
+#define BROTHER_DATA_BLOCK_END_OF_ALL_FRAMES_5  0x20 // 0x00 20
+#define BROTHER_DATA_BLOCK_CANCEL_5             0x41 // 0x00 41
+
 /*
  * Error condition codes.
  *
  */
+// Brother 2, 3, 4 codes
 #define BROTHER_DATA_QUERY_RESPONSE             0xc1
 #define BROTHER_DATA_BLOCK_NO_DOCS              0xc2
 #define BROTHER_DATA_BLOCK_PAPER_JAM            0xc3
@@ -90,6 +96,10 @@
 // unsure about this one, too. Only recovery is a printer restart.
 // Can happen when the previous scan was interrupted by a driver crash.
 #define BROTHER_DATA_BLOCK_DEVICE_STUCK         0xc6
+
+// Brother 5 codes
+#define BROTHER_DATA_BLOCK_NO_DOCS_5            0x90 // 0x90 00
+#define BROTHER_DATA_BLOCK_PAPER_JAM_5          0x91 // 0x91 00
 
 /*
  * Other protocol error?
@@ -594,7 +604,7 @@ DecodeStatus BrotherEncoderFamily234Base::ProcessNextPacket(const SANE_Byte* &sr
   new_block = false;
 
 
-  if (current_header.block_type != 0)
+  if (current_header.block_type != BROTHER_DATA_BLOCK_NONE)
     /* The current packet has not been processed completely */
     return DECODE_STATUS_GOOD;
 
@@ -733,7 +743,7 @@ DecodeStatus BrotherEncoderFamily234Base::DecodeScanData (const SANE_Byte *src_d
       size_t bytes_written = 0;
 
       ret_status = ProcessNextPacket(src_data, src_data_len, dest_data_len, orig_dest_data_len, new_block);
-      if (ret_status != DECODE_STATUS_GOOD || current_header.block_type == 0)
+      if (ret_status != DECODE_STATUS_GOOD || current_header.block_type == BROTHER_DATA_BLOCK_NONE)
       {
         /*
          * block_type == 0 means that we don't have further data to process,
@@ -815,7 +825,7 @@ DecodeStatus BrotherEncoderFamily234Base::DecodeScanData (const SANE_Byte *src_d
 
       if (ret_status != DECODE_STATUS_GOOD)
         {
-          current_header.block_type = 0;
+          current_header.block_type = BROTHER_DATA_BLOCK_NONE;
           break;
         }
 
@@ -836,7 +846,7 @@ DecodeStatus BrotherEncoderFamily234Base::DecodeScanData (const SANE_Byte *src_d
        */
       if (current_header.block_len == 0)
         {
-          current_header.block_type = 0;
+          current_header.block_type = BROTHER_DATA_BLOCK_NONE;
         }
 
       /*
@@ -1621,6 +1631,7 @@ DecodeStatus BrotherEncoderFamily5::DecodeScanData (const SANE_Byte *src_data, s
           ret_status = DECODE_STATUS_ERROR;
           break;
         }
+  FDBGNP (DBG_SERIOUS, "");
 
       if (ret_status != DECODE_STATUS_GOOD)
         {
@@ -1669,7 +1680,6 @@ DecodeStatus BrotherEncoderFamily5::DecodeScanData (const SANE_Byte *src_data, s
   return ret_status;
 }
 
-
 /*
  * EndOfFrame (0x82) is 10 bytes long because it doesn't have the
  * 2-byte packet length that the others do, so we could assume that
@@ -1690,67 +1700,121 @@ DecodeStatus BrotherEncoderFamily5::DecodeScanDataHeader (const SANE_Byte *src_d
       return DECODE_STATUS_TRUNCATED;
     }
 
-  header.block_type = src_data[1];
+  header.block_type = BROTHER_DATA_BLOCK_NONE;
   header.block_len = 0;
   header.image_number = 0;
 
-//  if (header.block_type == BROTHER_DATA_BLOCK_NO_DOCS)
-//    {
-//      *src_data_consumed = 1;
-//      return DECODE_STATUS_NO_DOCS;
-//    }
-//
-//  if (header.block_type == BROTHER_DATA_BLOCK_SCAN_FINISHED)
-//    {
-//      *src_data_consumed = 1;
-//      return DECODE_STATUS_ENDOFDATA;
-//    }
-//
-//  if (header.block_type == BROTHER_DATA_BLOCK_CANCEL)
-//    {
-//      *src_data_consumed = 1;
-//      return DECODE_STATUS_CANCEL;
-//    }
-//
-//  if ((header.block_type == BROTHER_DATA_BLOCK_PAPER_JAM)
-//      || (header.block_type == BROTHER_DATA_BLOCK_CLEARING_PAPER))
-//    {
-//      *src_data_consumed = 1;
-//      return DECODE_STATUS_PAPER_JAM;
-//    }
-//
-//  if (header.block_type == BROTHER_DATA_BLOCK_COVER_OPEN)
-//    {
-//      *src_data_consumed = 1;
-//      return DECODE_STATUS_COVER_OPEN;
-//    }
-
-  if (header.block_type == BROTHER_DATA_BLOCK_END_OF_FRAME_NO_MORE5)
+  /*
+   * Error conditions.
+   *
+   */
+  if (src_data[0] & 0x80)
     {
-      if (src_data_len < 4)
-        {
-          return DECODE_STATUS_TRUNCATED;
-        }
+      if (src_data_len < 2)
+	{
+	  return DECODE_STATUS_TRUNCATED;
+	}
 
-      *src_data_consumed = 4;
-      return DECODE_STATUS_ENDOFFRAME_NO_MORE;
+      header.block_type = src_data[0];
+
+      if (header.block_type == BROTHER_DATA_BLOCK_NO_DOCS_5)
+	{
+	  return DECODE_STATUS_NO_DOCS;
+	}
+      if (header.block_type == BROTHER_DATA_BLOCK_PAPER_JAM_5)
+	{
+	  return DECODE_STATUS_PAPER_JAM;
+	}
+
+      // Don't know this one!
+      FDBG (DBG_SERIOUS,
+           "unknown error status encountered: 0x%2.2x",
+           (unsigned int) header.block_type);
+
+      return DECODE_STATUS_UNSUPPORTED;
     }
 
   /*
-   * Other data-carrying packets.
+   * Normal status indications.
    *
    */
-  if (src_data_len < 14)
+  if (src_data[0] == 0)
     {
-      return DECODE_STATUS_TRUNCATED;
+      header.block_type = src_data[1];
+
+      if (header.block_type == BROTHER_DATA_BLOCK_END_OF_FRAME_5)
+	{
+	  if (src_data_len < 4)
+	    {
+	      return DECODE_STATUS_TRUNCATED;
+	    }
+
+	  *src_data_consumed = 4;
+	  header.image_number = src_data[2] + (src_data[3] << 8);
+	  return DECODE_STATUS_ENDOFFRAME_WITH_MORE;
+	}
+
+      if (header.block_type == BROTHER_DATA_BLOCK_END_OF_ALL_FRAMES_5)
+	{
+	  if (src_data_len < 2)
+	    {
+	      return DECODE_STATUS_TRUNCATED;
+	    }
+	  *src_data_consumed = 2;
+	  return DECODE_STATUS_ENDOFFRAME_NO_MORE;
+	}
+
+      if (header.block_type == BROTHER_DATA_BLOCK_CANCEL_5)
+	{
+	  if (src_data_len < 2)
+	    {
+	      return DECODE_STATUS_TRUNCATED;
+	    }
+	  *src_data_consumed = 2;
+	  return DECODE_STATUS_CANCEL;
+	}
+
+       /*
+       * Other data-carrying packets.
+       *
+       */
+      if ((header.block_type == BROTHER_DATA_BLOCK_RLENGTH5) ||
+	  (header.block_type == BROTHER_DATA_BLOCK_JPEG5))
+	{
+	  if (src_data_len < 14)
+	    {
+	      return DECODE_STATUS_TRUNCATED;
+	    }
+
+	  *src_data_consumed = 14;
+
+	  header.block_len = src_data[6] + (src_data[7] << 8);
+	  header.image_number = src_data[2] + (src_data[3] << 8);
+	  return DECODE_STATUS_GOOD;
+	}
+
+      /*
+       * Unknown data block type.
+       *
+       */
+      FDBG (DBG_SERIOUS,
+           "unknown data block type encountered: 0x%2.2x",
+           (unsigned int) header.block_type);
+
+      return DECODE_STATUS_UNSUPPORTED;
+
     }
 
-  *src_data_consumed = 14;
+  /*
+   * Don't know this block type.
+   * We might also have gotten out of sync.
+   *
+   */
+  FDBG (DBG_SERIOUS,
+       "unknown scan block type encountered: 0x%2.2x",
+       (unsigned int) src_data[0]);
 
-  header.block_len = src_data[6] + (src_data[7] << 8);
-  header.image_number = src_data[2] + (src_data[3] << 8);
-
-  return DECODE_STATUS_GOOD;
+  return DECODE_STATUS_UNSUPPORTED;
 }
 
 DecodeStatus BrotherEncoderFamily5::DecodeButtonQueryResp (const SANE_Byte *data, size_t data_len,
@@ -2287,28 +2351,37 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
 {
   *src_data_consumed = 0;
   *dest_data_written = 0;
+
   if (src_data_len == 0)
   {
     // TODO: Is this desired behaviour? What is the scenario here?
+    //
+    // Not sure what we should do, but I'm checking for no decode data. If there's no data,
+    // we can't do anything. It's really just an abort for a situation which shouldn't happen.
     FDBGNP(DBG_DETAIL, "JFIF decoder was called on an empty buffer. Returning EOF");
     return DECODE_STATUS_ENDOFFRAME_WITH_MORE;
   }
 
   /*
-   * Check if the decoder has finished already. While we should not normally get here, this check can catch some spurious errors.
-   * For example, if a slightly invalid number of rows was requested, the scanner returns JFIF data whose header does not always
-   * match the actual number of rows.
+   * Check if the decoder has finished already.
+   * While we should not normally get here, this check can catch some spurious errors.
+   * For example, if a slightly invalid number of rows was requested, the scanner
+   * returns JFIF data whose header does not always match the actual number of rows.
+   *
    */
   if (state.cinfo.output_height > 0 && state.cinfo.output_scanline >= state.cinfo.output_height)
   {
     FDBG (DBG_SERIOUS,
-      "WARNING: JFIF decoder was called on a finished buffer (data left: %zu). This can happen when the scanner returns more data than announced",
+      "WARNING: JFIF decoder was called on a finished buffer (data left: %zu). "
+      "This can happen when the scanner returns more data than announced",
       src_data_len);
+
     // Skip the remaining data on this page by absorbing it
     *src_data_consumed = src_data_len;
     // return STATUS_GOOD so we can process an EOF packet on the next turn
     return DECODE_STATUS_GOOD;
   }
+
   FDBG (DBG_EVENT,
        "src_data_len=%zu dest_data_len=%zu",
        src_data_len,
@@ -2420,8 +2493,10 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
        *
        */
 
-      /* Check if we have read all scanlines before attempting to read.
+      /*
+       * Check if we have read all scanlines before attempting to read.
        * This suppresses a spurious error message.
+       *
        */
       if (state.cinfo.output_scanline >= state.cinfo.output_height)
         {
@@ -2440,12 +2515,13 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
       output_size -= line_size;
       output_ptr += converted * line_size;
 
-      FDBG (DBG_DETAIL,
+      FDBG (DBG_SERIOUS,
            "Converted %u scanlines. "
-           "Remaining scanlines: %u output_remaining=%zu",
+           "Remaining scanlines: %u output_remaining=%zu decompress_remaining=%zu",
            (unsigned int) converted,
            (unsigned int) (state.cinfo.output_height - state.cinfo.output_scanline),
-           output_size);
+           output_size,
+	   state.src_mgr.bytes_in_buffer);
 
     }
 
@@ -2475,6 +2551,7 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
        * As explained above, *src_data_consumed will not account for all the bytes that have been read
        * so libjpeg can restart an unfinished decode. In case we are finished, however, we do want
        * to absorb all the remaining bytes so the caller knows that all the data has been processed.
+       *
        */
       *src_data_consumed = src_data_len;
       FDBGNP (DBG_EVENT, "Converted all scanlines. Finishing.");
@@ -2483,11 +2560,13 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
         {
           FDBGNP (DBG_WARN,
                "Failed to finish JPEG decompress.");
-          /* This can happen under some circumstances which are not entirely clear to me.
+          /*
+           * This can happen under some circumstances which are not entirely clear to me.
            * It may have to do with the fact that the device sometimes returns invalid JFIF
            * in the sense that the size in the header doesn't match the image size.
            * We don't want to abort the whole scan here. Just log the error, set cinfo to zero,
            * and hope we don't leak too much memory.
+           *
            */
           memset(&state.cinfo, 0, sizeof(state.cinfo));
         }
@@ -2537,3 +2616,80 @@ DecodeStatus BrotherGrayRawDecoder::DecodeScanData (const SANE_Byte *src_data, s
 
   return DECODE_STATUS_GOOD;
 }
+
+/*
+ * BrotherImageCache.
+ *
+ * A store for images received and decoded during simultaneous duplex
+ * scanning. In this case, we can receive out of order images interleaved
+ * together. We need to decode both, send one and store the other. Then
+ * later send the other.
+ *
+ * This will primarily be stored in a temporary file.
+ *
+ * One reading has occurred, writing is not longer permitted.
+ *
+ */
+BrotherImageCache::BrotherImageCache():
+  cache_file(nullptr),
+  has_read(false)
+{
+}
+
+BrotherImageCache::~BrotherImageCache()
+{
+  fclose(cache_file);
+  cache_file = nullptr;
+}
+
+bool BrotherImageCache::WriteData(const SANE_Byte *buffer, size_t buffer_len)
+{
+  if (has_read)
+    {
+      FDBGNP (DBG_SERIOUS, "Attempt to write to image cache after having read.");
+      return false;
+    }
+
+  /*
+   * Create and open a temporary file to receive the data if we
+   * haven't already.
+   *
+   */
+  if (!cache_file)
+    {
+      cache_file = tmpfile();
+      if (!cache_file)
+	{
+	  FDBG(DBG_SERIOUS, "Failed to create an image cache file [%s].", strerror(errno));
+	  return false;
+	}
+    }
+
+  if (fwrite(buffer, 1, buffer_len, cache_file) != buffer_len)
+    {
+      FDBG(DBG_SERIOUS, "Failed to write to an image cache file [%s].", strerror(errno));
+      return false;
+    }
+
+  return true;
+}
+
+bool BrotherImageCache::ReadData(SANE_Byte *buffer, size_t buffer_len, size_t &data_written)
+{
+  if (!cache_file)
+    {
+      FDBGNP (DBG_SERIOUS, "Attempt to read from empty image cache file.");
+      return false;
+    }
+
+  data_written = fread(buffer, 1, buffer_len, cache_file);
+  if (ferror(cache_file) != 0)
+    {
+      FDBG (DBG_SERIOUS, "An error occurred reading the image cache [%s].", strerror(errno));
+      return false;
+    }
+
+  return true;
+}
+
+
