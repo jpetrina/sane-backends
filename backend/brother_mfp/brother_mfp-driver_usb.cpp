@@ -357,7 +357,7 @@ SANE_Status BrotherUSBDriver::PollDataFromScanner()
        * It's OK: as long as we are reading something substantial, that is fine.
        *
        */
-      FDBG (DBG_EVENT,
+      FDBG (DBG_SERIOUS,
            "attempting read, space for %zu bytes",
            bytes_to_read);
 
@@ -372,7 +372,7 @@ SANE_Status BrotherUSBDriver::PollDataFromScanner()
         }
 
       data_buffer_bytes += bytes_to_read;
-      FDBG (DBG_DETAIL,
+      FDBG (DBG_SERIOUS,
            "read %zu bytes, now buffer has %zu bytes",
            bytes_to_read, data_buffer_bytes);
     }
@@ -442,32 +442,6 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
       return SANE_STATUS_EOF;
     }
 
-  const size_t bytes_per_frame = params.bytes_per_line*params.lines;
-  if (pad_or_crop_in_progress)
-    {
-      /*
-       * The scanner has delivered either more or less lines than expected,
-       * which we handle by cropping / padding. This flag indicates that such
-       * an action is in progress. We might need to deliver more padded lines
-       * or send a final EOF.
-       */
-      if (bytes_written_this_page < bytes_per_frame)
-        {
-          RepeatPreviousScanline(data, max_length, length);
-          bytes_written_this_page += *length;
-          return SANE_STATUS_GOOD;
-        }
-      else
-        {
-          /*
-           * The code that set pad_or_crop_in_progress has already absorbed
-           * the EOF block.
-           */
-          pad_or_crop_in_progress = false;
-          return SANE_STATUS_EOF;
-        }
-    }
-
   /*
    * Everything is good. Let's get on with it.
    *
@@ -485,19 +459,28 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
 
     }
 
-  /* First we try to fill the output buffer from scanned data.
-   * No need to read from USB when we still have plenty of data to process. */
+  /*
+   * First we try to fill the output buffer from scanned data.
+   * No need to read from USB when we still have plenty of data to process.
+   *
+   */
   DecodeStatus dec_ret = DecodeReadBuffer(data, max_length, length);
   if (*length > 0)
     {
-      /* We could call DecodeReadBuffer() again if there is space for at least
+      /*
+       * We could call DecodeReadBuffer() again if there is space for at least
        * one more scanline, but that requires even more careful EOF and buffer
-       * handling. */
+       * handling.
+       *
+       */
       FDBGNP(DBG_DETAIL, "Filled the output buffer by processing data, not pulling from USB");
     }
   else
     {
-      /* In this case we read from USB to further fill `data`. */
+      /*
+       * In this case we read from USB to further fill `data`.
+       *
+       */
       res = PollDataFromScanner();
       if (res != SANE_STATUS_GOOD)
         {
@@ -521,70 +504,10 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
       encoder->NewPage();
     }
 
-  /* Store the most recent scanline in case we need it for padding */
-  const size_t bytes_per_line = (size_t)params.bytes_per_line;
-  if (*length >= bytes_per_line)
-    memcpy(previous_scanline, data + *length - bytes_per_line, bytes_per_line);
-
-  /* Handle edge case: Scanner delivered fewer lines than announced */
-  if (res == SANE_STATUS_EOF && bytes_written_this_page < bytes_per_frame)
-    {
-      RepeatPreviousScanline(data, max_length, length);
-      res = SANE_STATUS_GOOD;
-      /* Set a flag to continue or EOF on the next call of sane_read() */
-      pad_or_crop_in_progress = true;
-    }
-  /* Handle edge case: Scanner delivered more lines than announced */
-  else if (res == SANE_STATUS_GOOD && bytes_written_this_page + *length > bytes_per_frame)
-    {
-      const size_t extra_lines = (bytes_written_this_page + *length - bytes_per_frame) / bytes_per_line;
-      FDBG(DBG_SERIOUS, "WARNING: Discarding %zu unexpected scan lines", extra_lines);
-      /* Flush the remaining data from the reader, using the unused back part
-       * of `data` as a dummy target buffer */
-      *length = bytes_per_frame - bytes_written_this_page;
-      SANE_Byte *unused_data_buffer = data + *length;
-      size_t dummy_length = 0;
-      do
-        {
-          res = PollDataFromScanner();
-          if (res != SANE_STATUS_GOOD)
-              return res;
-          dec_ret = DecodeReadBuffer(unused_data_buffer,
-                                          max_length - *length,
-                                          &dummy_length);
-          res = encoder->DecodeStatusToSaneStatus(dec_ret);
-          if (dummy_length > 0)
-            FDBG(DBG_DEBUG, "WARNING: Discarding another %zu lines", dummy_length / bytes_per_line);
-        }
-      while (res == SANE_STATUS_GOOD);
-      if (res == SANE_STATUS_EOF)
-      {
-        /* Return the remaining data and send an EOF on the next read */
-        pad_or_crop_in_progress = true;
-        res = SANE_STATUS_GOOD;
-      }
-    }
-
   bytes_written_this_page += *length;
 
   return res;
 }
-
-/* Pad the bottom of the output image by repeating the final scanline.
- * This is done if the printer delivered fewer scanlines than announced. */
-void BrotherUSBDriver::RepeatPreviousScanline(SANE_Byte *data, size_t max_length, size_t *length)
-  {
-    const auto bytes_per_line = params.bytes_per_line;
-    const size_t lines_missing = params.lines - (bytes_written_this_page / bytes_per_line);
-    const size_t lines_to_write = std::min(lines_missing, max_length / bytes_per_line);
-    FDBG(DBG_SERIOUS, "WARNING: Scanner delivered %zu fewer lines than announced, padding with previous line", lines_missing);
-    for (size_t i=0; i < lines_to_write; i++)
-      {
-        memcpy(&data[i*bytes_per_line], previous_scanline, bytes_per_line);
-      }
-    FDBG(DBG_DEBUG, "Added %zu padded scanlines", lines_to_write);
-    *length += lines_to_write * bytes_per_line;
-  }
 
 /*
  * Just suck any cached data from the read stream and discard it.
@@ -869,10 +792,6 @@ SANE_Status BrotherUSBDriver::CancelScan ()
   data_buffer = NULL;
   data_buffer_bytes = 0;
 
-  delete [] previous_scanline;
-  previous_scanline = nullptr;
-
-
   return SANE_STATUS_GOOD;
 }
 
@@ -1123,10 +1042,6 @@ SANE_Status BrotherUSBDriver::StartScan ()
           return SANE_STATUS_NO_MEM;
         }
       data_buffer_bytes = 0;
-
-      previous_scanline = new SANE_Byte[params.bytes_per_line] {};
-      if (nullptr == previous_scanline)
-        return SANE_STATUS_NO_MEM;
     }
   else
     {
@@ -1349,9 +1264,7 @@ BrotherUSBDriver::BrotherUSBDriver (const char *devicename, BrotherFamily family
      data_buffer (nullptr),
      data_buffer_bytes (0),
      bytes_written_this_page (0),
-     previous_scanline(nullptr),
-     out_of_docs(false),
-     pad_or_crop_in_progress(false)
+     out_of_docs(false)
  {
    this->devicename = strdup(devicename);
  }

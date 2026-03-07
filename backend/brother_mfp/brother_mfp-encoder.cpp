@@ -674,7 +674,7 @@ DecodeStatus BrotherEncoderFamily234Base::ProcessNextPacket(const SANE_Byte* &sr
      *
      */
     {
-      if (jfif_decoder.HasUnprocessedDecodeData())
+      if (current_decoder->HasUnprocessedDecodeData())
         {
           FDBGNP (DBG_DEBUG, "Processing cached data before handling next packet");
           /*
@@ -754,34 +754,34 @@ DecodeStatus BrotherEncoderFamily234Base::DecodeScanData (const SANE_Byte *src_d
 
       size_t in_len = std::min(src_data_len, current_header.block_len);
 
-      BrotherScanDataDecoder *decoder = nullptr;
+      BrotherScanDataDecoder *decoder = current_decoder;
 
-      if (current_header.block_type == BROTHER_DATA_BLOCK_JPEG)
-        {
-          decoder = &jfif_decoder;
-        }
-      else if (current_header.block_type == BROTHER_DATA_BLOCK_GRAY_RLENGTH)
-        {
-          decoder = &gray_decoder;
-        }
-      else if (current_header.block_type == BROTHER_DATA_BLOCK_GRAY_RAW)
-        {
-          decoder = &gray_raw_decoder;
-        }
-      else if ((current_header.block_type == BROTHER_DATA_BLOCK_RED_RAW)
-          || (current_header.block_type == BROTHER_DATA_BLOCK_GREEN_RAW)
-          || (current_header.block_type == BROTHER_DATA_BLOCK_BLUE_RAW))
-        {
-          decoder = &colour_decoder;
-        }
-      else
-        {
-          FDBG (DBG_IMPORTANT,
-               "unknown block encountered: 0x%2.2x",
-               (unsigned int) current_header.block_type);
-          ret_status = DECODE_STATUS_ERROR;
-          break;
-        }
+//      if (current_header.block_type == BROTHER_DATA_BLOCK_JPEG)
+//        {
+//          decoder = &jfif_decoder;
+//        }
+//      else if (current_header.block_type == BROTHER_DATA_BLOCK_GRAY_RLENGTH)
+//        {
+//          decoder = &gray_decoder;
+//        }
+//      else if (current_header.block_type == BROTHER_DATA_BLOCK_GRAY_RAW)
+//        {
+//          decoder = &gray_raw_decoder;
+//        }
+//      else if ((current_header.block_type == BROTHER_DATA_BLOCK_RED_RAW)
+//          || (current_header.block_type == BROTHER_DATA_BLOCK_GREEN_RAW)
+//          || (current_header.block_type == BROTHER_DATA_BLOCK_BLUE_RAW))
+//        {
+//          decoder = &colour_decoder;
+//        }
+//      else
+//        {
+//          FDBG (DBG_IMPORTANT,
+//               "unknown block encountered: 0x%2.2x",
+//               (unsigned int) current_header.block_type);
+//          ret_status = DECODE_STATUS_ERROR;
+//          break;
+//        }
 // TODO test experimental switch-case version:
 /*
       switch (current_header.block_type)
@@ -1478,206 +1478,210 @@ DecodeStatus BrotherEncoderFamily5::EncodeParameterBlock (SANE_Byte *data, size_
   return DECODE_STATUS_GOOD;
 }
 
+
 DecodeStatus BrotherEncoderFamily5::DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                                     size_t *src_data_consumed, SANE_Byte *dest_data,
                                                     size_t dest_data_len, size_t *dest_data_written)
 {
-  FDBGNP (DBG_EVENT, "");
-  DecodeStatus ret_status = DECODE_STATUS_GOOD;
+    FDBGNP (DBG_SERIOUS, "");
+    DecodeStatus ret_status = DECODE_STATUS_GOOD;
 
-  *src_data_consumed = 0;
-  *dest_data_written = 0;
+    /*
+     * Check for terminated status.
+     * We have read everything and we cannot return anything further.
+     *
+     */
+    if (end_image_flag && !current_decoder)
+      {
+	return DECODE_STATUS_ENDOFDATA;
+      }
 
-  /*
-   * We will use this to compute the bytes consumed at the end.
-   *
-   */
-  size_t orig_src_data_len = src_data_len;
-  size_t orig_dest_data_len = dest_data_len;
+    /*
+     * Main read loop. At least we have not terminated yet.
+     *
+     */
+    *src_data_consumed = 0;
+    *dest_data_written = 0;
 
-  /*
-   * Now take note here that we do not *necessarily* need src_data to be able to decode.
-   * We might have terminated the previous call not because we ran out of input, but because
-   * we ran out of output space. Some blocks are just repetitions that are unrolled and require
-   * no additional src data. So we enter this loop *even if there is nothing in the src_data buffer*.
-   *
-   * All of the functions that we are about to call must be able to deal with src_data_len == 0
-   * intelligently.
-   *
-   */
-  for (;;)
-    {
-      /*
-       * If we are not in a block, then decode the next block.
-       *
-       * We might not have enough bytes to fully decode the header.
-       * In which case, we wait for some more data.
-       *
-       */
-      bool new_block = false;
+    for (;;)
+      {
+	size_t bytes_consumed = 0;
+	size_t bytes_written = 0;
 
-      if (current_header.block_type == 0)
-        {
-          size_t header_consumed = 0;
-          ret_status = DecodeScanDataHeader(src_data, src_data_len, &header_consumed, current_header);
-          if (ret_status == DECODE_STATUS_TRUNCATED)
-            {
-              /*
-               * This means we don't have enough data to decode a header yet.
-               * Try again next time if we have read more data.
-               *
-               */
-              ret_status = DECODE_STATUS_GOOD;
-              break;
-            }
+	if (current_decoder)
+	  {
+	    if (current_header.block_type != BROTHER_DATA_BLOCK_NONE)
+	    {
+	      size_t in_len = std::min(src_data_len, current_header.block_len);
 
-          if (ret_status == DECODE_STATUS_CANCEL)
-            {
-              FDBGNP (DBG_IMPORTANT, "cancel detected");
-              break;
-            }
+	      ret_status = current_decoder->DecodeScanData (src_data, in_len,
+							    &bytes_consumed,
+							    dest_data,
+							    dest_data_len,
+							    &bytes_written);
+	    }
+	  else
+	    {
+	      FDBGNP (DBG_SERIOUS, "decoding, but no source.");
 
-          /*
-            * Detect special case situations.
-            *
-            */
-          if (ret_status != DECODE_STATUS_GOOD)
-            {
-              FDBG (DBG_WARN,
-                   "%s.",
-                   DecodeStatusToString (ret_status));
+	      ret_status = current_decoder->DecodeScanData (nullptr, 0,
+							    &bytes_consumed,
+							    dest_data,
+							    dest_data_len,
+							    &bytes_written);
+	    }
 
-              current_header.block_type = 0;
+	    src_data += bytes_consumed;
+	    src_data_len -= bytes_consumed;
+	    *src_data_consumed += bytes_consumed;
 
-              /*
-               * If we have data in hand, then we will send this up first.
-               * Otherwise, send SANE_STATUS_EOF to trigger stop of scan.
-               *
-               * We don't consume this header so we will see it the next time around.
-               *
-               */
-              if (orig_dest_data_len > dest_data_len)
-                {
-                  ret_status = DECODE_STATUS_GOOD;
-                }
-              else
-                {
-                  // Consume the header.
-                  src_data_len -= header_consumed;
-                }
-              break;
-            }
-          if (ret_status != DECODE_STATUS_GOOD)
-            {
-              FDBGNP (DBG_IMPORTANT, "failed to decode header");
-              current_header.block_type = 0;
-              break;
-            }
+	    if (ret_status == DECODE_STATUS_TRUNCATED)
+	      {
+		// This is OK. we just need more data from the device probably.
+		return DECODE_STATUS_TRUNCATED;
+	      }
+	    else if (ret_status != DECODE_STATUS_GOOD)
+	      {
+		// Something bad :(
+		break;
+	      }
 
-          FDBG (DBG_IMPORTANT,
-               "decoded new block header: 0x%2.2x, length=%zu",
-               current_header.block_type,
-               current_header.block_len);
+	    // TODO: check current_header.block_len >= bytes_consumed;
 
-          src_data += header_consumed;
-          src_data_len -= header_consumed;
+	    current_header.block_len -= bytes_consumed;
 
-          new_block = true;
-        }
+	    FDBG (DBG_DETAIL,
+		 "current block bytes remaining after decode=%zu",
+		 current_header.block_len);
 
-      /*
-       * Attempt to decode the data block.
-       * We will exit the function if we can only partially
-       * decode it, hoping to do more next time.
-       *
-       */
-      size_t bytes_consumed = 0;
-      size_t bytes_written = 0;
-      size_t in_len = std::min(src_data_len, current_header.block_len);
+	    dest_data += bytes_written;
+	    dest_data_len -= bytes_written;
+	    *dest_data_written += bytes_written;
 
-      if (current_header.block_type == BROTHER_DATA_BLOCK_JPEG5)
-        {
-          if (new_block)
-            {
-              jfif_decoder.NewBlock ();
-            }
+	    /*
+	     * Perhaps we have completed the block.
+	     *
+	     */
+	    if (current_header.block_len == 0)
+	      {
+		current_header.block_type = BROTHER_DATA_BLOCK_NONE;
+	      }
 
-          ret_status = jfif_decoder.DecodeScanData (src_data,
-                                                    in_len,
-                                                    &bytes_consumed,
-                                                    dest_data,
-                                                    dest_data_len,
-                                                    &bytes_written);
-        }
-      else if (current_header.block_type == BROTHER_DATA_BLOCK_RLENGTH5)
-        {
-          if (new_block)
-            {
-              gray_decoder.NewBlock ();
-            }
+	    if (end_image_flag && !current_decoder->HasUnprocessedDecodeData())
+	      {
+		delete current_decoder;
+		current_decoder = nullptr;
+	      }
+	  }
 
-          ret_status = gray_decoder.DecodeScanData (src_data,
-                                                    in_len,
-                                                    &bytes_consumed,
-                                                    dest_data,
-                                                    dest_data_len,
-                                                    &bytes_written);
-        }
-      else
-        {
-          FDBG (DBG_IMPORTANT,
-               "unknown block encountered: 0x%2.2x",
-               (unsigned int) current_header.block_type);
-          ret_status = DECODE_STATUS_ERROR;
-          break;
-        }
-  FDBGNP (DBG_SERIOUS, "");
+	/*
+	 * Check end conditions.
+	 *
+	 */
+	if (end_image_flag)
+	  {
+	    if (*dest_data_written)
+	      {
+		FDBGNP (DBG_DETAIL, "exiting with GOOD: end of image seen, but we wrote some data.");
+		return DECODE_STATUS_GOOD;	// cached data was available.
+	      }
+	    else
+	      {
+		if (current_decoder)
+		  {
+		    FDBGNP (DBG_DETAIL, "exiting with GOOD: end of image seen, but there is cached data, but no output space.");
+		    return DECODE_STATUS_GOOD;	// have cached data, but no output buffer space.
+		  }
+		else
+		  {
+		    FDBGNP (DBG_DETAIL, "exiting with ENDOFDATA: end of image and decoder flushed.");
+		    return DECODE_STATUS_ENDOFDATA;	// All done.
+		  }
+	      }
+	  }
 
-      if (ret_status != DECODE_STATUS_GOOD)
-        {
-          current_header.block_type = 0;
-          break;
-        }
+	/*
+	 * New block read?
+	 *
+	 */
+	if (current_header.block_type == BROTHER_DATA_BLOCK_NONE)
+	  {
+	    size_t header_consumed = 0;
 
-      src_data += bytes_consumed;
-      src_data_len -= bytes_consumed;
-      current_header.block_len -= bytes_consumed;
+	    ret_status = DecodeScanDataHeader(src_data, src_data_len, &header_consumed, current_header);
 
-      FDBG (DBG_DETAIL,
-           "current block bytes remaining after decode=%zu",
-           current_header.block_len);
+	    src_data += header_consumed;
+	    src_data_len -= header_consumed;
+	    *src_data_consumed += header_consumed;
 
-      dest_data += bytes_written;
-      dest_data_len -= bytes_written;
+	    if (ret_status == DECODE_STATUS_TRUNCATED)
+	      {
+		// This is OK. we just need more data from the device probably.
+		FDBGNP (DBG_DETAIL, "exiting with TRUNCATED: need more data for header decode.");
+		return DECODE_STATUS_TRUNCATED;
+	      }
+	    else if (ret_status == DECODE_STATUS_ENDOFFRAME_WITH_MORE)	// end of current frame.
+	      {
+		end_image_flag = true; 	// continue for the moment. There may be data to flush out.
+	      }
+	    else if (ret_status == DECODE_STATUS_ENDOFFRAME_NO_MORE)
+	      {
+		end_image_flag = true;
+		break;
+	      }
+	    else if (ret_status != DECODE_STATUS_GOOD)
+	      {
+		/*
+		 * All other statii are terminal. Something went badly wrong.
+		 * Probably an error condition on the device, like paper jam.
+		 *
+		 */
+		FDBGNP (DBG_DETAIL, "something went really wrong.");
+		break;
+	      }
 
-      /*
-       * Perhaps we have completed the block.
-       *
-       */
-      if (current_header.block_len == 0)
-        {
-          current_header.block_type = 0;
-        }
+	    if (current_header.block_type == BROTHER_DATA_BLOCK_END_OF_FRAME_5)
+	      {
+		end_image_flag = true;
+	      }
+	    else
+	      {
+		if (!current_decoder)
+		  {
+		    if (current_header.block_type == BROTHER_DATA_BLOCK_JPEG5)
+		      {
+			current_decoder = new BrotherJFIFDecoder(scan_params);
+		      }
+		    else if (current_header.block_type == BROTHER_DATA_BLOCK_RLENGTH5)
+		      {
+			current_decoder = new BrotherGrayRLengthDecoder(scan_params);
+		      }
+		    else
+		      {
+			// TODO generate error.
+		      }
+		    //TODO Check current_decoder
+		  }
+	      }
+	  }
+	else if (!bytes_consumed)
+	  {
+	    return DECODE_STATUS_GOOD;	// awaiting more data.
+	  }
+      }
 
-      /*
-       * Deal with special situation whereby we have input
-       * and output buffer space, but we couldn't decode anything.
-       * It might be that there is data in the input buffer
-       * but we need more to proceed.
-       *
-       * If we haven't written anything, we cannot have made any progress.
-       *
-       */
-      if (bytes_written == 0)
-        {
-          break;
-        }
-    }
+    /*
+     * Exiting the loop to here means that something went very wrong.
+     * Probably an error condition on the device, like paper jam.
+     * ret_status will contain something appropriate.
+     *
+     */
+    end_image_flag = true;
+    delete current_decoder;
+    current_decoder = nullptr;
+    FDBGNP (DBG_DETAIL, "exiting with error.");
 
-  *src_data_consumed = orig_src_data_len - src_data_len;
-  *dest_data_written = orig_dest_data_len - dest_data_len;
-
-  return ret_status;
+    return ret_status;
 }
 
 /*
@@ -1742,6 +1746,10 @@ DecodeStatus BrotherEncoderFamily5::DecodeScanDataHeader (const SANE_Byte *src_d
     {
       header.block_type = src_data[1];
 
+      /*
+       * This block appears at the end of each frame.
+       *
+       */
       if (header.block_type == BROTHER_DATA_BLOCK_END_OF_FRAME_5)
 	{
 	  if (src_data_len < 4)
@@ -1754,6 +1762,11 @@ DecodeStatus BrotherEncoderFamily5::DecodeScanDataHeader (const SANE_Byte *src_d
 	  return DECODE_STATUS_ENDOFFRAME_WITH_MORE;
 	}
 
+      /*
+       * This block appears after all frames have been sent (e.g. ADF is now empty).
+       * It will appear on its own after the last BROTHER_DATA_BLOCK_END_OF_FRAME_5 has been sent.
+       *
+       */
       if (header.block_type == BROTHER_DATA_BLOCK_END_OF_ALL_FRAMES_5)
 	{
 	  if (src_data_len < 2)
@@ -1790,6 +1803,13 @@ DecodeStatus BrotherEncoderFamily5::DecodeScanDataHeader (const SANE_Byte *src_d
 
 	  header.block_len = src_data[6] + (src_data[7] << 8);
 	  header.image_number = src_data[2] + (src_data[3] << 8);
+
+	  FDBG (DBG_DETAIL,
+	       "block header decoded. type=0x%2.2x len=%zu image_num=%u",
+	       (unsigned int) header.block_type,
+	       header.block_len,
+	       (unsigned int)header.image_number);
+
 	  return DECODE_STATUS_GOOD;
 	}
 
@@ -1871,12 +1891,6 @@ DecodeStatus BrotherEncoderFamily5::DecodeButtonStateResp (const SANE_Byte *data
 
 void BrotherGrayRLengthDecoder::NewBlock ()
 {
-}
-
-void BrotherGrayRLengthDecoder::NewPage(const BrotherParameters &params)
-{
-  decode_params = params;
-  NewBlock();
 }
 
 /*
@@ -2019,21 +2033,6 @@ void BrotherInterleavedRGBColourDecoder::NewBlock ()
 {
 }
 
-void BrotherInterleavedRGBColourDecoder::NewPage(const BrotherParameters &params)
-{
-  decode_params = params;
-  NewBlock();
-
-  /*
-   * Signal that we need to reallocate the scanline_buffer.
-   * We defer the allocation because this function returns void
-   * so we cannot signal an error if there is a problem allocating memory.
-   *
-   */
-  scanline_length = 0;
-  scanline_buffer_size = 0;
-}
-
 void BrotherInterleavedRGBColourDecoder::ConvertYCbCrToRGB (SANE_Byte y, SANE_Byte cb, SANE_Byte cr,
                                                             SANE_Byte *red, SANE_Byte *green,
                                                             SANE_Byte *blue)
@@ -2174,22 +2173,6 @@ DecodeStatus BrotherInterleavedRGBColourDecoder::DecodeScanData (const SANE_Byte
 void BrotherJFIFDecoder::NewBlock()
 {
   // Nothing to do.
-}
-
-void BrotherJFIFDecoder::NewPage (const BrotherParameters &params)
-{
-  decode_params = params;
-
-  /*
-   * Aborting a non-running state should be OK.
-   *
-   */
-  jpeg_abort_decompress(&state.cinfo);
-  state = {};
-  decompress_bytes = 0;
-
-  // Re-initialize the library for a new image
-  InitLibJpeg();
 }
 
 void BrotherJFIFDecoder::InitSource (j_decompress_ptr cinfo)
@@ -2575,11 +2558,6 @@ DecodeStatus BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte 
   return DECODE_STATUS_GOOD;
 }
 
-
-void BrotherGrayRawDecoder::NewPage(const BrotherParameters &params)
-{
-  decode_params = params;
-}
 
 void BrotherGrayRawDecoder::NewBlock()
 {

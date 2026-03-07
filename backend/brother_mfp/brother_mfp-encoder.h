@@ -329,16 +329,32 @@ protected:
 class BrotherScanDataDecoder
 {
 public:
-  virtual void NewPage(const BrotherParameters &params) = 0;
+  BrotherScanDataDecoder(const BrotherParameters &params):
+    decode_params(params)
+  {
+  }
+
+  virtual ~BrotherScanDataDecoder()
+  {
+  }
+
+  virtual void NewBlock() = 0;
+
   virtual DecodeStatus DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
                                size_t *dest_data_written) = 0;
+
+  virtual SANE_Bool HasUnprocessedDecodeData() = 0;
+
+protected:
+  BrotherParameters decode_params;
 };
 
 class BrotherJFIFDecoder : public BrotherScanDataDecoder
 {
 public:
-  BrotherJFIFDecoder():
+  BrotherJFIFDecoder(const BrotherParameters &params):
+    BrotherScanDataDecoder(params),
     decompress_bytes(0)
   {
     InitLibJpeg();
@@ -353,7 +369,6 @@ public:
   }
 
   void NewBlock();
-  void NewPage(const BrotherParameters &params) override;
 
   DecodeStatus DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
@@ -420,16 +435,20 @@ private:
 class BrotherGrayRLengthDecoder : public BrotherScanDataDecoder
 {
 public:
-  BrotherGrayRLengthDecoder()
+  BrotherGrayRLengthDecoder(const BrotherParameters &params):
+    BrotherScanDataDecoder(params)
   {
   }
   void NewBlock();
 
-  void NewPage(const BrotherParameters &params) override;
-
   DecodeStatus DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
                                size_t *dest_data_written) override;
+
+  SANE_Bool HasUnprocessedDecodeData()
+  {
+    return FALSE;
+  }
 
 private:
   BrotherParameters decode_params;
@@ -439,7 +458,8 @@ private:
 class BrotherInterleavedRGBColourDecoder : public BrotherScanDataDecoder
 {
 public:
-  explicit BrotherInterleavedRGBColourDecoder(SANE_Word capabilities):
+  explicit BrotherInterleavedRGBColourDecoder(const BrotherParameters &params, SANE_Word capabilities):
+    BrotherScanDataDecoder(params),
     capabilities(capabilities),
     scanline_buffer(nullptr),
     scanline_buffer_size(0),
@@ -454,11 +474,14 @@ public:
   }
   void NewBlock();
 
-  void NewPage(const BrotherParameters &params) override;
-
   DecodeStatus DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
                                size_t *dest_data_written) override;
+
+  SANE_Bool HasUnprocessedDecodeData()
+  {
+    return FALSE;
+  }
 
   enum ChannelEncoding
   {
@@ -482,16 +505,20 @@ private:
 class BrotherGrayRawDecoder : public BrotherScanDataDecoder
 {
 public:
-  BrotherGrayRawDecoder()
+  BrotherGrayRawDecoder(const BrotherParameters &params):
+    BrotherScanDataDecoder(params)
   {
   }
   void NewBlock();
 
-  void NewPage(const BrotherParameters &params) override;
-
   DecodeStatus DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
                                size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
                                size_t *dest_data_written) override;
+
+  SANE_Bool HasUnprocessedDecodeData()
+  {
+    return FALSE;
+  }
 
 private:
   BrotherParameters decode_params;
@@ -500,8 +527,9 @@ private:
 class BrotherEncoderFamily234Base : public BrotherEncoder
 {
 public:
-  explicit BrotherEncoderFamily234Base(SANE_Word capabilities):
-    colour_decoder(capabilities)
+  explicit BrotherEncoderFamily234Base(SANE_Word caps):
+    capabilities(caps),
+    current_decoder(nullptr)
   {
   }
 
@@ -513,10 +541,8 @@ public:
   {
     current_header.block_type = 0;
 
-    jfif_decoder.NewPage(scan_params);
-    gray_decoder.NewPage (scan_params);
-    gray_raw_decoder.NewPage (scan_params);
-    colour_decoder.NewPage (scan_params);
+    delete current_decoder;
+    current_decoder = nullptr;
   }
 
   DecodeStatus EncodeQueryBlock (SANE_Byte *data, size_t data_len, size_t *length) override;
@@ -569,12 +595,9 @@ protected:
     return res;
   }
 
+  SANE_Word capabilities;
   ScanDataHeader current_header;
-
-  BrotherJFIFDecoder jfif_decoder;
-  BrotherGrayRLengthDecoder gray_decoder;
-  BrotherGrayRawDecoder gray_raw_decoder;
-  BrotherInterleavedRGBColourDecoder colour_decoder;
+  BrotherScanDataDecoder *current_decoder;
 };
 
 
@@ -639,7 +662,10 @@ private:
 class BrotherEncoderFamily5 : public BrotherEncoder
 {
 public:
-  explicit BrotherEncoderFamily5(SANE_Word capabilities)
+  explicit BrotherEncoderFamily5(SANE_Word capabilities):
+  end_image_flag(false),
+  current_decoder(nullptr)
+
   {
     (void)capabilities;
   }
@@ -651,9 +677,9 @@ public:
   void NewPage() override
   {
     current_header.block_type = 0;
-
-    jfif_decoder.NewPage(scan_params);
-    gray_decoder.NewPage (scan_params);
+    delete current_decoder;
+    current_decoder = nullptr;
+    end_image_flag = false;
   }
 
   const char* ScanModeToText (BrotherScanMode scan_mode) override;
@@ -702,7 +728,8 @@ private:
                                      size_t *src_data_consumed, ScanDataHeader &header);
 
   ScanDataHeader current_header;
+  bool end_image_flag;
+  BrotherScanDataDecoder *current_decoder;
 
-  BrotherJFIFDecoder jfif_decoder;
-  BrotherGrayRLengthDecoder gray_decoder;
+
 };
