@@ -53,7 +53,7 @@
 #define BROTHER_USB_REQ_STOPSESSION        2
 #define BROTHER_USB_REQ_BUTTONSTATE        3
 
-#define BROTHER_READ_BUFFER_LEN (16 * 1024)
+#define BROTHER_READ_BUFFER_LEN (64 * 1024)
 
 
 /*-----------------------------------------------------------------*/
@@ -280,7 +280,7 @@ SANE_Status BrotherUSBDriver::ExecStartSession ()
 
   BrotherSessionResponse resp;
 
-  if (encoder->DecodeSessionResp (small_buffer, 5, resp) != DECODE_STATUS_GOOD)
+  if (encoder->DecodeSessionResp (small_buffer, 5, resp) != SANE_STATUS_GOOD)
   {
     FDBGNP (DBG_WARN,
         "start session response is invalid.");
@@ -314,7 +314,7 @@ SANE_Status BrotherUSBDriver::ExecStopSession ()
 
   BrotherSessionResponse resp;
 
-  if (encoder->DecodeSessionResp (small_buffer, 5, resp) != DECODE_STATUS_GOOD)
+  if (encoder->DecodeSessionResp (small_buffer, 5, resp) != SANE_STATUS_GOOD)
   {
     FDBGNP (DBG_WARN,
         "stop session response is invalid.");
@@ -384,16 +384,16 @@ SANE_Status BrotherUSBDriver::PollDataFromScanner()
  * decoded data will be removed from `data_buffer`.
  *
  */
-DecodeStatus BrotherUSBDriver::DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length)
+SANE_Status BrotherUSBDriver::DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length)
 {
   size_t data_consumed = 0;
 
-  DecodeStatus dec_ret = encoder->DecodeScanData (data_buffer,
-                                                   data_buffer_bytes,
-                                                   &data_consumed,
-                                                   data,
-                                                   max_length,
-                                                   length);
+  SANE_Status dec_ret = encoder->DecodeScanData (data_buffer,
+						 data_buffer_bytes,
+						 &data_consumed,
+						 data,
+						 max_length,
+						 length);
 
   /*
    * Shift down the read buffer so that we can maximise our
@@ -410,7 +410,7 @@ DecodeStatus BrotherUSBDriver::DecodeReadBuffer(SANE_Byte *data, size_t max_leng
        "decoder consumes %zu bytes and writes %zu bytes, returning %s",
        data_consumed,
        *length,
-       encoder->DecodeStatusToString(dec_ret));
+       sane_strstatus(dec_ret));
 
   return dec_ret;
 }
@@ -437,6 +437,11 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
       return SANE_STATUS_CANCELLED;
     }
 
+  if (out_of_docs)
+    {
+      return SANE_STATUS_NO_DOCS;
+    }
+
   if (!is_scanning)
     {
       return SANE_STATUS_EOF;
@@ -448,15 +453,8 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
    */
   if (!in_session)
     {
-      FDBGNP (DBG_SERIOUS, "NULL handle passed.");
+      FDBGNP (DBG_SERIOUS, "session not running.");
       return SANE_STATUS_INVAL;
-    }
-
-  if (!is_scanning)
-    {
-      FDBGNP (DBG_EVENT, "is not scanning.");
-      return SANE_STATUS_CANCELLED;
-
     }
 
   /*
@@ -464,7 +462,7 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
    * No need to read from USB when we still have plenty of data to process.
    *
    */
-  DecodeStatus dec_ret = DecodeReadBuffer(data, max_length, length);
+  SANE_Status dec_ret = DecodeReadBuffer(data, max_length, length);
   if (*length > 0)
     {
       /*
@@ -490,23 +488,7 @@ SANE_Status BrotherUSBDriver::ReadScanData (SANE_Byte *data, size_t max_length, 
       dec_ret = DecodeReadBuffer(data, max_length, length);
     }
 
-  res = encoder->DecodeStatusToSaneStatus(dec_ret);
-
-  if ((dec_ret == DECODE_STATUS_ENDOFDATA) || (dec_ret == DECODE_STATUS_ENDOFFRAME_NO_MORE)
-      || (dec_ret == DECODE_STATUS_NO_DOCS))
-    {
-      next_frame_number++;
-      out_of_docs = true;
-    }
-  else if (dec_ret == DECODE_STATUS_ENDOFFRAME_WITH_MORE)
-    {
-      next_frame_number++;
-      encoder->NewPage();
-    }
-
-  bytes_written_this_page += *length;
-
-  return res;
+  return dec_ret;
 }
 
 /*
@@ -644,10 +626,10 @@ SANE_Status BrotherUSBDriver::Init ()
    *
    */
   size_t packet_len = 0;
-  DecodeStatus dec_ret = encoder->EncodeQueryBlock (small_buffer,
+  SANE_Status dec_ret = encoder->EncodeQueryBlock (small_buffer,
                                                     sizeof(small_buffer),
                                                     &packet_len);
-  if (dec_ret != DECODE_STATUS_GOOD)
+  if (dec_ret != SANE_STATUS_GOOD)
     {
       FDBG (DBG_SERIOUS,
            "failed to generate query block: %d",
@@ -694,7 +676,7 @@ SANE_Status BrotherUSBDriver::Init ()
   BrotherQueryResponse query_resp;
 
   dec_ret = encoder->DecodeQueryBlockResp (small_buffer, buf_size, query_resp);
-  if (dec_ret != DECODE_STATUS_GOOD)
+  if (dec_ret != SANE_STATUS_GOOD)
     {
       FDBG (DBG_SERIOUS,
            "failed to read query block response: %d",
@@ -810,13 +792,14 @@ SANE_Status BrotherUSBDriver::StartScan ()
   /*
    * This is the count of frames we have acquired so far.
    * 0 means that we are at the start of a session so we need to
-   * so all the setup.
+   * do all the setup.
    *
    * If not, then we have come back here to get the next frame, probably
    * from an ADF.
    *
    */
-  if (next_frame_number == 0)
+  next_frame_number++;
+  if (next_frame_number == 1)
     {
       /*
        * This flag indicated that we exhausted all of the frames in this session.
@@ -869,10 +852,10 @@ SANE_Status BrotherUSBDriver::StartScan ()
        *
        */
       size_t packet_len = 0;
-      DecodeStatus dec_ret = encoder->EncodeBasicParameterBlock (small_buffer,
+      SANE_Status dec_ret = encoder->EncodeBasicParameterBlock (small_buffer,
                                                                  sizeof(small_buffer),
                                                                  &packet_len);
-      if (dec_ret != DECODE_STATUS_GOOD)
+      if (dec_ret != SANE_STATUS_GOOD)
         {
           FDBG (DBG_SERIOUS,
                "failed to generate basic param block: %d",
@@ -919,7 +902,7 @@ SANE_Status BrotherUSBDriver::StartScan ()
       BrotherBasicParamResponse basic_param_resp;
 
       dec_ret = encoder->DecodeBasicParameterBlockResp (small_buffer, buf_size, basic_param_resp);
-      if (dec_ret != DECODE_STATUS_GOOD)
+      if (dec_ret != SANE_STATUS_GOOD)
         {
           FDBG (DBG_SERIOUS,
                "failed to read prep parameter block response: %d",
@@ -934,9 +917,9 @@ SANE_Status BrotherUSBDriver::StartScan ()
        */
       packet_len = 0;
       dec_ret = encoder->EncodeSourceSelectBlock (small_buffer, sizeof(small_buffer), &packet_len);
-      if (dec_ret != DECODE_STATUS_UNSUPPORTED)
+      if (dec_ret != SANE_STATUS_UNSUPPORTED)
         {
-          if (dec_ret != DECODE_STATUS_GOOD)
+          if (dec_ret != SANE_STATUS_GOOD)
             {
               FDBG (DBG_SERIOUS,
                    "failed to generate source select block: %d",
@@ -981,13 +964,13 @@ SANE_Status BrotherUSBDriver::StartScan ()
           BrotherSourceStatusResponse source_resp;
 
           dec_ret = encoder->DecodeSourceStatusBlockResp (small_buffer, buf_size, source_resp);
-          if (dec_ret != DECODE_STATUS_GOOD)
+          if (dec_ret != SANE_STATUS_GOOD)
             {
               FDBG (DBG_SERIOUS,
                    "source select response block invalid: %d",
                    dec_ret);
               (void) CancelScan ();
-              return encoder->DecodeStatusToSaneStatus(dec_ret);
+              return dec_ret;
             }
 
           FDBG (DBG_DETAIL,
@@ -1001,7 +984,7 @@ SANE_Status BrotherUSBDriver::StartScan ()
        */
       packet_len = 0;
       dec_ret = encoder->EncodeParameterBlock (small_buffer, sizeof(small_buffer), &packet_len);
-      if (dec_ret != DECODE_STATUS_GOOD)
+      if (dec_ret != SANE_STATUS_GOOD)
         {
           FDBG (DBG_SERIOUS,
                "failed to generate param block: %d",
@@ -1048,7 +1031,7 @@ SANE_Status BrotherUSBDriver::StartScan ()
       if (!is_scanning)
         {
           FDBGNP (DBG_SERIOUS,
-               "next image: we are no scanning!");
+               "next image: we are not scanning!");
           (void) CancelScan ();
           return SANE_STATUS_INVAL;
         }
@@ -1070,10 +1053,10 @@ SANE_Status BrotherUSBDriver::StartScan ()
        * This is not necessary on all families.
        */
       size_t packet_len = 0;
-      DecodeStatus dec_ret = encoder->EncodeParameterBlockBlank (small_buffer,
+      SANE_Status dec_ret = encoder->EncodeParameterBlockBlank (small_buffer,
                                                                  sizeof(small_buffer),
                                                                  &packet_len);
-      if (dec_ret != DECODE_STATUS_GOOD)
+      if (dec_ret != SANE_STATUS_GOOD)
         {
           FDBG (DBG_SERIOUS,
                "failed to generate param block: %d",
@@ -1110,7 +1093,6 @@ SANE_Status BrotherUSBDriver::StartScan ()
    *
    */
   encoder->NewPage();
-  bytes_written_this_page = 0;
 
   return SANE_STATUS_GOOD;
 }
@@ -1137,7 +1119,7 @@ SANE_Status BrotherUSBDriver::CheckSensor (BrotherSensor &status)
 
  BrotherButtonQueryResponse resp;
 
- if (encoder->DecodeButtonQueryResp (small_buffer, 4, resp) != DECODE_STATUS_GOOD)
+ if (encoder->DecodeButtonQueryResp (small_buffer, 4, resp) != SANE_STATUS_GOOD)
  {
    FDBGNP (DBG_WARN,
        "button state response is invalid.");
@@ -1184,18 +1166,18 @@ SANE_Status BrotherUSBDriver::CheckSensor (BrotherSensor &status)
       */
       BrotherButtonStateResponse state_resp;
 
-      DecodeStatus dec_ret = encoder->DecodeButtonStateResp (small_buffer, 9, state_resp);
+      SANE_Status dec_ret = encoder->DecodeButtonStateResp (small_buffer, 9, state_resp);
 
-      if (dec_ret == DECODE_STATUS_GOOD)
+      if (dec_ret == SANE_STATUS_GOOD)
         {
           status = state_resp.button_value;
           return SANE_STATUS_GOOD;
         }
       /* use INVAL to indicate a "no button pressed" response */
-      else if (dec_ret != DECODE_STATUS_INVAL)
+      else if (dec_ret != SANE_STATUS_INVAL)
         {
           FDBGNP (DBG_WARN, "button info response is invalid.");
-          return encoder->DecodeStatusToSaneStatus (dec_ret);
+          return dec_ret;
         }
       else
         {
@@ -1263,7 +1245,6 @@ BrotherUSBDriver::BrotherUSBDriver (const char *devicename, BrotherFamily family
      small_buffer {0},
      data_buffer (nullptr),
      data_buffer_bytes (0),
-     bytes_written_this_page (0),
      out_of_docs(false)
  {
    this->devicename = strdup(devicename);

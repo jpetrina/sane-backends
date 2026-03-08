@@ -111,41 +111,39 @@ public:
    */
   SANE_Status SetSource (BrotherSource source)
   {
-    return encoder->DecodeStatusToSaneStatus (encoder->SetSource (source));
+    return encoder->SetSource (source);
   }
 
   SANE_Status SetScanMode (BrotherScanMode scan_mode)
   {
-    return encoder->DecodeStatusToSaneStatus (encoder->SetScanMode (scan_mode));
+    return encoder->SetScanMode (scan_mode);
   }
 
   SANE_Status SetRes (SANE_Int x, SANE_Int y)
   {
-    return encoder->DecodeStatusToSaneStatus (encoder->SetRes (x, y));
+    return encoder->SetRes (x, y);
   }
 
   SANE_Status SetContrast (SANE_Int contrast)
   {
-    return encoder->DecodeStatusToSaneStatus (encoder->SetContrast (contrast));
+    return encoder->SetContrast (contrast);
   }
 
   SANE_Status SetBrightness (SANE_Int brightness)
   {
-    return encoder->DecodeStatusToSaneStatus (encoder->SetBrightness (brightness));
+    return encoder->SetBrightness (brightness);
   }
 
   SANE_Status SetCompression (SANE_Bool compression)
   {
-    return encoder->DecodeStatusToSaneStatus (encoder->SetCompression (compression));
+    return encoder->SetCompression (compression);
   }
 
   SANE_Status SetScanDimensions (SANE_Int pixel_x_offset, SANE_Int pixel_x_width,
                                  SANE_Int pixel_y_offset, SANE_Int pixel_y_height)
   {
-    return encoder->DecodeStatusToSaneStatus (encoder->SetScanDimensions (pixel_x_offset,
-                                                                          pixel_x_width,
-                                                                          pixel_y_offset,
-                                                                          pixel_y_height));
+    return encoder->SetScanDimensions (pixel_x_offset, pixel_x_width,
+				       pixel_y_offset, pixel_y_height);
   }
 
 protected:
@@ -187,7 +185,7 @@ private:
 
   SANE_Status PollDataFromScanner();
 
-  DecodeStatus DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length);
+  SANE_Status DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length);
 
   void RepeatPreviousScanline(SANE_Byte *data, size_t max_length, size_t *length);
 
