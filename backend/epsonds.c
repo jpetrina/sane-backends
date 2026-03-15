@@ -3140,7 +3140,11 @@ sane_start(SANE_Handle handle)
 
 	}
 	if (!s->hw->has_hardware_lut) { // Set Color Matrix
-		if (s->params.format == SANE_FRAME_RGB && s->hw->lut_id != 0 )/*Color Matrix Target devide and color Scan*/
+		SANE_Bool has_color_matrix_profile =
+			(s->hw->lut_id == 2 || s->hw->lut_id == 4 ||
+			 s->hw->lut_id == 5 || s->hw->lut_id == 6);
+
+		if (s->params.format == SANE_FRAME_RGB && has_color_matrix_profile)/*Color Matrix Target devide and color Scan*/
 		{
 			ColorMatrix matrix;
 
