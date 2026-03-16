@@ -3083,7 +3083,8 @@ sane_start(SANE_Handle handle)
 				cmd[pos++] =  LUT[0][count];
 			}
 		}
-		else if (s->params.format == SANE_FRAME_RGB) {
+		else if (s->params.format == SANE_FRAME_RGB &&
+			 !(strcmp(source_list[s->val[OPT_SOURCE].w], STRING_ADFDUPLEX) == 0 && s->hw->lut_id == 7)) {
 			DBG(10, "SANE_FRAME_RGB\n");
 			cmd[pos++] = '#';
 			cmd[pos++] = 'G';
