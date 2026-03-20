@@ -93,6 +93,8 @@ enum {
 	OPT_LOAD,
 	OPT_ADF_SKEW,
 	OPT_ADF_CRP,
+	OPT_SENSOR_GROUP,
+	OPT_BUTTON_1,
 	NUM_OPTIONS
 };
 
@@ -147,6 +149,8 @@ struct epsonds_device
 	SANE_Bool adf_has_eject;	/* supports eject command */
 	SANE_Byte adf_alignment;	/* left, center, right */
 	SANE_Byte adf_has_dfd;		/* supports double feed detection */
+
+	SANE_Bool has_button;		/* has scan button (interrupt endpoint) */
 
 	SANE_Byte adf_has_crp;		/* supports crp */
 

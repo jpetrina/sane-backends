@@ -77,7 +77,11 @@ changing the value of this macro, it is necessary to reconfigure, rebuild,
 and reinstall SANE for the change to take effect.
 
 Aliases are defined in the config file
-.IR dll.aliases .
+.IR dll.aliases
+and in the files, found in the
+.IR @CONFIGDIR@/dll.aliases.d
+directory.
+
 It can contain entries of the form
 .PP
 .RS

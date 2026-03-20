@@ -4856,7 +4856,7 @@ detect_device (struct Rts8891_Device *dev)
       for (i = 0; i < dev->reg_count; i++)
 	sprintf (message + strlen (message), "0x%02x ", dev->regs[i]);
       sprintf (message + strlen (message), "\n");
-      DBG (DBG_io2, message);
+      DBG (DBG_io2, "%s\n", message);
     }
 
   /* initial sensor guess */

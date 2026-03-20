@@ -669,7 +669,7 @@ void CommandSetGl646::init_regs_for_scan_session(Genesys_Device* dev, const Gene
                                                           session.params.channels,
                                                           session.params.scan_method);
     regs->set16(REG_DPISET, dpiset_sensor.register_dpiset);
-    regs->set16(REG_LPERIOD, sensor.exposure_lperiod);
+    regs->set16(REG_LPERIOD, session.params.exposure_lperiod);
 
   /* move distance must be adjusted to take into account the extra lines
    * read to reorder data */
@@ -789,7 +789,7 @@ void CommandSetGl646::init_regs_for_scan_session(Genesys_Device* dev, const Gene
   regs->find_reg(0x65).value = motor->mtrpwm;
 
     sanei_genesys_calculate_zmod(regs->find_reg(0x02).value & REG_0x02_FASTFED,
-                                 sensor.exposure_lperiod,
+                                 session.params.exposure_lperiod,
                                  slope_table1.table,
                                  slope_table1.table.size(),
                                   move, motor->fwdbwd, &z1, &z2);
@@ -1694,6 +1694,7 @@ void CommandSetGl646::move_back_home(Genesys_Device* dev, bool wait_until_home) 
     session.params.color_filter = ColorFilter::RED;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::REVERSE |
                            ScanFlag::AUTO_GO_HOME |
                            ScanFlag::DISABLE_GAMMA;
@@ -1812,6 +1813,7 @@ void CommandSetGl646::init_regs_for_shading(Genesys_Device* dev, const Genesys_S
     session.params.color_filter = dev->settings.color_filter;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING |
                            ScanFlag::DISABLE_GAMMA |
                            ScanFlag::IGNORE_COLOR_OFFSET |
@@ -1919,6 +1921,7 @@ SensorExposure CommandSetGl646::led_calibration(Genesys_Device* dev, const Genes
     session.params.color_filter = ColorFilter::RED;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING;
     if (dev->settings.scan_method == ScanMethod::TRANSPARENCY) {
         session.params.flags |= ScanFlag::USE_XPA;
@@ -2099,6 +2102,7 @@ static void ad_fe_offset_calibration(Genesys_Device* dev, const Genesys_Sensor& 
     session.params.color_filter = ColorFilter::RED;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING;
     if (dev->settings.scan_method == ScanMethod::TRANSPARENCY) {
         session.params.flags |= ScanFlag::USE_XPA;
@@ -2213,6 +2217,7 @@ void CommandSetGl646::offset_calibration(Genesys_Device* dev, const Genesys_Sens
     session.params.color_filter = ColorFilter::RED;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING;
     if (dev->settings.scan_method == ScanMethod::TRANSPARENCY) {
         session.params.flags |= ScanFlag::USE_XPA;
@@ -2366,6 +2371,7 @@ void CommandSetGl646::coarse_gain_calibration(Genesys_Device* dev, const Genesys
     session.params.color_filter = ColorFilter::RED;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING;
     if (dev->settings.scan_method == ScanMethod::TRANSPARENCY) {
         session.params.flags |= ScanFlag::USE_XPA;
@@ -2480,6 +2486,7 @@ void CommandSetGl646::init_regs_for_warmup(Genesys_Device* dev, const Genesys_Se
     session.params.color_filter =  ColorFilter::RED;
     session.params.contrast_adjustment = 0;
     session.params.brightness_adjustment = 0;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING |
                            ScanFlag::DISABLE_GAMMA;
     if (dev->settings.scan_method == ScanMethod::TRANSPARENCY) {
@@ -2963,6 +2970,7 @@ ScanSession CommandSetGl646::calculate_scan_session(const Genesys_Device* dev,
     session.params.color_filter = settings.color_filter;
     session.params.contrast_adjustment = settings.contrast;
     session.params.brightness_adjustment = settings.brightness;
+    session.params.exposure_lperiod = settings.exposure_lperiod;
     session.params.flags = ScanFlag::AUTO_GO_HOME;
     if (settings.scan_method == ScanMethod::TRANSPARENCY) {
         session.params.flags |= ScanFlag::USE_XPA;

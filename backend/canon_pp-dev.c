@@ -959,13 +959,13 @@ int sanei_canon_pp_calibrate(scanner_parameters *sp, char *cal_file)
 
 	/* Allocate memory for calibration data */
 	sp->blackweight = (unsigned long *)
-		calloc(sizeof(unsigned long), sp->scanheadwidth);
+		calloc(sp->scanheadwidth, sizeof(unsigned long));
 	sp->redweight = (unsigned long *)
-		calloc(sizeof(unsigned long), sp->scanheadwidth);
+		calloc(sp->scanheadwidth, sizeof(unsigned long));
 	sp->greenweight = (unsigned long *)
-		calloc(sizeof(unsigned long), sp->scanheadwidth);
+		calloc(sp->scanheadwidth, sizeof(unsigned long));
 	sp->blueweight = (unsigned long *)
-		calloc(sizeof(unsigned long), sp->scanheadwidth);
+		calloc(sp->scanheadwidth, sizeof(unsigned long));
 
 	/* The data buffer needs to hold a number of images (calibration_reads)
 	 * per colour, each sp->scanheadwidth x scanline_count */

@@ -28,5 +28,6 @@ SANE_Status eds_control(epsonds_scanner *s, void *buf, size_t buf_size);
 SANE_Status eds_fsy(epsonds_scanner *s);
 SANE_Status eds_fsx(epsonds_scanner *s);
 SANE_Status eds_lock(epsonds_scanner *s);
+SANE_Status eds_read_button(epsonds_scanner *s, SANE_Bool *pressed);
 
 #endif

@@ -941,7 +941,7 @@ attach_one (const char *device_name, int connType)
   }
 
   /* build a scanner struct to hold it */
-  if ((s = calloc (sizeof (*s), 1)) == NULL)
+  if ((s = calloc (1, sizeof (*s))) == NULL)
     return SANE_STATUS_NO_MEM;
 
   /* config file settings */

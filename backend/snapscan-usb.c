@@ -81,6 +81,9 @@
 #define SHM_W 0
 #endif
 
+#define DEFAULT_TIMEOUT (30 * 1000) // 30 seconds
+#define FW_DOWNLOAD_TIMEOUT (2 * 1000) // 2 seconds
+
 /* Global variables */
 
 static snapscan_mutex_t snapscan_mutex;
@@ -278,15 +281,15 @@ static SANE_Status usb_write(int fd, const void *buf, size_t n) {
     size_t bytes_written = n;
 
     static const char me[] = "usb_write";
-    DBG(DL_DATA_TRACE, "%s: writing: %s\n",me,usb_debug_data(dbgmsg,buf,n));
+    DBG(DL_DATA_TRACE, "%s: writing:%s\n", me, usb_debug_data(dbgmsg, buf, n));
 
     status = sanei_usb_write_bulk(fd, (const SANE_Byte*)buf, &bytes_written);
-    if(bytes_written != n) {
-      DBG (DL_MAJOR_ERROR, "%s Only %lu bytes written\n",me, (u_long) bytes_written);
-        status = SANE_STATUS_IO_ERROR;
-    }
     urb_counters->write_urbs += (bytes_written + 7) / 8;
     DBG (DL_DATA_TRACE, "Written %lu bytes\n", (u_long) bytes_written);
+    if (bytes_written != n) {
+        DBG(DL_MAJOR_ERROR, "%s: only %lu bytes written\n", me, (u_long)bytes_written);
+        status = SANE_STATUS_IO_ERROR;
+    }
     return status;
 }
 
@@ -297,18 +300,19 @@ static SANE_Status usb_read(SANE_Int fd, void *buf, size_t n) {
     size_t bytes_read = n;
 
     status = sanei_usb_read_bulk(fd, (SANE_Byte*)buf, &bytes_read);
+    urb_counters->read_urbs += ((bytes_read + 63) / 64);
+    if (bytes_read)
+        DBG(DL_DATA_TRACE, "%s: received %lu bytes:%s\n", me, (u_long)bytes_read, usb_debug_data(dbgmsg, buf, bytes_read));
+    else
+        DBG(DL_DATA_TRACE, "%s: received 0 bytes\n", me);
     if (bytes_read != n) {
-        DBG (DL_MAJOR_ERROR, "%s Only %lu bytes read\n",me, (u_long) bytes_read);
+        DBG(DL_MAJOR_ERROR, "%s: only %lu bytes read\n",me, (u_long)bytes_read);
         status = SANE_STATUS_IO_ERROR;
     }
-    urb_counters->read_urbs += ((63 + bytes_read) / 64);
-    DBG(DL_DATA_TRACE, "%s: reading: %s\n",me,usb_debug_data(dbgmsg,buf,n));
-    DBG(DL_DATA_TRACE, "Read %lu bytes\n", (u_long) bytes_read);
     return status;
 }
 
-static SANE_Status usb_read_status(int fd, int *scsistatus, int *transaction_status,
-                                   char command)
+static SANE_Status usb_read_status(int fd, unsigned char *transaction_status, char command)
 {
     static const char me[] = "usb_read_status";
     unsigned char status_buf[8];
@@ -317,13 +321,8 @@ static SANE_Status usb_read_status(int fd, int *scsistatus, int *transaction_sta
 
     RETURN_ON_FAILURE(usb_read(fd,status_buf,8));
 
-    if(transaction_status)
-        *transaction_status = status_buf[0];
-
+    *transaction_status = status_buf[0];
     scsistat = (status_buf[1] & STATUS_MASK) >> 1;
-
-    if(scsistatus)
-        *scsistatus = scsistat;
 
     switch(scsistat) {
     case GOOD:
@@ -355,7 +354,8 @@ static SANE_Status usb_cmd(int fd, const void *src, size_t src_size,
                     void *dst, size_t * dst_size)
 {
   static const char me[] = "usb_cmd";
-  int status,tstatus;
+  SANE_Status status;
+  unsigned char tstatus;
   int cmdlen,datalen;
   char command;
 
@@ -374,19 +374,29 @@ static SANE_Status usb_cmd(int fd, const void *src, size_t src_size,
 
   DBG(DL_DATA_TRACE, "%s: cmdlen=%d, datalen=%d\n",me,cmdlen,datalen);
 
+   sanei_usb_set_timeout(DEFAULT_TIMEOUT);
+
   /* Send command to scanner */
   RETURN_ON_FAILURE( usb_write(fd,src,cmdlen) );
 
   /* Read status */
-  RETURN_ON_FAILURE( usb_read_status(fd, NULL, &tstatus, command) );
+  RETURN_ON_FAILURE(usb_read_status(fd, &tstatus, command));
 
   /* Send data only if the scanner is expecting it */
   if(datalen > 0 && (tstatus == TRANSACTION_WRITE)) {
+      int fw_download = command == SEND && ((unsigned char *)src)[2] == 0x87;
       /* Send data to scanner */
       RETURN_ON_FAILURE( usb_write(fd, ((const SANE_Byte *) src) + cmdlen, datalen) );
 
-      /* Read status */
-      RETURN_ON_FAILURE( usb_read_status(fd, NULL, &tstatus, command) );
+      /* If downloading firmware, don't wait too long, scanner may not send a response */
+      if (fw_download)
+          sanei_usb_set_timeout(FW_DOWNLOAD_TIMEOUT);
+      status = usb_read_status(fd, &tstatus, command);
+      if (fw_download) {
+          sanei_usb_set_timeout(DEFAULT_TIMEOUT);
+          if (status == SANE_STATUS_IO_ERROR)
+              return SANE_STATUS_GOOD;
+      }
   }
 
   /* Receive data only when new data is waiting */
@@ -394,7 +404,7 @@ static SANE_Status usb_cmd(int fd, const void *src, size_t src_size,
       RETURN_ON_FAILURE( usb_read(fd,dst,*dst_size) );
 
       /* Read status */
-      RETURN_ON_FAILURE( usb_read_status(fd, NULL, &tstatus, command) );
+      RETURN_ON_FAILURE(usb_read_status(fd, &tstatus, command));
   }
 
   if(tstatus != TRANSACTION_COMPLETED) {

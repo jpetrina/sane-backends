@@ -71,6 +71,12 @@ eds_dev_post_init(struct epsonds_device *dev)
 		return SANE_STATUS_INVAL;
 	}
 
+	/* ES-60W has a scan button on USB interrupt endpoint */
+	if (eds_is_model(dev, "ES-60W")) {
+		dev->has_button = SANE_TRUE;
+		DBG(10, "%s: button support enabled for %s\n", __func__, dev->model);
+	}
+
 	return SANE_STATUS_GOOD;
 }
 

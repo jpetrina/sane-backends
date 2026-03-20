@@ -468,7 +468,7 @@ attach_one (const char *name)
     /* build a scanner struct to hold it */
     DBG (15, "attach_one: init struct\n");
 
-    if ((s = calloc (sizeof (*s), 1)) == NULL)
+    if ((s = calloc (1, sizeof (*s))) == NULL)
         return SANE_STATUS_NO_MEM;
 
     /* copy the device name */

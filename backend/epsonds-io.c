@@ -24,6 +24,9 @@
 #include "epsonds-io.h"
 #include "epsonds-net.h"
 
+/* Timeout for button polling in milliseconds */
+#define BUTTON_POLL_TIMEOUT 100
+
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
@@ -185,4 +188,62 @@ SANE_Status eds_lock(epsonds_scanner *s)
 	}
 
 	return status;
+}
+
+/*
+ * Read button status from interrupt endpoint.
+ * Returns SANE_TRUE if button was pressed, SANE_FALSE otherwise.
+ * Only works for USB scanners with button support (e.g. ES-60W).
+ *
+ * Note: Button events are buffered by USB hardware until read.
+ * A button press is not lost between polls - it will be reported
+ * on the next call to this function.
+ */
+SANE_Status eds_read_button(epsonds_scanner *s, SANE_Bool *pressed)
+{
+	SANE_Status status;
+	SANE_Byte buffer[8];
+	size_t size = sizeof(buffer);
+
+	*pressed = SANE_FALSE;
+
+	if (s->hw->connection != SANE_EPSONDS_USB) {
+		DBG(5, "%s: not USB, skipping\n", __func__);
+		return SANE_STATUS_UNSUPPORTED;
+	}
+
+	if (!s->hw->has_button) {
+		DBG(5, "%s: no button support\n", __func__);
+		return SANE_STATUS_UNSUPPORTED;
+	}
+
+	DBG(10, "%s: reading interrupt endpoint\n", __func__);
+
+	memset(buffer, 0, sizeof(buffer));
+
+	/* Use short timeout for button polling */
+	sanei_usb_set_timeout(BUTTON_POLL_TIMEOUT);
+
+	status = sanei_usb_read_int(s->fd, buffer, &size);
+
+	/* Restore normal timeout */
+	sanei_usb_set_timeout(USB_TIMEOUT);
+
+	if (status == SANE_STATUS_GOOD && size >= 2) {
+		DBG(10, "%s: got %zu bytes: [%d, %d, %d, %d, %d, %d, %d, %d]\n",
+		    __func__, size,
+		    buffer[0], buffer[1], buffer[2], buffer[3],
+		    buffer[4], buffer[5], buffer[6], buffer[7]);
+
+		/* ES-60W: byte[0]=1 (button ID), byte[1]=1 (pressed) */
+		if (buffer[0] == 1 && buffer[1] == 1) {
+			*pressed = SANE_TRUE;
+			DBG(5, "%s: button pressed!\n", __func__);
+		}
+	} else if (status != SANE_STATUS_GOOD) {
+		/* Timeout is normal when no button press */
+		DBG(15, "%s: no button event (status=%s)\n", __func__, sane_strstatus(status));
+	}
+
+	return SANE_STATUS_GOOD;
 }
