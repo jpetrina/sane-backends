@@ -316,7 +316,7 @@ print_xml_reset_all_jobs (xmlNode *node,
 			print_xml_job_finish (node, &status);
 			if (status == SANE_STATUS_DEVICE_BUSY) {
 			    char *jobUri = (char *)xmlNodeGetContent(node);
-			    char *job = strrchr((const char *)jobUri, '/');
+			    char *job = strrchr(jobUri, '/');
 			    char *scanj = NULL;
 			    if (job != NULL) {
 			        if (strstr(jobUri,"ScanJobs"))

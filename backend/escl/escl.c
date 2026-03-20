@@ -476,6 +476,7 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
     int port = 0;
     SANE_Status status;
     static ESCL_Device *escl_device = NULL;
+    DBG (10, "attach_one_config [%s]\n", line);
     if (*line == '#') return SANE_STATUS_GOOD;
     if (!strncmp(line, "pdfblacklist", 12)) return SANE_STATUS_GOOD;
     if (strncmp(line, "device", 6) == 0) {
@@ -518,35 +519,39 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
     }
 
     if (strncmp(line, "[device]", 8) == 0) {
+	DBG (10, "New Escl_Device");
 	escl_device = escl_free_device(escl_device);
 	escl_device = (ESCL_Device*)calloc(1, sizeof(ESCL_Device));
 	if (!escl_device) {
 	   DBG (10, "New Escl_Device allocation failure.");
 	   return (SANE_STATUS_NO_MEM);
 	}
+        return SANE_STATUS_GOOD;
     }
     else if (strncmp(line, "ip", 2) == 0) {
 	const char *ip_space = sanei_config_skip_whitespace(line + 2);
-	DBG (10, "New Escl_Device IP [%s].", (ip_space ? ip_space : "VIDE"));
 	if (escl_device != NULL && ip_space != NULL) {
+	    DBG (10, "New Escl_Device IP [%s].", (ip_space ? ip_space : "VIDE"));
 	    DBG (10, "New Escl_Device IP Affected.");
 	    escl_device->ip_address = strdup(ip_space);
 	}
+        return SANE_STATUS_GOOD;
     }
     else if (sscanf(line, "port %i", &port) == 1 && port != 0) {
-	DBG (10, "New Escl_Device PORT [%d].", port);
 	if (escl_device != NULL) {
+	    DBG (10, "New Escl_Device PORT [%d].", port);
 	    DBG (10, "New Escl_Device PORT Affected.");
 	    escl_device->port_nb = port;
 	}
     }
     else if (strncmp(line, "model", 5) == 0) {
 	const char *model_space = sanei_config_skip_whitespace(line + 5);
-	DBG (10, "New Escl_Device MODEL [%s].", (model_space ? model_space : "VIDE"));
 	if (escl_device != NULL && model_space != NULL) {
+	    DBG (10, "New Escl_Device MODEL [%s].", (model_space ? model_space : "VIDE"));
 	    DBG (10, "New Escl_Device MODEL Affected.");
 	    escl_device->model_name = strdup(model_space);
 	}
+        return SANE_STATUS_GOOD;
     }
     else if (strncmp(line, "type", 4) == 0) {
 	const char *type_space = sanei_config_skip_whitespace(line + 4);
@@ -555,6 +560,7 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
 	    DBG (10, "New Escl_Device TYPE Affected.");
 	    escl_device->type = strdup(type_space);
 	}
+        return SANE_STATUS_GOOD;
     }
     escl_device->is = strdup("flatbed or ADF scanner");
     escl_device->uuid = NULL;
@@ -562,8 +568,10 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
     snprintf(url_port, sizeof(url_port), "https://%s:%d", escl_device->ip_address, escl_device->port_nb);
     escl_device->tls = escl_is_tls(url_port, escl_device->type);
     status = escl_check_and_add_device(escl_device);
-    if (status == SANE_STATUS_GOOD)
-       escl_device = NULL;
+    if (status == SANE_STATUS_GOOD) {
+    	DBG (10, "attach_one_config finish %s://%s:%d", escl_device->type, escl_device->ip_address, escl_device->port_nb);
+       	escl_device = NULL;
+    }
     return status;
 }
 

@@ -249,7 +249,7 @@ SANE_Status
 epsonds_net_lock(struct epsonds_scanner *s)
 {
 	SANE_Status status;
-	unsigned char buf[7] = "\x01\xa0\x04\x00\x00\x01\x2c";
+	unsigned char buf[7] = {'\x01', '\xa0', '\x04', '\x00', '\x00', '\x01', '\x2c'};
 
 	DBG(1, "%s\n", __func__);
 

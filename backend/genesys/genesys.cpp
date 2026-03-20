@@ -776,6 +776,7 @@ void scanner_move(Genesys_Device& dev, ScanMethod scan_method, unsigned steps, D
     session.params.color_filter = ColorFilter::GREEN;
     session.params.contrast_adjustment = dev.settings.contrast;
     session.params.brightness_adjustment = dev.settings.brightness;
+    session.params.exposure_lperiod = dev.settings.exposure_lperiod;
 
     session.params.flags = ScanFlag::DISABLE_SHADING |
                            ScanFlag::DISABLE_GAMMA |
@@ -943,6 +944,7 @@ void scanner_move_back_home(Genesys_Device& dev, bool wait_until_home)
     session.params.color_filter = ColorFilter::GREEN;
     session.params.contrast_adjustment = dev.settings.contrast;
     session.params.brightness_adjustment = dev.settings.brightness;
+    session.params.exposure_lperiod = dev.settings.exposure_lperiod;
 
     session.params.flags =  ScanFlag::DISABLE_SHADING |
                             ScanFlag::DISABLE_GAMMA |
@@ -1086,6 +1088,7 @@ void scanner_move_back_home_ta(Genesys_Device& dev)
     session.params.color_filter = ColorFilter::GREEN;
     session.params.contrast_adjustment = dev.settings.contrast;
     session.params.brightness_adjustment = dev.settings.brightness;
+    session.params.exposure_lperiod = dev.settings.exposure_lperiod;
 
     session.params.flags =  ScanFlag::DISABLE_SHADING |
                             ScanFlag::DISABLE_GAMMA |
@@ -1198,6 +1201,7 @@ void scanner_search_strip(Genesys_Device& dev, bool forward, bool black)
     session.params.color_filter = ColorFilter::RED;
     session.params.contrast_adjustment = dev.settings.contrast;
     session.params.brightness_adjustment = dev.settings.brightness;
+    session.params.exposure_lperiod = dev.settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING |
                            ScanFlag::DISABLE_GAMMA;
     if (dev.model->asic_type != AsicType::GL841 && !forward) {
@@ -1496,6 +1500,7 @@ void scanner_offset_calibration(Genesys_Device& dev, const Genesys_Sensor& senso
                                                                           : dev.settings.color_filter;
     session.params.contrast_adjustment = dev.settings.contrast;
     session.params.brightness_adjustment = dev.settings.brightness;
+    session.params.exposure_lperiod = dev.settings.exposure_lperiod;
     session.params.flags = flags;
     compute_session(&dev, session, *calib_sensor);
 
@@ -1807,6 +1812,7 @@ void scanner_coarse_gain_calibration(Genesys_Device& dev, const Genesys_Sensor& 
     session.params.color_filter = dev.settings.color_filter;
     session.params.contrast_adjustment = dev.settings.contrast;
     session.params.brightness_adjustment = dev.settings.brightness;
+    session.params.exposure_lperiod = dev.settings.exposure_lperiod;
     session.params.flags = flags;
     compute_session(&dev, session, *calib_sensor);
 
@@ -2002,6 +2008,7 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
     session.params.color_filter = dev.settings.color_filter;
     session.params.contrast_adjustment = dev.settings.contrast;
     session.params.brightness_adjustment = dev.settings.brightness;
+    session.params.exposure_lperiod = dev.settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING |
                            ScanFlag::DISABLE_GAMMA |
                            ScanFlag::SINGLE_LINE |
@@ -4276,6 +4283,8 @@ static Genesys_Settings calculate_scan_settings(Genesys_Scanner* s)
 
     settings.expiration_time = s->expiration_time;
 
+    settings.exposure_lperiod = s->exposure_time;
+
     return settings;
 }
 
@@ -4507,6 +4516,8 @@ static void init_options(Genesys_Scanner* s)
   SANE_Int option;
     const Genesys_Model* model = s->dev->model;
 
+  const auto& sensor = sanei_genesys_find_sensor_any(s->dev);
+
   memset (s->opt, 0, sizeof (s->opt));
 
   for (option = 0; option < NUM_OPTIONS; ++option)
@@ -4588,6 +4599,22 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_RESOLUTION].unit = SANE_UNIT_DPI;
   s->opt[OPT_RESOLUTION].constraint_type = SANE_CONSTRAINT_WORD_LIST;
     set_resolution_option_values(*s, true);
+
+  // exposure time
+  s->opt[OPT_EXPOSURE_TIME].name = SANE_NAME_SCAN_EXPOS_TIME;
+  s->opt[OPT_EXPOSURE_TIME].title = SANE_TITLE_SCAN_EXPOS_TIME;
+  s->opt[OPT_EXPOSURE_TIME].desc = SANE_DESC_SCAN_EXPOS_TIME;
+  s->opt[OPT_EXPOSURE_TIME].type = SANE_TYPE_INT;
+  s->opt[OPT_EXPOSURE_TIME].constraint_type = SANE_CONSTRAINT_RANGE;
+  SANE_Range * exposure_time_range = new(SANE_Range);
+
+  // discovered via trial and error on a plustek opticfilm 7400v1; might vary per-sensor.
+  exposure_time_range->min = 11000;
+  exposure_time_range->max = 0xFFFF;
+  exposure_time_range->quant = 0;
+
+  s->opt[OPT_EXPOSURE_TIME].constraint.range = exposure_time_range;
+  s->exposure_time = sensor.exposure_lperiod;
 
   /* "Geometry" group: */
   s->opt[OPT_GEOMETRY_GROUP].name = SANE_NAME_GEOMETRY;
@@ -5663,6 +5690,9 @@ static void get_option_value(Genesys_Scanner* s, int option, void* val)
     case OPT_RESOLUTION:
         *reinterpret_cast<SANE_Word*>(val) = s->resolution;
         break;
+    case OPT_EXPOSURE_TIME:
+        *reinterpret_cast<SANE_Word*>(val) = s->exposure_time;
+        break;
     case OPT_BIT_DEPTH:
         *reinterpret_cast<SANE_Word*>(val) = s->bit_depth;
         break;
@@ -5871,6 +5901,11 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
         break;
     case OPT_RESOLUTION:
         s->resolution = *reinterpret_cast<SANE_Word*>(val);
+        calc_parameters(s);
+        *myinfo |= SANE_INFO_RELOAD_PARAMS;
+        break;
+    case OPT_EXPOSURE_TIME:
+        s->exposure_time = *reinterpret_cast<SANE_Word*>(val);
         calc_parameters(s);
         *myinfo |= SANE_INFO_RELOAD_PARAMS;
         break;

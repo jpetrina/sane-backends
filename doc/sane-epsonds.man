@@ -68,6 +68,14 @@ The
 .B \-\-adf-mode
 option select the ADF mode (simplex/duplex).
 
+.SH SENSORS
+Some scanners (e.g. ES-60W) have a hardware scan button. The button state can
+be polled via the
+.B \-\-scan
+option, which returns 1 when the button is pressed and 0 otherwise.
+This is useful for scanning applications that want to trigger a scan
+when the user presses the button on the device.
+
 .SH CONFIGURATION FILE
 The configuration file
 .I @CONFIGDIR@/epsonds.conf

@@ -641,7 +641,7 @@ void CommandSetGl846::init_regs_for_scan_session(Genesys_Device* dev, const Gene
 
   slope_dpi = slope_dpi * (1 + dummy);
 
-    exposure_time = sensor.exposure_lperiod;
+    exposure_time = session.params.exposure_lperiod;
     const auto& motor_profile = get_motor_profile(dev->motor.profiles, exposure_time, session);
 
   /* we enable true gray for cis scanners only, and just when doing
@@ -722,6 +722,7 @@ ScanSession CommandSetGl846::calculate_scan_session(const Genesys_Device* dev,
     session.params.color_filter = settings.color_filter;
     session.params.contrast_adjustment = settings.contrast;
     session.params.brightness_adjustment = settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     // backtracking isn't handled well, so don't enable it
     session.params.flags = flags;
 
@@ -846,6 +847,7 @@ void CommandSetGl846::init_regs_for_shading(Genesys_Device* dev, const Genesys_S
     session.params.color_filter = dev->settings.color_filter;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = flags;
     compute_session(dev, session, calib_sensor);
 

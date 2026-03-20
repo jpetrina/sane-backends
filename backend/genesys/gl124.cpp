@@ -718,7 +718,7 @@ void CommandSetGl124::init_regs_for_scan_session(Genesys_Device* dev, const Gene
     if (has_flag(session.params.flags, ScanFlag::FEEDING)) {
         exposure_time = 2304;
     } else {
-        exposure_time = sensor.exposure_lperiod;
+        exposure_time = session.params.exposure_lperiod;
     }
     const auto& motor_profile = get_motor_profile(dev->motor.profiles, exposure_time, session);
 
@@ -782,6 +782,7 @@ ScanSession CommandSetGl124::calculate_scan_session(const Genesys_Device* dev,
     session.params.color_filter = settings.color_filter;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::NONE;
 
     compute_session(dev, session, sensor);
@@ -952,6 +953,7 @@ void CommandSetGl124::init_regs_for_shading(Genesys_Device* dev, const Genesys_S
     session.params.color_filter = ColorFilter::RED;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING |
                            ScanFlag::DISABLE_GAMMA |
                            ScanFlag::DISABLE_BUFFER_FULL_MOVE;
@@ -1087,6 +1089,7 @@ void move_to_calibration_area(Genesys_Device* dev, const Genesys_Sensor& sensor,
     session.params.color_filter = dev->settings.color_filter;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = ScanFlag::DISABLE_SHADING |
                            ScanFlag::DISABLE_GAMMA |
                            ScanFlag::SINGLE_LINE |
@@ -1175,6 +1178,7 @@ void CommandSetGl124::init_regs_for_warmup(Genesys_Device* dev, const Genesys_Se
     session.params.color_filter = dev->settings.color_filter;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = flags;
 
     compute_session(dev, session, sensor);
