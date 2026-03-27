@@ -62,9 +62,6 @@
 #include "brother_mfp-common.h"
 #include "brother_mfp-driver.h"
 
-#define BROTHER_READ_BUFFER_LEN (16 * 1024)
-
-
 /*-----------------------------------------------------------------*/
 
 union BrotherSocketAddr

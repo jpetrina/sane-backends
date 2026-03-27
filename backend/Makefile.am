@@ -386,10 +386,12 @@ libbrother_mfp_la_SOURCES = \
 		brother_mfp/brother_mfp-common.cpp \
 		brother_mfp/brother_mfp-common.h \
         brother_mfp/brother_mfp-driver_usb.cpp \
-        brother_mfp/brother_mfp-driver_network.cpp \
-		brother_mfp/brother_mfp-driver.h \
-		brother_mfp/brother_mfp-encoder.cpp \
-		brother_mfp/brother_mfp-encoder.h \
+        brother_mfp/brother_mfp-driver.h \
+		brother_mfp/brother_mfp-family.cpp \
+		brother_mfp/brother_mfp-family5.cpp \
+		brother_mfp/brother_mfp-family.h \
+		brother_mfp/brother_mfp-data-decoder.cpp \
+		brother_mfp/brother_mfp-data-decoder.h \
 		brother_mfp/brother_mfp.cpp
 libbrother_mfp_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=brother_mfp $(SNMP_CFLAGS)
 

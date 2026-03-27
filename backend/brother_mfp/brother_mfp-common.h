@@ -25,6 +25,7 @@
 #pragma once
 
 #include<string>
+#include "../include/sane/sane.h"
 
 #define BACKEND_NAME            brother_mfp
 #define BROTHER_MFP_CONFIG_FILE "brother_mfp.conf"
@@ -67,6 +68,7 @@
 #define DBG_DETAIL      5
 #define DBG_DEBUG       6
 
+#define BROTHER_READ_BUFFER_LEN (64 * 1024)
 
 /* based on https://stackoverflow.com/a/29856690 */
 /* a constexpr would be great, but std::string_view is a C++17 feature */
@@ -78,3 +80,53 @@ const std::string computeMethodName(const std::string& function, const std::stri
 #define FDBG(LEVEL, TEXT, ...) DBG(LEVEL, "%s: " TEXT "\n", __COMPACT_PRETTY_FUNCTION__, __VA_ARGS__)
 /* no parameter version */
 #define FDBGNP(LEVEL, TEXT) DBG(LEVEL, "%s: " TEXT "\n", __COMPACT_PRETTY_FUNCTION__)
+
+typedef enum
+{
+  BROTHER_SCAN_MODE_COLOR,
+  BROTHER_SCAN_MODE_GRAY,
+  BROTHER_SCAN_MODE_GRAY_DITHERED,
+  BROTHER_SCAN_MODE_TEXT
+} BrotherScanMode;
+
+typedef enum
+{
+  BROTHER_SOURCE_NONE,
+  BROTHER_SOURCE_AUTO,
+  BROTHER_SOURCE_FLATBED,
+  BROTHER_SOURCE_ADF,
+  BROTHER_SOURCE_ADF_DUPLEX,
+} BrotherSource;
+
+struct BrotherParameters
+{
+  BrotherParameters():
+    param_brightness (0),
+    param_contrast (0),
+    param_compression (SANE_TRUE),
+    param_pixel_x_offset (0),
+    param_pixel_x_width (0),
+    param_pixel_y_offset (0),
+    param_pixel_y_height (0),
+    param_scan_mode (BROTHER_SCAN_MODE_COLOR),
+    param_source(BROTHER_SOURCE_FLATBED),
+    param_x_res(100),
+    param_y_res(100)
+  {
+  }
+  SANE_Int param_brightness;
+  SANE_Int param_contrast;
+  SANE_Bool param_compression;
+
+  SANE_Int param_pixel_x_offset;
+  SANE_Int param_pixel_x_width;
+  SANE_Int param_pixel_y_offset;
+  SANE_Int param_pixel_y_height;
+
+  BrotherScanMode param_scan_mode;
+  BrotherSource param_source;
+
+  SANE_Int param_x_res;
+  SANE_Int param_y_res;
+
+};
