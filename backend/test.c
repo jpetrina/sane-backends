@@ -245,7 +245,7 @@ static SANE_Fixed init_tl_x = SANE_FIX (0.0);
 static SANE_Fixed init_tl_y = SANE_FIX (0.0);
 static SANE_Fixed init_br_x = SANE_FIX (80.0);
 static SANE_Fixed init_br_y = SANE_FIX (100.0);
-static SANE_Word init_resolution = 50;
+static SANE_Fixed init_resolution = SANE_FIX (50.0);
 static SANE_String init_mode = NULL;
 static SANE_Word init_depth = 8;
 static SANE_Bool init_hand_scanner = SANE_FALSE;
@@ -2076,7 +2076,7 @@ sane_open (SANE_String_Const devicename, SANE_Handle *handle)
   test_device->cancelled = SANE_FALSE;
   test_device->eof = SANE_FALSE;
   test_device->bytes_total = 0;
-  test_device->pass = 0;
+  test_device->pass = -1;
   test_device->number_of_scans = 0;
 
   return SANE_STATUS_GOOD;
@@ -2105,7 +2105,6 @@ sane_close (SANE_Handle handle)
       return;
     }
   test_device->open = SANE_FALSE;
-  return;
 }
 
 const SANE_Option_Descriptor *
@@ -2855,14 +2854,17 @@ sane_start (SANE_Handle handle)
       return SANE_STATUS_INVAL;
     }
   if (strcmp (test_device->val[opt_mode].s, SANE_VALUE_SCAN_MODE_COLOR) == 0
-      && test_device->val[opt_three_pass].w == SANE_TRUE
-      && test_device->pass > 2)
+      && test_device->val[opt_three_pass].w == SANE_TRUE)
     {
-      DBG (1, "sane_start: already in last pass of three\n");
-      return SANE_STATUS_INVAL;
+      test_device->pass++;
+      if (test_device->pass > 2)
+	{
+	  DBG (1, "sane_start: already in last pass of three\n");
+	  return SANE_STATUS_INVAL;
+	}
     }
 
-  if (test_device->pass == 0)
+  if (test_device->pass == -1)
     {
       test_device->number_of_scans++;
       DBG (3, "sane_start: scanning page %d\n", test_device->number_of_scans);
@@ -3043,13 +3045,6 @@ sane_read (SANE_Handle handle, SANE_Byte *data,
 	  return status;
 	}
       test_device->eof = SANE_TRUE;
-      if (strcmp (test_device->val[opt_mode].s, SANE_VALUE_SCAN_MODE_COLOR) ==
-	  0 && test_device->val[opt_three_pass].w == SANE_TRUE)
-	{
-	  test_device->pass++;
-	  if (test_device->pass > 2)
-	    test_device->pass = 0;
-	}
       if (bytes_read == 0)
 	return SANE_STATUS_EOF;
     }
@@ -3101,6 +3096,9 @@ sane_cancel (SANE_Handle handle)
       DBG (1, "sane_cancel: scan already cancelled\n");
       return;
     }
+
+  test_device->pass = -1;
+
   if (!test_device->scanning)
     {
       DBG (2, "sane_cancel: scan is already finished\n");
@@ -3110,8 +3108,6 @@ sane_cancel (SANE_Handle handle)
   test_device->cancelled = SANE_TRUE;
   test_device->scanning = SANE_FALSE;
   test_device->eof = SANE_FALSE;
-  test_device->pass = 0;
-  return;
 }
 
 SANE_Status
