@@ -224,14 +224,20 @@ SANE_Status BrotherFamily234Base::StartScan()
 	  return SANE_STATUS_NO_DOCS;
 	}
 
-      res = StartScan_ParameterBlank();
-      if (res != SANE_STATUS_GOOD)
+      /*
+       * FAMILY_4 doesn't require this. It just sends the next frame.
+       *
+       */
+      if (family_type != BROTHER_FAMILY_4)
 	{
-	  FDBG(DBG_SERIOUS, "failed to send blank parameter block: %d", res);
-	  (void) CancelScan_Internal();
-	  return res;
+	  res = StartScan_ParameterBlank();
+	  if (res != SANE_STATUS_GOOD)
+	    {
+	      FDBG(DBG_SERIOUS, "failed to send blank parameter block: %d", res);
+	      (void) CancelScan_Internal();
+	      return res;
+	    }
 	}
-
       ResetState(false);
     }
   scan_state = SCANSTATE_ACQUIRING;
@@ -1735,7 +1741,7 @@ SANE_Status BrotherFamily3::EncodeParameterBlock(SANE_Byte *data, size_t data_le
 			      "B=%u\nN=%u\n" /* brightness, contrast */
 			      "A=%u,%u,%u,%u\n" /* scan area */
 			      "D=%s\n" /* single / duplex */
-			      "U=OFF\nP=OFF\n"
+			      "U=OFF\nP=OFF\n"		// TODO: perhaps we don't need this?
 			      "\x80";
   *length = snprintf(
       (char*) data,
@@ -1853,13 +1859,14 @@ SANE_Status BrotherFamily4::DecodeScanDataHeader(const SANE_Byte *src_data, size
 	}
       if (header.block_type == BROTHER_DATA_BLOCK_END_OF_IMAGE)
 	{
-	  FDBG(DBG_DETAIL, "read end of image [0x%2.2x].", header.block_type);
 	  if (src_data_len < 10)
 	    {
 	      return SANE_STATUS_GOOD;	// not enough data yet.
 	    }
 	  *src_data_consumed = 10;
 	  header.image_number = src_data[3] + (src_data[4] << 8);
+	  FDBG(DBG_DETAIL, "read end of image [0x%2.2x] image[%d].", header.block_type,
+	       header.image_number);
 	  return SANE_STATUS_GOOD;
 	}
     }
@@ -1908,11 +1915,8 @@ SANE_Status BrotherFamily4::EncodeParameterBlock(SANE_Byte *data, size_t data_le
 			      "%s\n"
 			      "B=%u\nN=%u\n"
 			      "A=%u,%u,%u,%u\n"
-//			      "S=NORMAL_SCAN\n"
-//			      "P=0\nG=0\nL=0\n"
 			      "D=%s\n"
 			      "\x80";
-
 
   *length = snprintf ((char*) data,
                       data_len,

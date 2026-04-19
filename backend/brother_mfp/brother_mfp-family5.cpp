@@ -620,10 +620,10 @@ SANE_Status BrotherFamily5::EncodeQueryScanInfoBlock (SANE_Byte *data, size_t da
                       "DPLX=%s\nBRIT=%u\nCONT=%u\nATCL=0,0\n"
                       "COMP=%s\nRATE=50\nJSF=420\n"
                       "IPRC=NORMAL\nPTYPE=NORMAL\nPAGE=0\n"
-                      "LONG=OFF\nCARR=OFF\nRMGC=OFF\nDTDF=OFF\nDT4V=OFF\n"
-                      "DSKW=OFF\nLSMD=OFF\nRMBP=OFF\nRMMR=OFF\nGMMA=OFF\n"
-                      "TONE=ON\nQTFD=OFF\nATCN=OFF\nATCRP=OFF\nUSER=\n"
-                      "\x80",
+//                      "LONG=OFF\nCARR=OFF\nRMGC=OFF\nDTDF=OFF\nDT4V=OFF\n"  // TODO: Perhaps we don't need this extra guff?
+//                      "DSKW=OFF\nLSMD=OFF\nRMBP=OFF\nRMMR=OFF\nGMMA=OFF\n"  //       It all looks like FAX thingies anyway.
+                      "TONE=ON\nQTFD=OFF\nATCN=OFF\nATCRP=OFF\nUSER=\n"	    // TODO: Perhaps we could experiment putting something in here?
+                      "\x80",						    //       Would it appear on the device?
                       scan_params.param_source == BROTHER_SOURCE_AUTO ?
                           "AUTO" :
                           (scan_params.param_source == BROTHER_SOURCE_FLATBED ? "FB" : "ADF"),
@@ -1275,10 +1275,11 @@ SANE_Status BrotherFamily5::DecodeScanDataHeader(const SANE_Byte *src_data, size
 	      return SANE_STATUS_GOOD;	// truncated.
 	    }
 
-	  FDBG (DBG_DETAIL, "read end of frame header [0x%2.2x].", header.block_type);
-
 	  *src_data_consumed = 4;
 	  header.image_number = src_data[2] + (src_data[3] << 8);
+	  FDBG(DBG_DETAIL, "read end of frame header [0x%2.2x] image[%d].", header.block_type,
+	       header.image_number);
+
 	  return SANE_STATUS_GOOD;
 	}
 

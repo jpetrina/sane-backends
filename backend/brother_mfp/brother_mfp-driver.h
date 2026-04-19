@@ -45,8 +45,6 @@
 #include "../include/sane/sanei_config.h"
 #include "../include/sane/sanei_usb.h"
 
-//#include "brother_mfp-encoder.h"
-
 /*-----------------------------------------------------------------*/
 
 /*
@@ -72,8 +70,8 @@ struct BrotherSessionResponse
 class BrotherTransport
 {
 public:
-  BrotherTransport():
-    async_io_mode(false)
+  BrotherTransport() :
+      async_io_mode(false)
   {
   }
 
@@ -95,14 +93,14 @@ public:
 
   virtual SANE_Bool IsConnected() = 0;
 
-  virtual SANE_Status SendCommand (const SANE_Byte *send_buffer, size_t send_size) = 0;
+  virtual SANE_Status SendCommand(const SANE_Byte *send_buffer, size_t send_size) = 0;
 
-  virtual SANE_Status ReceiveResponse (SANE_Byte *rec_buffer, size_t *rec_size,
-				       useconds_t *rec_timeout) = 0;
-
-  virtual SANE_Status SendAndReceive (const SANE_Byte *send_buffer, size_t send_size,
-				      SANE_Byte *rec_buffer, size_t *rec_size,
+  virtual SANE_Status ReceiveResponse(SANE_Byte *rec_buffer, size_t *rec_size,
 				      useconds_t *rec_timeout) = 0;
+
+  virtual SANE_Status SendAndReceive(const SANE_Byte *send_buffer, size_t send_size,
+				     SANE_Byte *rec_buffer, size_t *rec_size,
+				     useconds_t *rec_timeout) = 0;
 
   virtual SANE_Status ReadScanData(SANE_Byte *buffer, size_t buffer_len, size_t &bytes_read) = 0;
 
@@ -187,7 +185,7 @@ public:
 
     if (IsCancelled())
       {
-        return SANE_STATUS_CANCELLED;
+	return SANE_STATUS_CANCELLED;
       }
     return res;
   }
@@ -202,20 +200,19 @@ public:
   SANE_Status SetAsyncIOMode(bool async_io) override;
 
 private:
-  SANE_Status ExecStartSession ();
-  SANE_Status ExecStopSession ();
+  SANE_Status ExecStartSession();
+  SANE_Status ExecStopSession();
 
-  SANE_Status DecodeSessionResp (const SANE_Byte *data, size_t data_len,
-				 BrotherSessionResponse &response);
+  SANE_Status DecodeSessionResp(const SANE_Byte *data, size_t data_len,
+				BrotherSessionResponse &response);
 
-  SANE_Status PollForReadFlush (useconds_t max_time);
+  SANE_Status PollForReadFlush(useconds_t max_time);
 
-  SANE_Status PollForRead (SANE_Byte *buffer, size_t *buf_len,
-                           useconds_t *max_time);
+  SANE_Status PollForRead(SANE_Byte *buffer, size_t *buf_len, useconds_t *max_time);
 
   SANE_Status PollDataFromScanner();
 
-  SANE_Bool IsCancelled()
+  SANE_Bool IsCancelled() override
   {
     return want_cancel;
   }
