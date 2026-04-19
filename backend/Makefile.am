@@ -389,6 +389,7 @@ libbrother_mfp_la_SOURCES = \
         brother_mfp/brother_mfp-driver.h \
 		brother_mfp/brother_mfp-family.cpp \
 		brother_mfp/brother_mfp-family5.cpp \
+		brother_mfp/brother_mfp-family234.cpp \
 		brother_mfp/brother_mfp-family.h \
 		brother_mfp/brother_mfp-data-decoder.cpp \
 		brother_mfp/brother_mfp-data-decoder.h \

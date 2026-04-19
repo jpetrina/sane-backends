@@ -46,15 +46,6 @@ ScanDataHeader::ScanDataHeader () :
 {
 }
 
-
-//const char* BrotherFamily2::ScanModeToText (BrotherScanMode scan_mode)
-//{
-//  static const char *scan_mode_text[] =
-//    { "CGRAY", "GRAY64", "ERRDIF", "TEXT" };
-//
-//  return scan_mode_text[scan_mode];
-//}
-
 SANE_Status BrotherFamily::SetSource (BrotherSource source)
 {
   scan_params.param_source = source;
@@ -75,7 +66,7 @@ SANE_Status BrotherFamily::SetScanMode (BrotherScanMode scan_mode)
 
 SANE_Status BrotherFamily::SetRes (SANE_Int x, SANE_Int y)
 {
-  FDBG (DBG_EVENT, "XXXX res set to %d/%d", x, y);
+  FDBG (DBG_EVENT, "res set to %d/%d", x, y);
 
   /*
    * TODO: Perhaps check the validity of the parameter?

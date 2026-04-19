@@ -55,7 +55,7 @@
  * Functionality sets.
  *
  * For the moment, I am going to assume that the various proprietary
- * drivers follow the broad protocol versions and I will reflect this
+ * drivers follow the broad protocol versions and I will assume this
  * until I see different.
  *
  * So these will reflect the brscan2, brscan3, etc that Brother use.
@@ -99,16 +99,24 @@ struct BrotherButtonStateResponse
 };
 
 
-struct BrotherBasicParamResponse
+struct BrotherQueryScanInfoResponse
 {
-  int dummy;
-  // fill me
+  SANE_Int actual_x_res;
+  SANE_Int actual_y_res;
+  SANE_Int min_x;	// 0.1mm unit
+  SANE_Int max_x;	// 0.1mm unit
+  SANE_Int min_y;	// 0.1mm unit
+  SANE_Int max_y;	// 0.1mm unit
 };
 
 struct BrotherQueryResponse
 {
-  int dummy;
-  // fill me
+  SANE_Int info_size;
+  SANE_Int protocol_type;
+  SANE_Int colour_type;
+  SANE_Int hardware_version;
+  SANE_Int dpi_set;
+  SANE_Int paper_size_max;
 };
 
 struct BrotherSourceStatusResponse
@@ -153,36 +161,37 @@ private:
   bool has_read;
 };
 
-
 class BrotherFamily
 {
 public:
-  BrotherFamily (BrotherTransportType transport_type, SANE_String_Const device_name,
-		 SANE_Word capabilities)
+  BrotherFamily(BrotherFamilyType family_type, BrotherTransportType transport_type,
+		SANE_String_Const device_name, SANE_Word capabilities) :
+      family_type(family_type),
+      transport(nullptr),
+      capabilities(capabilities)
   {
-    // TODO: Do we need this?
-    (void)capabilities;
-
     switch (transport_type)
-    {
+      {
       case BROTHERTRANSPORT_USB:
 	transport = new BrotherTransportUSB(device_name);
 	break;
 
       case BROTHERTRANSPORT_ETHERNET:
       default:
-	;
-	// TODO: failure
-    }
+	FDBG(DBG_SERIOUS, "unsupported transport [%d]", transport_type);
+	break;
+      }
   }
 
-  virtual ~BrotherFamily ()
+  virtual ~BrotherFamily()
   {
     delete transport;
   }
 
   /*
    * Settings.
+   *
+   * Can call these any time when not scanning.
    *
    */
   SANE_Status SetSource(BrotherSource source);
@@ -194,6 +203,10 @@ public:
   SANE_Status SetScanDimensions(SANE_Int pixel_x_offset, SANE_Int pixel_x_width,
 				SANE_Int pixel_y_offset, SANE_Int pixel_y_height);
 
+  /*
+   * Operations.
+   *
+   */
   virtual SANE_Status Connect() = 0;
 
   virtual SANE_Status Disconnect() = 0;
@@ -207,156 +220,28 @@ public:
   virtual void Cancel() = 0;
 
 protected:
+  BrotherFamilyType family_type;
   BrotherTransport *transport;
   BrotherParameters scan_params;
+  SANE_Word capabilities;
 };
 
-
-//class BrotherFamily234Base : public BrotherFamily
-//{
-//public:
-//  explicit BrotherFamily234Base(SANE_Word caps):
-//    capabilities(caps),
-//    last_block_type(0),
-//    end_image_flag(false),
-//    out_of_docs(false),
-//    was_cancelled(false)
-//  {
-//  }
-//
-//  ~BrotherFamily234Base ()
-//  {
-//  }
-//
-//  SANE_Status Connect() override;
-//
-//  SANE_Status Disconnect() override;
-//
-//  SANE_Status Start() override;
-//
-//  SANE_Status Read() override;
-//
-//  SANE_Status SetAsyncIOMode(bool async_io) override;
-//
-//  SANE_Status Cancel() override;
-//
-//private:
-//  void NewPage() override;
-//
-//  SANE_Status EncodeQueryBlock (SANE_Byte *data, size_t data_len, size_t *length);
-//
-//  SANE_Status DecodeSessionResp (const SANE_Byte *data, size_t data_len,
-//                                  BrotherSessionResponse &response);
-//
-//  SANE_Status EncodeBasicParameterBlock (SANE_Byte *data, size_t data_len, size_t *length);
-//
-//  SANE_Status DecodeBasicParameterBlockResp (const SANE_Byte *data, size_t data_len,
-//                                              BrotherBasicParamResponse &response);
-//
-//  SANE_Status EncodeSourceStatusBlock (SANE_Byte *data, size_t data_len, size_t *length) ;
-//
-//  SANE_Status DecodeSourceStatusBlockResp (const SANE_Byte *data, size_t data_len,
-//                                            BrotherSourceStatusResponse &response);
-//
-//  SANE_Status EncodeSourceSelectBlock (SANE_Byte *data, size_t data_len, size_t *length);
-//
-//  SANE_Status DecodeSourceSelectBlockResp (const SANE_Byte *data, size_t data_len,
-//                                            BrotherSourceStatusResponse &response);
-//
-//  SANE_Status EncodeParameterBlock (SANE_Byte *data, size_t data_len, size_t *length);
-//
-//  SANE_Status EncodeParameterBlockBlank (SANE_Byte *data, size_t data_len, size_t *length);
-//
-//  SANE_Status DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
-//                               size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
-//                               size_t *dest_data_written)
-//
-//  SANE_Status DecodeButtonQueryResp (const SANE_Byte *data, size_t data_len,
-//                                      BrotherButtonQueryResponse &response)
-//
-//  SANE_Status DecodeButtonStateResp (const SANE_Byte *data, size_t data_len,
-//                                      BrotherButtonStateResponse &response);
-//
-//  SANE_Status EncodeCancelBlock (SANE_Byte *data, size_t data_len, size_t *length);
-//
-//  SANE_Status HasDocs();
-//
-//  virtual SANE_Status DecodeScanDataHeader (const SANE_Byte *src_data, size_t src_data_len,
-//                                             size_t *src_data_consumed, ScanDataHeader &header) = 0;
-//
-//  virtual char const* GetFamilySpecificParameterBlock ()
-//  {
-//    char const * res = "";
-//    return res;
-//  }
-//
-//  SANE_Word capabilities;
-//  ScanDataHeader current_header;
-//
-//  std::list<std::unique_ptr<BrotherScanDataDecoder> > decoders;
-//  SANE_Byte last_block_type;
-//
-//  bool end_image_flag;
-//  bool out_of_docs;
-//  bool was_cancelled;
-//};
-//
-//
-//class BrotherFamily2 : public BrotherFamily234Base
-//{
-//  using BrotherFamily234Base::BrotherFamily234Base;
-//protected:
-//  SANE_Status DecodeQueryBlockResp (const SANE_Byte *data, size_t data_len,
-//                                             BrotherQueryResponse &response) override;
-//  SANE_Status DecodeScanDataHeader (const SANE_Byte *src_data, size_t src_data_len,
-//                                     size_t *src_data_consumed, ScanDataHeader &header) override;
-//};
-//
-//class BrotherFamily3 : public BrotherFamily234Base
-//{
-//  using BrotherFamily234Base::BrotherFamily234Base;
-//protected:
-//  SANE_Status DecodeQueryBlockResp (const SANE_Byte *data, size_t data_len,
-//                                             BrotherQueryResponse &response) override;
-//
-//  SANE_Status DecodeScanDataHeader (const SANE_Byte *src_data, size_t src_data_len,
-//                                     size_t *src_data_consumed, ScanDataHeader &header) override;
-//
-//};
-//
-//class BrotherFamily4 : public BrotherFamily234Base
-//{
-//  using BrotherFamily234Base::BrotherFamily234Base;
-//
-//  SANE_Status EncodeParameterBlockBlank (SANE_Byte *data, size_t data_len,
-//                                          size_t *length) override;
-//protected:
-//  SANE_Status DecodeScanDataHeader (const SANE_Byte *src_data, size_t src_data_len,
-//                                     size_t *src_data_consumed, ScanDataHeader &header) override;
-//
-//  SANE_Status DecodeQueryBlockResp (const SANE_Byte *data, size_t data_len,
-//                                             BrotherQueryResponse &response) override;
-//
-//  char const* GetFamilySpecificParameterBlock () override;
-//};
-
-class BrotherFamily5 : public BrotherFamily
+class BrotherFamily234Base : public BrotherFamily
 {
 public:
-  explicit BrotherFamily5(BrotherTransportType transport_type, SANE_String_Const device_name,
-			  SANE_Word capabilities) :
-      BrotherFamily(transport_type, device_name, capabilities),
-      current_decoder(nullptr),
+  explicit BrotherFamily234Base(BrotherFamilyType family_type, BrotherTransportType transport_type,
+				SANE_String_Const device_name, SANE_Word capabilities) :
+      BrotherFamily(family_type, transport_type, device_name, capabilities),
+      scan_state(SCANSTATE_IDLE),
+      data_buffer_bytes(0),
+      last_block_category(BLOCKCATEGORY_NONE),
       end_image_flag(false),
       out_of_docs(false),
-      was_cancelled(false),
-      scan_state(SCANSTATE_IDLE),
-      data_buffer_bytes(0)
+      was_cancelled(false)
   {
-    (void) capabilities;
   }
 
-  ~BrotherFamily5 ()
+  virtual ~BrotherFamily234Base()
   {
   }
 
@@ -364,7 +249,7 @@ public:
 
   SANE_Status Disconnect() override;
 
-  SANE_Status StartScan () override;
+  SANE_Status StartScan() override;
 
   SANE_Status ReadData(SANE_Byte *data, size_t max_length, size_t *length) override;
 
@@ -372,8 +257,19 @@ public:
 
   void Cancel() override;
 
-private:
+protected:
+  const char* ScanModeToText(BrotherScanMode scan_mode);
 
+  enum BlockCategory
+  {
+    BLOCKCATEGORY_NONE,
+    BLOCKCATEGORY_JPEG,
+    BLOCKCATEGORY_GRAY_RLENGTH,
+    BLOCKCATEGORY_GRAY_RAW,
+    BLOCKCATEGORY_COLOUR_RAW
+  };
+
+private:
   enum ScanState
   {
     SCANSTATE_IDLE,
@@ -386,7 +282,9 @@ private:
    *
    */
   SANE_Status Init();
-  SANE_Status StartScan_BasicParameter();
+  SANE_Status StartScan_SelectSource();
+  SANE_Status StartScan_QueryScanInfo();
+  SANE_Status StartScan_ParameterBlank();
   SANE_Status StartScan_Parameter();
   SANE_Status CancelScan_Internal();
 
@@ -394,84 +292,279 @@ private:
    * Packet encode/decode.
    *
    */
-  const char* ScanModeToText (BrotherScanMode scan_mode);
+  SANE_Status EncodeQueryBlock(SANE_Byte *data, size_t data_len, size_t *length);
 
-  SANE_Status EncodeQueryBlock (SANE_Byte *data, size_t data_len, size_t *length);
+  SANE_Status DecodeQueryBlockResp(const SANE_Byte *data, size_t data_len,
+				   BrotherQueryResponse &response);
 
-  SANE_Status DecodeQueryBlockResp (const SANE_Byte *data, size_t data_len,
-                                     BrotherQueryResponse &response);
+  SANE_Status DecodeSessionResp(const SANE_Byte *data, size_t data_len,
+				BrotherSessionResponse &response);
 
-  SANE_Status DecodeSessionResp (const SANE_Byte *data, size_t data_len,
-                                  BrotherSessionResponse &response);
+  SANE_Status EncodeQueryScanInfoBlock(SANE_Byte *data, size_t data_len, size_t *length);
 
-  SANE_Status EncodeBasicParameterBlock (SANE_Byte *data, size_t data_len, size_t *length);
+  SANE_Status DecodeQueryScanInfoBlockResp(const SANE_Byte *data, size_t data_len,
+					    BrotherQueryScanInfoResponse &response);
 
-  SANE_Status DecodeBasicParameterBlockResp (const SANE_Byte *data, size_t data_len,
-                                              BrotherBasicParamResponse &response);
+  SANE_Status EncodeSourceStatusBlock(SANE_Byte *data, size_t data_len, size_t *length);
 
-  SANE_Status EncodeSourceStatusBlock (SANE_Byte *data, size_t data_len, size_t *length);
+  SANE_Status DecodeSourceStatusBlockResp(const SANE_Byte *data, size_t data_len,
+					  BrotherSourceStatusResponse &response);
 
-  SANE_Status DecodeSourceStatusBlockResp (const SANE_Byte *data, size_t data_len,
-                                            BrotherSourceStatusResponse &response);
+  SANE_Status EncodeSourceSelectBlock(SANE_Byte *data, size_t data_len, size_t *length);
 
-  SANE_Status EncodeSourceSelectBlock (SANE_Byte *data, size_t data_len, size_t *length);
+  SANE_Status DecodeSourceSelectBlockResp(const SANE_Byte *data, size_t data_len,
+					  BrotherSourceStatusResponse &response);
 
-  SANE_Status DecodeSourceSelectBlockResp (const SANE_Byte *data, size_t data_len,
-                                            BrotherSourceStatusResponse &response);
+  SANE_Status EncodeParameterBlockBlank(SANE_Byte *data, size_t data_len, size_t *length);
 
-  SANE_Status EncodeParameterBlock (SANE_Byte *data, size_t data_len, size_t *length);
+  SANE_Status EncodeCancelBlock(SANE_Byte *data, size_t data_len, size_t *length);
 
-  SANE_Status EncodeParameterBlockBlank (SANE_Byte *data, size_t data_len, size_t *length);
+  SANE_Status DecodeScanData(const SANE_Byte *src_data, size_t src_data_len,
+			     size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
+			     size_t *dest_data_written);
 
-  SANE_Status EncodeCancelBlock (SANE_Byte *data, size_t data_len, size_t *length);
+  SANE_Status DecodeButtonQueryResp(const SANE_Byte *data, size_t data_len,
+				    BrotherButtonQueryResponse &response);
 
-  SANE_Status DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
-                               size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
-                               size_t *dest_data_written);
+  SANE_Status DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
+				    BrotherButtonStateResponse &response);
 
-  SANE_Status DecodeButtonQueryResp (const SANE_Byte *data, size_t data_len,
-                                      BrotherButtonQueryResponse &response);
-
-  SANE_Status DecodeButtonStateResp (const SANE_Byte *data, size_t data_len,
-                                      BrotherButtonStateResponse &response);
-
-private:
+protected:
   void ResetState(bool full)
   {
     /*
-     * Reset all state. Some of these shouldn't be necessary be if something
-     * went wrong, this should get us into a known state.
+     * Reset all state to known situation.
+     *
+     * If full is TRUE then reset for first Start().
+     * If full is FALSE then prepare for next image.
      *
      */
-    delete current_decoder;
-    current_decoder = nullptr;
-
+    decoders.clear();
     end_image_flag = false;
-    out_of_docs = false;
 
     if (full)
       {
 	data_buffer_bytes = 0;
 	current_header.block_type = BROTHER_DATA_BLOCK_NONE;
+	out_of_docs = false;
       }
   }
 
-  SANE_Status DecodeScanDataHeader (const SANE_Byte *src_data, size_t src_data_len,
-                                     size_t *src_data_consumed, ScanDataHeader &header);
+  virtual SANE_Status DecodeScanDataHeader(const SANE_Byte *src_data, size_t src_data_len,
+				   size_t *src_data_consumed, ScanDataHeader &header) = 0;
+
+  virtual SANE_Status EncodeParameterBlock(SANE_Byte *data, size_t data_len, size_t *length) = 0;
 
   SANE_Status DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length);
 
   ScanDataHeader current_header;
-  BrotherScanDataDecoder *current_decoder;
-  bool end_image_flag;
-  bool out_of_docs;
-  bool was_cancelled;
   ScanState scan_state;
   SANE_Byte small_send_buffer[1024];
   SANE_Byte small_rec_buffer[1024];
   SANE_Byte data_buffer[BROTHER_READ_BUFFER_LEN];
   size_t data_buffer_bytes;
 
+  std::list<std::unique_ptr<BrotherScanDataDecoder> > decoders;
+  BlockCategory last_block_category;
+
+  bool end_image_flag;
+  bool out_of_docs;
+  bool was_cancelled;	// allows next (Read()) API call to return cancelled status.
   std::mutex mutex;
 };
 
+class BrotherFamily2 : public BrotherFamily234Base
+{
+public:
+  explicit BrotherFamily2(BrotherTransportType transport_type, SANE_String_Const device_name,
+			  SANE_Word capabilities) :
+      BrotherFamily234Base(BROTHER_FAMILY_2, transport_type, device_name, capabilities)
+  {
+  }
+
+  virtual ~BrotherFamily2()
+  {
+  }
+
+protected:
+  SANE_Status DecodeScanDataHeader(const SANE_Byte *src_data, size_t src_data_len,
+					   size_t *src_data_consumed, ScanDataHeader &header) override;
+
+  SANE_Status EncodeParameterBlock(SANE_Byte *data, size_t data_len, size_t *length) override;
+};
+
+class BrotherFamily3 : public BrotherFamily234Base
+{
+public:
+  explicit BrotherFamily3(BrotherTransportType transport_type, SANE_String_Const device_name,
+			  SANE_Word capabilities) :
+      BrotherFamily234Base(BROTHER_FAMILY_3, transport_type, device_name, capabilities)
+  {
+  }
+
+  virtual ~BrotherFamily3()
+  {
+  }
+
+protected:
+  SANE_Status DecodeScanDataHeader(const SANE_Byte *src_data, size_t src_data_len,
+					   size_t *src_data_consumed, ScanDataHeader &header) override;
+
+  SANE_Status EncodeParameterBlock(SANE_Byte *data, size_t data_len, size_t *length) override;
+};
+
+class BrotherFamily4 : public BrotherFamily234Base
+{
+public:
+  explicit BrotherFamily4(BrotherTransportType transport_type, SANE_String_Const device_name,
+			  SANE_Word capabilities) :
+      BrotherFamily234Base(BROTHER_FAMILY_4, transport_type, device_name, capabilities)
+  {
+  }
+
+  virtual ~BrotherFamily4()
+  {
+  }
+
+protected:
+  SANE_Status DecodeScanDataHeader(const SANE_Byte *src_data, size_t src_data_len,
+					   size_t *src_data_consumed, ScanDataHeader &header) override;
+
+  SANE_Status EncodeParameterBlock(SANE_Byte *data, size_t data_len, size_t *length) override;
+};
+
+
+class BrotherFamily5 : public BrotherFamily
+{
+public:
+  explicit BrotherFamily5(BrotherTransportType transport_type, SANE_String_Const device_name,
+			  SANE_Word capabilities) :
+      BrotherFamily(BROTHER_FAMILY_5, transport_type, device_name, capabilities),
+      scan_state(SCANSTATE_IDLE),
+      data_buffer_bytes(0),
+      last_block_type(BROTHER_DATA_BLOCK_NONE),
+      end_image_flag(false),
+      out_of_docs(false),
+      was_cancelled(false)
+  {
+  }
+
+  ~BrotherFamily5()
+  {
+  }
+
+  SANE_Status Connect() override;
+
+  SANE_Status Disconnect() override;
+
+  SANE_Status StartScan() override;
+
+  SANE_Status ReadData(SANE_Byte *data, size_t max_length, size_t *length) override;
+
+  SANE_Status SetAsyncIOMode(bool async_io) override;
+
+  void Cancel() override;
+
+private:
+  enum ScanState
+  {
+    SCANSTATE_IDLE,
+    SCANSTATE_ACQUIRING,
+    SCANSTATE_EOF
+  };
+
+  /*
+   * Transport operations.
+   *
+   */
+  SANE_Status Init();
+  SANE_Status StartScan_QueryScanInfo();
+  SANE_Status StartScan_Parameter();
+  SANE_Status CancelScan_Internal();
+
+  /*
+   * Packet encode/decode.
+   *
+   */
+  const char* ScanModeToText(BrotherScanMode scan_mode);
+
+  SANE_Status EncodeQueryBlock(SANE_Byte *data, size_t data_len, size_t *length);
+
+  SANE_Status DecodeQueryBlockResp(const SANE_Byte *data, size_t data_len,
+				   BrotherQueryResponse &response);
+
+  SANE_Status DecodeSessionResp(const SANE_Byte *data, size_t data_len,
+				BrotherSessionResponse &response);
+
+  SANE_Status EncodeQueryScanInfoBlock(SANE_Byte *data, size_t data_len, size_t *length);
+
+  SANE_Status DecodeQueryScanInfoBlockResp(const SANE_Byte *data, size_t data_len,
+					    BrotherQueryScanInfoResponse &response);
+
+  SANE_Status EncodeSourceStatusBlock(SANE_Byte *data, size_t data_len, size_t *length);
+
+  SANE_Status DecodeSourceStatusBlockResp(const SANE_Byte *data, size_t data_len,
+					  BrotherSourceStatusResponse &response);
+
+  SANE_Status EncodeSourceSelectBlock(SANE_Byte *data, size_t data_len, size_t *length);
+
+  SANE_Status DecodeSourceSelectBlockResp(const SANE_Byte *data, size_t data_len,
+					  BrotherSourceStatusResponse &response);
+
+  SANE_Status EncodeParameterBlock(SANE_Byte *data, size_t data_len, size_t *length);
+
+  SANE_Status EncodeParameterBlockBlank(SANE_Byte *data, size_t data_len, size_t *length);
+
+  SANE_Status EncodeCancelBlock(SANE_Byte *data, size_t data_len, size_t *length);
+
+  SANE_Status DecodeScanData(const SANE_Byte *src_data, size_t src_data_len,
+			     size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
+			     size_t *dest_data_written);
+
+  SANE_Status DecodeButtonQueryResp(const SANE_Byte *data, size_t data_len,
+				    BrotherButtonQueryResponse &response);
+
+  SANE_Status DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
+				    BrotherButtonStateResponse &response);
+
+private:
+  void ResetState(bool full)
+  {
+    /*
+     * Reset all state to known situation.
+     *
+     * If full is TRUE then reset for first Start().
+     * If full is FALSE then prepare for next image.
+     *
+     */
+    decoders.clear();
+    end_image_flag = false;
+
+    if (full)
+      {
+	data_buffer_bytes = 0;
+	current_header.block_type = BROTHER_DATA_BLOCK_NONE;
+	out_of_docs = false;
+      }
+  }
+
+  SANE_Status DecodeScanDataHeader(const SANE_Byte *src_data, size_t src_data_len,
+				   size_t *src_data_consumed, ScanDataHeader &header);
+
+  SANE_Status DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length);
+
+  ScanDataHeader current_header;
+  ScanState scan_state;
+  SANE_Byte small_send_buffer[1024];
+  SANE_Byte small_rec_buffer[1024];
+  SANE_Byte data_buffer[BROTHER_READ_BUFFER_LEN];
+  size_t data_buffer_bytes;
+
+  std::list<std::unique_ptr<BrotherScanDataDecoder> > decoders;
+  SANE_Int last_block_type;
+
+  bool end_image_flag;
+  bool out_of_docs;
+  bool was_cancelled;	// allows next (Read()) API call to return cancelled status.
+  std::mutex mutex;
+};

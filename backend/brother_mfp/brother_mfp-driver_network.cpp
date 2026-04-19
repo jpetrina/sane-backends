@@ -62,6 +62,9 @@
 #include "brother_mfp-common.h"
 #include "brother_mfp-driver.h"
 
+#define BROTHER_READ_BUFFER_LEN (16 * 1024)
+
+
 /*-----------------------------------------------------------------*/
 
 union BrotherSocketAddr
@@ -74,6 +77,8 @@ union BrotherSocketAddr
 
 SANE_Status BrotherNetworkDriver::Connect ()
 {
+  FDBGNP (DBG_EVENT, "");
+
   int val;
 
   if ((sockfd = socket (AF_INET, SOCK_STREAM, 0)) < 0)
@@ -118,7 +123,7 @@ SANE_Status BrotherNetworkDriver::Connect ()
 
   if (init_res != SANE_STATUS_GOOD)
     {
-      FDBG (DBG_SERIOUS, "failed to send init session: %d", init_res);
+      FDBG (DBG_SERIOUS, "BrotherUSBDriver::Connect: failed to send init session: %d", init_res);
       Disconnect ();
     }
 
@@ -139,6 +144,8 @@ SANE_Status BrotherNetworkDriver::Connect ()
 
 SANE_Status BrotherNetworkDriver::SNMPRegisterButtons ()
 {
+  FDBGNP (DBG_EVENT, "");
+
 #if HAVE_LIBSNMP
   init_snmp ("brother_mfp");
 
@@ -284,16 +291,16 @@ SANE_Status BrotherNetworkDriver::ReadScanData (SANE_Byte *data, size_t max_leng
 BrotherNetworkDriver::BrotherNetworkDriver (const char *devicename, BrotherFamily family,
                                             SANE_Word capabilities) :
     BrotherDriver (family, capabilities),
-//    is_open (false),
-//    in_session (false),
-//    is_scanning (false),
-//    was_cancelled (false),
+    is_open (false),
+    in_session (false),
+    is_scanning (false),
+    was_cancelled (false),
     devicename (nullptr),
-//    next_frame_number (0),
+    next_frame_number (0),
     small_buffer { 0 },
     data_buffer (nullptr),
-//    data_buffer_bytes (0),
-//    out_of_docs (false),
+    data_buffer_bytes (0),
+    out_of_docs (false),
     sockfd (0)
  {
    this->devicename = strdup(devicename);

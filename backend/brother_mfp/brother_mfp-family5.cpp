@@ -79,6 +79,8 @@
 
 SANE_Status BrotherFamily5::Connect ()
 {
+  FDBGNP(DBG_EVENT, "");
+
   const std::lock_guard<std::mutex> lock(mutex);
 
   SANE_Status res;
@@ -86,7 +88,7 @@ SANE_Status BrotherFamily5::Connect ()
   res = transport->Acquire();
   if (res != SANE_STATUS_GOOD)
     {
-      FDBG (DBG_SERIOUS, "failed to connect: %d", res);
+      FDBG (DBG_SERIOUS, "failed to acquire: %d", res);
       return res;
     }
 
@@ -101,14 +103,14 @@ SANE_Status BrotherFamily5::Connect ()
   if (res != SANE_STATUS_GOOD)
     {
       (void)transport->Disconnect();
-      FDBG (DBG_SERIOUS, "failed to connect: %d", res);
+      FDBG (DBG_SERIOUS, "failed to init: %d", res);
       return res;
     }
 
   res = transport->Disconnect();
   if (res != SANE_STATUS_GOOD)
     {
-      FDBG (DBG_SERIOUS, "failed to connect: %d", res);
+      FDBG (DBG_SERIOUS, "failed to disconnect: %d", res);
       return res;
     }
 
@@ -117,6 +119,8 @@ SANE_Status BrotherFamily5::Connect ()
 
 SANE_Status BrotherFamily5::Disconnect ()
 {
+  FDBGNP(DBG_EVENT, "");
+
   const std::lock_guard<std::mutex> lock(mutex);
 
   SANE_Status res;
@@ -152,13 +156,13 @@ SANE_Status BrotherFamily5::StartScan ()
       return SANE_STATUS_INVAL;
     }
 
+    was_cancelled = false;
+
   /*
    * If IDLE then we need to kick off a completely new session.
    * There are a few things that we need to send to get things moving.
    *
    */
-  was_cancelled = false;
-
   if (scan_state == SCANSTATE_IDLE)
     {
       ResetState(true);
@@ -175,10 +179,10 @@ SANE_Status BrotherFamily5::StartScan ()
           return res;
         }
 
-      res = StartScan_BasicParameter();
+      res = StartScan_QueryScanInfo();
       if (res != SANE_STATUS_GOOD)
 	{
-          FDBG (DBG_SERIOUS, "failed to send basic parameter block: %d", res);
+          FDBG (DBG_SERIOUS, "failed to send query scan info block: %d", res);
           (void) CancelScan_Internal ();
           return res;
 	}
@@ -208,6 +212,11 @@ SANE_Status BrotherFamily5::ReadData(SANE_Byte *data, size_t max_length, size_t 
 
   FDBGNP(DBG_EVENT, "");
 
+  /*
+   * Make sure that we signal that cancelling happened once
+   * and only once.
+   *
+   */
   if (was_cancelled)
     {
       was_cancelled = false;
@@ -242,7 +251,7 @@ SANE_Status BrotherFamily5::ReadData(SANE_Byte *data, size_t max_length, size_t 
        *
        */
       res = DecodeReadBuffer(data, max_length, length);
-      if ((res == SANE_STATUS_GOOD) && (*length == 0))
+      if ((res == SANE_STATUS_GOOD) && (*length == 0))	 // nothing to decode.
 	{
 	  /*
 	   * In this case we read from transport to further fill data.
@@ -255,6 +264,7 @@ SANE_Status BrotherFamily5::ReadData(SANE_Byte *data, size_t max_length, size_t 
 	  if (res != SANE_STATUS_GOOD)
 	    {
 	      (void)CancelScan_Internal();
+	      scan_state = SCANSTATE_IDLE;
 	      return res;
 	    }
 
@@ -278,7 +288,17 @@ SANE_Status BrotherFamily5::ReadData(SANE_Byte *data, size_t max_length, size_t 
        * going to get really confused. Also, the SANE API standard says that if we are returning
        * SANE_STATUS_EOF, we cannot be passing back any data.
        *
+       * More important to return CANCEL if we were cancelled.
+       *
        */
+      if (was_cancelled)
+        {
+          was_cancelled = false;
+	  (void)CancelScan_Internal();
+	  scan_state = SCANSTATE_IDLE;
+          return SANE_STATUS_CANCELLED;
+        }
+
       if (res == SANE_STATUS_EOF)
 	{
 	  scan_state = SCANSTATE_EOF;
@@ -293,8 +313,11 @@ SANE_Status BrotherFamily5::ReadData(SANE_Byte *data, size_t max_length, size_t 
 
       /*
        * If we are in blocking IO mode, then if we read nothing and no error, wait a bit
-       * and try again. We could release the lock while we're sleeping but we aren't sleeping
-       * for very long and it would make things complicated. Let's not.
+       * and try again.
+       *
+       * We could release the lock while we're sleeping but we aren't sleeping
+       * for very long and it would make things a bit more complicated. Let's not.
+       * TODO: Maybe we should?
        *
        */
       if (transport->GetAsyncIOMode() || (*length != 0))
@@ -303,14 +326,16 @@ SANE_Status BrotherFamily5::ReadData(SANE_Byte *data, size_t max_length, size_t 
 	}
 
       FDBGNP(DBG_DETAIL, "no read, so sleeping for a bit.");
-      struct timespec ts = { 0, 100000 };
-
-      nanosleep(&ts, NULL);
+      usleep(TIMEOUT_MILLISECS(100));
     }
 
   return res;
 }
 
+/*
+ * Decode data from data_buffer and remove what we consumed.
+ *
+ */
 SANE_Status BrotherFamily5::DecodeReadBuffer(SANE_Byte *data, size_t max_length, size_t *length)
 {
   size_t data_consumed = 0;
@@ -327,7 +352,7 @@ SANE_Status BrotherFamily5::DecodeReadBuffer(SANE_Byte *data, size_t max_length,
    */
   if (data_consumed)
     {
-      (void) memmove (data_buffer, data_buffer + data_consumed, data_buffer_bytes - data_consumed);
+      (void) memmove(data_buffer, data_buffer + data_consumed, data_buffer_bytes - data_consumed);
       data_buffer_bytes -= data_consumed;
     }
 
@@ -354,11 +379,16 @@ SANE_Status BrotherFamily5::SetAsyncIOMode(bool async_io)
 
 void BrotherFamily5::Cancel()
 {
+  FDBGNP(DBG_EVENT, "");
+
   /*
    * Do transport cancel before we take the mutex!!!
    * Otherwise, we will never actually abort anything since
    * all other operations hold the mutex as well and we will never
    * take the mutex while another operation is in progress.
+   *
+   * Note that the transport cancel just interrupts any currently
+   * executing operation. It doesn't interact with the device.
    *
    * It is safe to call this one transport function outside
    * the mutex lock and it will try to abort whatever we are
@@ -423,17 +453,17 @@ SANE_Status BrotherFamily5::Init ()
 
 
 
-SANE_Status BrotherFamily5::StartScan_BasicParameter ()
+SANE_Status BrotherFamily5::StartScan_QueryScanInfo ()
 {
   SANE_Status res;
 
   FDBGNP (DBG_EVENT, "");
 
   size_t send_len = 0;
-  res = EncodeBasicParameterBlock (small_send_buffer, sizeof(small_send_buffer), &send_len);
+  res = EncodeQueryScanInfoBlock (small_send_buffer, sizeof(small_send_buffer), &send_len);
   if (res != SANE_STATUS_GOOD)
     {
-      FDBG(DBG_SERIOUS, "failed to generate basic param block: %d", res);
+      FDBG(DBG_SERIOUS, "failed to generate query scan info block: %d", res);
       return SANE_STATUS_INVAL;
     }
 
@@ -443,16 +473,16 @@ SANE_Status BrotherFamily5::StartScan_BasicParameter ()
   res = transport->SendAndReceive(small_send_buffer, send_len, small_rec_buffer, &rec_len, &timeout);
   if ((res != SANE_STATUS_GOOD) || (timeout == 0))
     {
-      FDBG(DBG_SERIOUS, "failed to send basic parameter block: %d", res);
+      FDBG(DBG_SERIOUS, "failed to send query scan info block: %d", res);
       return res;
     }
 
-  BrotherBasicParamResponse basic_param_resp;
+  BrotherQueryScanInfoResponse query_scan_info_resp;
 
-  res = DecodeBasicParameterBlockResp (small_rec_buffer, rec_len, basic_param_resp);
+  res = DecodeQueryScanInfoBlockResp (small_rec_buffer, rec_len, query_scan_info_resp);
   if (res != SANE_STATUS_GOOD)
     {
-      FDBG(DBG_SERIOUS, "failed to read prep parameter block response: %d", res);
+      FDBG(DBG_SERIOUS, "failed to read query scan info block response: %d", res);
       return res;
     }
 
@@ -499,17 +529,15 @@ SANE_Status BrotherFamily5::EncodeQueryBlock (SANE_Byte *data, size_t data_len,
 
   if (*length > data_len)
     {
-      FDBG (DBG_SERIOUS,
-           "query block too long for buffer: %zu",
-           *length);
+      FDBG(DBG_SERIOUS, "query block too long for buffer: %zu", *length);
       return SANE_STATUS_INVAL;
     }
 
   return SANE_STATUS_GOOD;
 }
 
-SANE_Status BrotherFamily5::DecodeQueryBlockResp (const SANE_Byte *data, size_t data_len,
-                                                          BrotherQueryResponse &response)
+SANE_Status BrotherFamily5::DecodeQueryBlockResp(const SANE_Byte *data, size_t data_len,
+						 BrotherQueryResponse &response)
 {
 
   /*
@@ -519,10 +547,7 @@ SANE_Status BrotherFamily5::DecodeQueryBlockResp (const SANE_Byte *data, size_t 
   if ((data_len != 75) || (data[0] != BROTHER_DATA_QUERY_RESPONSE))
 
     {
-      FDBG (DBG_SERIOUS,
-           "invalid query response block: len = %zu",
-           data_len);
-
+      FDBG(DBG_SERIOUS, "invalid query response block: len = %zu", data_len);
       return SANE_STATUS_IO_ERROR;
     }
 
@@ -530,7 +555,7 @@ SANE_Status BrotherFamily5::DecodeQueryBlockResp (const SANE_Byte *data, size_t 
    * TODO: decode the response block to fill in the details.
    *
    */
-  response.dummy = 0;
+  memset(&response, 0, sizeof(response));
 
   return SANE_STATUS_GOOD;
 }
@@ -548,10 +573,7 @@ SANE_Status BrotherFamily5::DecodeSessionResp (const SANE_Byte *data, size_t dat
           && (memcmp (data, "\x05" "\x10" "\x02" "\x02", 4) != 0)))
 
     {
-      FDBG (DBG_SERIOUS,
-           "invalid session response block: len = %zu",
-           data_len);
-
+      FDBG(DBG_SERIOUS, "invalid session response block: len = %zu", data_len);
       return SANE_STATUS_IO_ERROR;
     }
 
@@ -562,10 +584,7 @@ SANE_Status BrotherFamily5::DecodeSessionResp (const SANE_Byte *data, size_t dat
   if ((data[4] != 0x00) && (data[4] != 0x80))
 
     {
-      FDBG (DBG_SERIOUS,
-           "invalid session response: data[4]=%u",
-           (unsigned int) data[4]);
-
+      FDBG(DBG_SERIOUS, "invalid session response: data[4]=%u", (unsigned int ) data[4]);
       return SANE_STATUS_IO_ERROR;
     }
 
@@ -584,15 +603,13 @@ SANE_Status BrotherFamily5::DecodeSessionResp (const SANE_Byte *data, size_t dat
  * as snprintf() will require space for a terminating NUL.
  *
  */
-SANE_Status BrotherFamily5::EncodeBasicParameterBlock (SANE_Byte *data, size_t data_len,
+SANE_Status BrotherFamily5::EncodeQueryScanInfoBlock (SANE_Byte *data, size_t data_len,
 							      size_t *length)
 {
   const char *mode_text = ScanModeToText (scan_params.param_scan_mode);
   if (nullptr == mode_text)
     {
-      FDBG (DBG_SERIOUS,
-           "failed to get scan mode text for mode %d",
-           scan_params.param_scan_mode);
+      FDBG(DBG_SERIOUS, "failed to get scan mode text for mode %d", scan_params.param_scan_mode);
       return SANE_STATUS_INVAL;
     }
 
@@ -622,17 +639,15 @@ SANE_Status BrotherFamily5::EncodeBasicParameterBlock (SANE_Byte *data, size_t d
 
   if (*length > data_len)
     {
-      FDBG (DBG_SERIOUS,
-           "parameter block too long for buffer: %zu",
-           *length);
+      FDBG(DBG_SERIOUS, "parameter block too long for buffer: %zu", *length);
       return SANE_STATUS_INVAL;
     }
 
   return SANE_STATUS_GOOD;
 }
 
-SANE_Status BrotherFamily5::DecodeBasicParameterBlockResp (const SANE_Byte *data, size_t data_len,
-                                                                   BrotherBasicParamResponse &response)
+SANE_Status BrotherFamily5::DecodeQueryScanInfoBlockResp(const SANE_Byte *data, size_t data_len,
+							 BrotherQueryScanInfoResponse &response)
 {
   /*
    * TODO: Decode this block.
@@ -814,9 +829,7 @@ SANE_Status BrotherFamily5::EncodeParameterBlock (SANE_Byte *data, size_t data_l
 
   if (*length > data_len)
     {
-      FDBG (DBG_SERIOUS,
-           "parameter block too long for buffer: %zu",
-           *length);
+      FDBG(DBG_SERIOUS, "parameter block too long for buffer: %zu", *length);
       return SANE_STATUS_INVAL;
     }
 
@@ -827,7 +840,7 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
 					   size_t *src_data_consumed, SANE_Byte *dest_data,
 					   size_t dest_data_len, size_t *dest_data_written)
 {
-  FDBGNP(DBG_SERIOUS, "");
+  FDBGNP(DBG_EVENT, "");
   SANE_Status ret_status = SANE_STATUS_GOOD;
 
   /*
@@ -844,13 +857,35 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
    * the frontend.
    *
    */
-  if (out_of_docs && !current_decoder)
+
+  /*
+   * writer - what we supplying scan data to.
+   * reader - what we are extracting decode data from to put in dest.
+   *
+   * If we are actively decoding, we should *always" have a reader.
+   *
+   */
+  BrotherScanDataDecoder *curr_writer = nullptr;
+  BrotherScanDataDecoder *curr_reader = nullptr;
+
+  if (!decoders.empty())
     {
+      curr_reader = decoders.front().get();
+      if (!end_image_flag)
+	{
+	  curr_writer = decoders.back().get();
+	}
+    }
+
+  if (out_of_docs && !curr_reader)
+    {
+      FDBGNP(DBG_DETAIL, "returning no_docs");
       return SANE_STATUS_NO_DOCS;
     }
 
-  if (end_image_flag && !current_decoder)
+  if (end_image_flag && !curr_reader)
     {
+      FDBGNP(DBG_DETAIL, "returning eof");
       return SANE_STATUS_EOF;
     }
 
@@ -866,35 +901,68 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
       size_t bytes_consumed = 0;
       size_t bytes_written = 0;
 
-      if (current_decoder)
+      /*
+       * If we are actively decoding, then we must *always*
+       * have a reader. At the very end, we might not have a writer once
+       * we have written all available data to the final decoder.
+       *
+       */
+      if (curr_reader)
 	{
-	  if (current_header.block_type != BROTHER_DATA_BLOCK_NONE)
+	  if (curr_reader && (curr_writer == curr_reader))
 	    {
+	      FDBGNP(DBG_DETAIL, "READING AND WRITING SAME DECODER.");
+
 	      size_t in_len = std::min(src_data_len, current_header.block_len);
 
-	      ret_status = current_decoder->DecodeScanData(src_data, in_len, &bytes_consumed,
-							   dest_data, dest_data_len,
-							   &bytes_written);
+	      ret_status = curr_writer->DecodeScanData(src_data, in_len, &bytes_consumed, dest_data,
+						       dest_data_len, &bytes_written);
+	    }
+	  else if (curr_reader && curr_writer && (curr_writer != curr_reader))
+
+	    {
+	      FDBGNP(DBG_DETAIL, "READING AND WRITING DIFFERENT DECODER.");
+
+	      // Input
+	      size_t in_len = std::min(src_data_len, current_header.block_len);
+	      ret_status = curr_writer->DecodeScanData(src_data, in_len, &bytes_consumed, NULL, 0,
+						       &bytes_written);
+
+	      // Output
+	      ret_status = curr_reader->DecodeScanData(NULL, 0, &bytes_consumed, dest_data,
+						       dest_data_len, &bytes_written);
 	    }
 	  else
 	    {
-	      FDBGNP(DBG_SERIOUS, "decoding, but no source.");
+	      FDBGNP(DBG_DETAIL, "READING ONLY: DRAINING.");
 
-	      ret_status = current_decoder->DecodeScanData(nullptr, 0, &bytes_consumed, dest_data,
-							   dest_data_len, &bytes_written);
+	      ret_status = curr_reader->DecodeScanData(NULL, 0, &bytes_consumed, dest_data,
+						       dest_data_len, &bytes_written);
+
 	    }
 
 	  src_data += bytes_consumed;
 	  src_data_len -= bytes_consumed;
 	  *src_data_consumed += bytes_consumed;
 
-	  if (ret_status != SANE_STATUS_GOOD)
+	  if ((ret_status != SANE_STATUS_GOOD) && (ret_status != SANE_STATUS_EOF))
 	    {
 	      // Something bad :(
 	      break;
 	    }
 
-	  // TODO: check current_header.block_len >= bytes_consumed;
+	  /*
+	   * Quick sanity check.
+	   *
+	   * We cannot consume more data than is in the current block.
+	   *
+	   */
+	  if (current_header.block_len < bytes_consumed)
+	    {
+		  FDBG(DBG_SERIOUS, "ERROR: we consumed more data than is in the block.=%zu",
+		       current_header.block_len);
+		  ret_status = SANE_STATUS_IO_ERROR;
+	    }
 
 	  current_header.block_len -= bytes_consumed;
 
@@ -914,10 +982,37 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
 	      current_header.block_type = BROTHER_DATA_BLOCK_NONE;
 	    }
 
-	  if (end_image_flag && !current_decoder->HasUnprocessedDecodeData())
+	  if ((end_image_flag || (decoders.size() > 1) || (ret_status == SANE_STATUS_EOF))
+	      && !curr_reader->HasUnprocessedDecodeData())
 	    {
-	      delete current_decoder;
-	      current_decoder = nullptr;
+	      decoders.pop_front();	// remove current reader.
+
+	      FDBG(DBG_DETAIL, "DELETING DRAINED decoder. Now there are %zu decoders.", decoders.size());
+
+	      /*
+	       * Reset the reader/writer.
+	       *
+	       * We are changing over to the next queued decoder, if there
+	       * is one.
+	       *
+	       */
+	      if (!decoders.empty())
+		{
+		  curr_reader = decoders.front().get();
+		  if (!end_image_flag)
+		    {
+		      curr_writer = decoders.back().get();
+		    }
+		  else
+		    {
+		      curr_writer = nullptr;
+		    }
+		}
+	      else
+		{
+		  curr_writer = nullptr;
+		  curr_reader = nullptr;
+		}
 	    }
 	}
 
@@ -934,7 +1029,7 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
 	    }
 	  else
 	    {
-	      if (current_decoder)
+	      if (!decoders.empty ())
 		{
 		  FDBGNP(
 		      DBG_DETAIL,
@@ -944,11 +1039,7 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
 	      else
 		{
 		  FDBGNP(DBG_DETAIL, "exiting with ENDOFDATA: end of image and decoder flushed.");
-		  if (was_cancelled)
-		    {
-		      return SANE_STATUS_CANCELLED;
-		    }
-		  return SANE_STATUS_EOF;	// All done.
+		  return out_of_docs? SANE_STATUS_NO_DOCS: SANE_STATUS_EOF;	// All done.
 		}
 	    }
 	}
@@ -964,72 +1055,113 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
 	  ret_status = DecodeScanDataHeader(src_data, src_data_len, &header_consumed,
 					    current_header);
 
-	  src_data += header_consumed;
-	  src_data_len -= header_consumed;
-	  *src_data_consumed += header_consumed;
-
-	  if (header_consumed == 0)
-	    {
-	      // This is OK. we just need more data from the device probably.
-	      return SANE_STATUS_GOOD;
-	    }
-	  else if (ret_status != SANE_STATUS_GOOD)
+	  if (ret_status != SANE_STATUS_GOOD)
 	    {
 	      /*
 	       * All other statii are terminal. Something went badly wrong.
 	       * Probably an error condition on the device, like paper jam.
 	       *
 	       */
-	      FDBGNP(DBG_WARN, "something went really wrong reading the block header.");
+	      FDBGNP(DBG_SERIOUS, "read error status from header read.");
 	      break;
 	    }
+	  if (header_consumed == 0)
+	    {
+	      // This is OK. we just need more data from the device probably.
+	      FDBGNP(DBG_DETAIL, "need decode header but need more data.");
+	      return SANE_STATUS_GOOD;
+	    }
+
+	  src_data += header_consumed;
+	  src_data_len -= header_consumed;
+	  *src_data_consumed += header_consumed;
 
 	  /*
 	   * First: aborts. Scan won't finish so we need to stop immediately.
 	   * Can't rely on scanning coming to a normal conclusion so we delete
-	   * the decoder.
+	   * the decoders.
 	   *
 	   */
-	  if ((current_header.block_type == BROTHER_DATA_BLOCK_PROT_CANCEL_5)
-	      || (current_header.block_type == BROTHER_DATA_BLOCK_DEV_CANCEL_5))
+	  if ((current_header.block_type == BROTHER_DATA_BLOCK_PROT_CANCEL_5) ||
+	      (current_header.block_type == BROTHER_DATA_BLOCK_DEV_CANCEL_5))
 	    {
 	      end_image_flag = true;
 	      out_of_docs = true;
 	      was_cancelled = true;
 
-	      delete current_decoder;
-	      current_decoder = nullptr;
+	      decoders.clear();
 	    }
 	  else if (current_header.block_type == BROTHER_DATA_BLOCK_END_OF_FRAME_5)
 	    {
+	      FDBGNP(DBG_DETAIL, "got frame termination header.");
+
 	      end_image_flag = true;
 	    }
 	  else if (current_header.block_type == BROTHER_DATA_BLOCK_END_OF_ALL_FRAMES_5)
 	    {
+	      FDBGNP(DBG_DETAIL, "got end of frame ALL.");
+	      end_image_flag = true;
 	      out_of_docs = true;
 	    }
 	  else
 	    {
-	      if (!current_decoder)
+	      /*
+	       * Create a new decoder, since this is the start of a new data block.
+	       * But only if we have a block for a different type of data.
+	       *
+	       */
+	      BrotherScanDataDecoder *new_decoder = nullptr;
+	      if ((last_block_type != current_header.block_type) || !curr_writer)
 		{
 		  if (current_header.block_type == BROTHER_DATA_BLOCK_JPEG5)
 		    {
-		      current_decoder = new BrotherJFIFDecoder(scan_params);
+		      new_decoder = new BrotherJFIFDecoder(scan_params);
+		      FDBGNP(DBG_EVENT, "CREATED JFIF DECODER.");
 		    }
 		  else if (current_header.block_type == BROTHER_DATA_BLOCK_RLENGTH5)
 		    {
-		      current_decoder = new BrotherGrayRLengthDecoder(scan_params);
+		      new_decoder = new BrotherGrayRLengthDecoder(scan_params);
+		      FDBGNP(DBG_EVENT, "CREATED GRAY RLENGTH DECODER.");
 		    }
 		  else
 		    {
-		      // TODO generate error.
+		      FDBG(DBG_SERIOUS, "detected unrecognised data block type [%d].",
+			   current_header.block_type);
+		      ret_status = SANE_STATUS_IO_ERROR;
+		      break;
 		    }
-		  //TODO Check current_decoder
+
+		  if (!new_decoder)
+		    {
+		      FDBGNP(DBG_SERIOUS, "failed to create new decoder instance.");
+		      ret_status = SANE_STATUS_NO_MEM;
+		      break;
+		    }
+
+		  /*
+		   * Add new decoder to the back of the list.
+		   * It will be our new writer (and maybe reader).
+		   *
+		   */
+		  decoders.push_back (std::unique_ptr<BrotherScanDataDecoder> (new_decoder));
+		  curr_writer = new_decoder;
+		  if (!curr_reader)
+		    {
+		      curr_reader = new_decoder;
+		    }
+		  last_block_type = current_header.block_type;
+		}
+	      else
+		{
+		  FDBGNP(DBG_DETAIL, "using existing writer: no change to type.");
 		}
 	    }
 	}
       else if (!bytes_consumed)
 	{
+	  FDBG(DBG_DETAIL,
+	       "no bytes were consumed. Try for more. src_data_len=%zu dest_data_len=%zu",
+	       src_data_len, dest_data_len);
 	  return SANE_STATUS_GOOD;	// awaiting more data.
 	}
     }
@@ -1041,12 +1173,12 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
    *
    */
   end_image_flag = true;
-  delete current_decoder;
-  current_decoder = nullptr;
-  FDBG(DBG_DETAIL, "exiting with error: %d(%s).", ret_status, sane_strstatus(ret_status));
+  decoders.clear();
+  FDBG (DBG_SERIOUS, "exiting with error: %d(%s).", ret_status, sane_strstatus(ret_status));
 
   return ret_status;
 }
+
 
 /*
  * EndOfFrame (0x82) is 10 bytes long because it doesn't have the
@@ -1064,7 +1196,7 @@ SANE_Status BrotherFamily5::DecodeScanData(const SANE_Byte *src_data, size_t src
 SANE_Status BrotherFamily5::DecodeScanDataHeader(const SANE_Byte *src_data, size_t src_data_len,
 						 size_t *src_data_consumed, ScanDataHeader &header)
 {
-  FDBGNP (DBG_SERIOUS, "");
+  FDBGNP (DBG_EVENT, "");
 
   if (src_data_len == 0)
     {
@@ -1095,22 +1227,22 @@ SANE_Status BrotherFamily5::DecodeScanDataHeader(const SANE_Byte *src_data, size
 
       if (header.block_type == BROTHER_DATA_BLOCK_NO_DOCS_5)
 	{
-	  FDBGNP (DBG_SERIOUS, "read no_docs header.");
+	  FDBGNP (DBG_DETAIL, "read no_docs header.");
 	  return SANE_STATUS_NO_DOCS;
 	}
       if (header.block_type == BROTHER_DATA_BLOCK_PAPER_JAM_5)
 	{
-	  FDBGNP (DBG_SERIOUS, "read no_paper jam header.");
+	  FDBGNP (DBG_DETAIL, "read no_paper jam header.");
 	  return SANE_STATUS_JAMMED;
 	}
       if (header.block_type == BROTHER_DATA_BLOCK_BUSY_ERR)
 	{
-	  FDBGNP (DBG_SERIOUS, "read device busy header.");
+	  FDBGNP (DBG_DETAIL, "read device busy header.");
 	  return SANE_STATUS_DEVICE_BUSY;
 	}
       if (header.block_type == BROTHER_DATA_BLOCK_PROT_ERR)
 	{
-	  FDBGNP (DBG_SERIOUS, "read protocol error header.");
+	  FDBGNP (DBG_DETAIL, "read protocol error header.");
 	  return SANE_STATUS_IO_ERROR;
 	}
 
@@ -1143,7 +1275,7 @@ SANE_Status BrotherFamily5::DecodeScanDataHeader(const SANE_Byte *src_data, size
 	      return SANE_STATUS_GOOD;	// truncated.
 	    }
 
-	  FDBG (DBG_SERIOUS, "read end of frame header [0x%2.2x].", header.block_type);
+	  FDBG (DBG_DETAIL, "read end of frame header [0x%2.2x].", header.block_type);
 
 	  *src_data_consumed = 4;
 	  header.image_number = src_data[2] + (src_data[3] << 8);
@@ -1163,7 +1295,7 @@ SANE_Status BrotherFamily5::DecodeScanDataHeader(const SANE_Byte *src_data, size
 	      return SANE_STATUS_GOOD;	// truncated
 	    }
 
-	  FDBG (DBG_SERIOUS, "read scan termination code [0x%2.2x].", header.block_type);
+	  FDBG (DBG_DETAIL, "read scan termination code [0x%2.2x].", header.block_type);
 
 	  *src_data_consumed = 2;
 	  return SANE_STATUS_GOOD;
@@ -1288,16 +1420,29 @@ SANE_Status BrotherFamily5::CancelScan_Internal()
     {
 
       /*
-       * Send the cancel command.
+       * OK we can be here in a few scenarios:
+       *
+       * 1) We might need to send a cancel command. The situations where this is necessary are:
+       *   a) We are in SCANSTATE_EOF state which means we got the end of an image and the device
+       *      wants to set more images. We will know this because it will try to send us more data.
+       *      For this case, we need to read something further to know what to do. We will poll
+       *      read for a while to see what turns up.
+       *   b) We are in SCANSTATE_ACQUIRING which means that the frontend wants us to abort the current
+       *      image.
+       *
+       * 2) If we are SCANSTATE_IDLE, then there is probably nothing we need to do.
+       *
+       * As it happens, it is OK to send ABT at any time before the final "NO MORE DOCS"
+       * response is sent so if we are not IDLE then we can send it.
        *
        */
-      if (scan_state == SCANSTATE_ACQUIRING)
+      if (scan_state != SCANSTATE_IDLE)
 	{
 	  res = EncodeCancelBlock(small_send_buffer, sizeof(small_send_buffer), &send_len);
 
 	  if (res != SANE_STATUS_GOOD)
 	    {
-	      FDBG(DBG_SERIOUS, "failed to generate basic param block: %d", res);
+	      FDBG(DBG_SERIOUS, "failed to generate cancel block: %d", res);
 	      return SANE_STATUS_INVAL;
 	    }
 

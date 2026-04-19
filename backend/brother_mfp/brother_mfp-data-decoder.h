@@ -220,7 +220,7 @@ private:
   static void ConvertYCbCrToRGB (SANE_Byte y, SANE_Byte cb, SANE_Byte cr, SANE_Byte *red,
                                  SANE_Byte *green, SANE_Byte *blue);
 
-  BrotherParameters decode_params;
+//  BrotherParameters decode_params;
   SANE_Word capabilities;
 
   SANE_Byte *scanline_buffer;
@@ -251,4 +251,3 @@ public:
 private:
   BrotherParameters decode_params;
 };
-

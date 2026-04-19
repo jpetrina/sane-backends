@@ -68,6 +68,8 @@ SANE_Status BrotherGrayRLengthDecoder::DecodeScanData (const SANE_Byte *in_buffe
                                                         size_t out_buffer_len,
                                                         size_t *bytes_written)
 {
+  FDBGNP (DBG_EVENT, "");
+
   *bytes_consumed = 0;
   *bytes_written = 0;
 
@@ -112,7 +114,7 @@ SANE_Status BrotherGrayRLengthDecoder::DecodeScanData (const SANE_Byte *in_buffe
            */
           if (in_buffer_len < 2)
             {
-              FDBGNP (DBG_IMPORTANT, "in_buffer_len < 2: can't decode yet.");
+              FDBGNP (DBG_DETAIL, "in_buffer_len < 2: can't decode yet.");
               break;
             }
 
@@ -134,11 +136,9 @@ SANE_Status BrotherGrayRLengthDecoder::DecodeScanData (const SANE_Byte *in_buffe
           (void) memset (out_buffer, decode_expand_char, output_req);
           written_output = output_req;
 
-          FDBG (DBG_IMPORTANT,
-               "expand block: %zu bytes of 0x%2.2x",
-               output_req,
-               (int) decode_expand_char);
-        }
+	  FDBG(DBG_DETAIL, "expand block: %zu bytes of 0x%2.2x", output_req,
+	       (int ) decode_expand_char);
+	}
       else
         {
 
@@ -160,10 +160,8 @@ SANE_Status BrotherGrayRLengthDecoder::DecodeScanData (const SANE_Byte *in_buffe
           consumed_input = output_req;
           written_output = output_req;
 
-          FDBG (DBG_IMPORTANT,
-               "bytes block: %zu bytes",
-               output_req);
-        }
+	  FDBG(DBG_DETAIL, "bytes block: %zu bytes", output_req);
+	}
 
       /*
        * Adjust for the consumed input and written output.
@@ -178,11 +176,7 @@ SANE_Status BrotherGrayRLengthDecoder::DecodeScanData (const SANE_Byte *in_buffe
 
   if (!in_buffer_len || !out_buffer_len)
     {
-      FDBG (DBG_DETAIL,
-           "ran out of buffer: in %zu out %zu",
-           in_buffer_len,
-           out_buffer_len);
-
+      FDBG(DBG_DETAIL, "ran out of buffer: in %zu out %zu", in_buffer_len, out_buffer_len);
     }
   *bytes_consumed = in_buffer_len_start - in_buffer_len;
   *bytes_written = out_buffer_len_start - out_buffer_len;
@@ -405,7 +399,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData (const SANE_Byte *src_data, size_
                                                  size_t *src_data_consumed, SANE_Byte *dest_data,
                                                  size_t dest_data_len, size_t *dest_data_written)
 {
-  FDBG (DBG_SERIOUS,
+  FDBG (DBG_EVENT,
        "src_data_len=%zu dest_data_len=%zu",
        src_data_len,
        dest_data_len);
@@ -420,7 +414,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData (const SANE_Byte *src_data, size_
    */
   for (;;)
     {
-      FDBGNP (DBG_SERIOUS, "In Loop...");
+      FDBGNP (DBG_DETAIL, "In Loop...");
 
       /*
        * Append what we can to the decompress buffer.
@@ -491,7 +485,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
                                                                 size_t dest_data_len,
                                                                 size_t *dest_data_written)
 {
-  FDBGNP (DBG_SERIOUS, "");
+  FDBGNP (DBG_EVENT, "");
 
   *src_data_consumed = 0;
   *dest_data_written = 0;
@@ -506,7 +500,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
     return SANE_STATUS_INVAL;
   }
 
-  FDBG (DBG_EVENT,
+  FDBG (DBG_DETAIL,
        "src_data_len=%zu dest_data_len=%zu",
        src_data_len,
        dest_data_len);
@@ -520,7 +514,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
 
   if (setjmp(state.my_env) != 0)
     {
-      FDBGNP (DBG_EVENT, "setjmp error return");
+      FDBGNP (DBG_SERIOUS, "setjmp error return");
       return SANE_STATUS_IO_ERROR;
     }
 
@@ -530,7 +524,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
    */
   if (!state.have_read_header)
     {
-      FDBGNP (DBG_EVENT, "Trying to read header.");
+      FDBGNP (DBG_DETAIL, "Trying to read header.");
 
       int read_status = jpeg_read_header(&state.cinfo, TRUE);
       if (read_status == JPEG_SUSPENDED)
@@ -548,7 +542,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
        * For gray it is JCS_GRAYSCALE. For colour it is JCS_RGB.
        *
        * Note: it does not seem like Brother machines use this mode.
-       * Grey images ae sent as 3 channel colour with all channels containing
+       * Grey images are sent as 3 channel colour with all channels containing
        * the grey data.
        */
 //      if (decode_params.param_scan_mode == BROTHER_SCAN_MODE_GRAY)
@@ -556,7 +550,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
 //          state.cinfo.out_color_space = JCS_GRAYSCALE;
 //        }
 
-      FDBGNP (DBG_EVENT, "Starting decompress.");
+      FDBGNP (DBG_DETAIL, "Starting decompress.");
 
       if (!jpeg_start_decompress(&state.cinfo))
 	{
@@ -580,7 +574,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
 	  return SANE_STATUS_IO_ERROR;
 	}
 
-      FDBG (DBG_IMPORTANT,
+      FDBG (DBG_DETAIL,
            "image parameters: width=%zu height=%zu",
            (size_t)state.cinfo.image_width, (size_t)state.cinfo.image_height);
 
@@ -620,7 +614,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
    */
   if (!raw_data_buffer)
     {
-      FDBGNP (DBG_DETAIL, "we don't have a raw buffer to decode into!");
+      FDBGNP (DBG_SERIOUS, "we don't have a raw buffer to decode into!");
       return SANE_STATUS_NO_MEM;
     }
 
@@ -685,7 +679,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
 
       output_size -= dest_line_size;
 
-      FDBG (DBG_SERIOUS,
+      FDBG (DBG_DETAIL,
            "Converted %u scanlines. "
            "Remaining scanlines: %u output_remaining=%zu decompress_remaining=%zu",
            (unsigned int) converted,
@@ -706,7 +700,7 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
   *dest_data_written = output_ptr - dest_data;
   *src_data_consumed = src_data_len - state.src_mgr.bytes_in_buffer;
 
-  FDBG (DBG_EVENT,
+  FDBG (DBG_DETAIL,
        "Finished: consumed %zu bytes, written %zu bytes",
        *src_data_consumed,
        *dest_data_written);
@@ -754,6 +748,8 @@ SANE_Status BrotherGrayRawDecoder::DecodeScanData (const SANE_Byte *src_data, si
                                                     size_t *src_data_consumed, SANE_Byte *dest_data,
                                                     size_t dest_data_len, size_t *dest_data_written)
 {
+  FDBGNP (DBG_EVENT, "");
+
   /*
    * Quick check. This isn't strictly necessary because the following code copes
    * properly with src_data_len == 0, but we might change this code in the future
@@ -778,8 +774,7 @@ SANE_Status BrotherGrayRawDecoder::DecodeScanData (const SANE_Byte *src_data, si
   *dest_data_written = copy_len;
   *src_data_consumed = copy_len;
 
-  FDBG(DBG_SERIOUS, "Transfered %zu GRAY data.", copy_len);
+  FDBG(DBG_DETAIL, "Transferred %zu GRAY data.", copy_len);
 
   return SANE_STATUS_GOOD;
 }
-
