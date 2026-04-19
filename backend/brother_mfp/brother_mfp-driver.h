@@ -131,26 +131,26 @@ public:
   {
   }
 
-  SANE_Status Acquire();
+  SANE_Status Acquire() override;
 
-  SANE_Status Release();
+  SANE_Status Release() override;
 
-  SANE_Bool IsAcquired();
+  SANE_Bool IsAcquired() override;
 
-  SANE_Status Connect();
+  SANE_Status Connect() override;
 
-  SANE_Status Disconnect();
+  SANE_Status Disconnect() override;
 
-  SANE_Bool IsConnected();
+  SANE_Bool IsConnected() override;
 
-  SANE_Status SendCommand(const SANE_Byte *send_buffer, size_t send_size);
+  SANE_Status SendCommand(const SANE_Byte *send_buffer, size_t send_size) override;
 
-  SANE_Status ReceiveResponse(SANE_Byte *rec_buffer, size_t *rec_size, useconds_t *rec_timeout);
+  SANE_Status ReceiveResponse(SANE_Byte *rec_buffer, size_t *rec_size, useconds_t *rec_timeout) override;
 
   SANE_Status SendAndReceive(const SANE_Byte *send_buffer, size_t send_size, SANE_Byte *rec_buffer,
-			     size_t *rec_size, useconds_t *rec_timeout);
+			     size_t *rec_size, useconds_t *rec_timeout) override;
 
-  SANE_Status ReadScanData(SANE_Byte *buffer, size_t buffer_len, size_t &bytes_read)
+  SANE_Status ReadScanData(SANE_Byte *buffer, size_t buffer_len, size_t &bytes_read) override
   {
     SANE_Status res;
 
@@ -192,7 +192,7 @@ public:
     return res;
   }
 
-  void Cancel()
+  void Cancel() override
   {
     want_cancel = true;
     const std::lock_guard<std::mutex> lock(mutex);
