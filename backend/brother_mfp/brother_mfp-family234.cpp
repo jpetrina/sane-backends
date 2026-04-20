@@ -1431,6 +1431,12 @@ SANE_Status BrotherFamily234Base::DecodeQueryBlockResp(const SANE_Byte *data, si
   return SANE_STATUS_GOOD;
 }
 
+SANE_Status BrotherFamily234Base::ReadButtons(SANE_Int &button_mask)
+{
+  return transport->ReadButtons(button_mask);
+}
+
+
 //==================Brother 2============================================================
 SANE_Status BrotherFamily2::DecodeScanDataHeader(const SANE_Byte *src_data, size_t src_data_len,
 						 size_t *src_data_consumed, ScanDataHeader &header)

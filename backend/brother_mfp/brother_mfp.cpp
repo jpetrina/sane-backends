@@ -1550,12 +1550,11 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
            *
            */
           {
-            // TODO: complete me.
-//            BrotherSensor sensor = BROTHER_SENSOR_NONE;
-//            if (device->driver->CheckSensor(sensor) == SANE_STATUS_GOOD)
-//              {
-//                device->current_sensor_states |= sensor;
-//              }
+            SANE_Int button_mask = BROTHER_SENSOR_NONE;
+            if (device->driver->ReadButtons(button_mask) == SANE_STATUS_GOOD)
+              {
+                device->current_sensor_states |= button_mask;
+              }
             switch (option)
             {
               case OPT_SENSOR_EMAIL:

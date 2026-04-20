@@ -1474,3 +1474,8 @@ SANE_Status BrotherFamily5::CancelScan_Internal()
 
   return SANE_STATUS_GOOD;
 }
+
+SANE_Status BrotherFamily5::ReadButtons(SANE_Int &button_mask)
+{
+  return transport->ReadButtons(button_mask);
+}

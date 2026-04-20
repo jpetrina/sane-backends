@@ -67,6 +67,22 @@ struct BrotherSessionResponse
   SANE_Bool ready;
 };
 
+struct BrotherButtonStateResponse
+{
+  SANE_Int button_value;   // raw value we get from the packet
+};
+
+struct BrotherButtonQueryResponse
+{
+  SANE_Bool has_button_press;
+};
+
+#define BROTHER_SENSOR_NONE     0
+#define BROTHER_SENSOR_EMAIL    (1 << 0)
+#define BROTHER_SENSOR_FILE     (1 << 1)
+#define BROTHER_SENSOR_OCR      (1 << 2)
+#define BROTHER_SENSOR_IMAGE    (1 << 3)
+
 class BrotherTransport
 {
 public:
@@ -103,6 +119,8 @@ public:
 				     useconds_t *rec_timeout) = 0;
 
   virtual SANE_Status ReadScanData(SANE_Byte *buffer, size_t buffer_len, size_t &bytes_read) = 0;
+
+  virtual SANE_Status ReadButtons(SANE_Int &button_mask) = 0;
 
   virtual SANE_Status SetAsyncIOMode(bool async_io) = 0;
 
@@ -190,6 +208,8 @@ public:
     return res;
   }
 
+  SANE_Status ReadButtons (SANE_Int &button_mask) override;
+
   void Cancel() override
   {
     want_cancel = true;
@@ -205,6 +225,12 @@ private:
 
   SANE_Status DecodeSessionResp(const SANE_Byte *data, size_t data_len,
 				BrotherSessionResponse &response);
+
+  SANE_Status DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
+				    BrotherButtonStateResponse &response);
+
+  SANE_Status DecodeButtonQueryResp(const SANE_Byte *data, size_t data_len,
+				    BrotherButtonQueryResponse &response);
 
   SANE_Status PollForReadFlush(useconds_t max_time);
 

@@ -520,77 +520,131 @@ bool BrotherTransport::GetAsyncIOMode()
   return async_io_mode;
 }
 
+SANE_Status BrotherTransportUSB::ReadButtons(SANE_Int &button_mask)
+{
+  SANE_Status res = sanei_usb_control_msg(fd, USB_DIR_IN | USB_TYPE_VENDOR,
+					  BROTHER_USB_REQ_BUTTONSTATE,
+					  0, 0, 255, small_buffer);
 
-//SANE_Status BrotherUSBDriver::CheckSensor (BrotherSensor &status)
-//{
-//  if (!encoder)
-//    {
-//      DBG (DBG_WARN, "BrotherUSBDriver::CheckSensor: no encoder");
-//      return SANE_STATUS_UNSUPPORTED;
-//    }
-//
-//  SANE_Status res = sanei_usb_control_msg (fd, USB_DIR_IN | USB_TYPE_VENDOR,
-//                                           BROTHER_USB_REQ_BUTTONSTATE,
-//                                           0, 0, 255, small_buffer);
-//
-// if (res != SANE_STATUS_GOOD)
-//   {
-//     DBG (DBG_WARN,
-//         "BrotherUSBDriver::CheckSensor: failed to send check sensor sequence: %s.",
-//         devicename);
-//     return res;
-//   }
-//
-// BrotherButtonQueryResponse resp;
-//
-// if (encoder->DecodeButtonQueryResp (small_buffer, 4, resp) != DECODE_STATUS_GOOD)
-// {
-//   DBG (DBG_WARN,
-//       "BrotherUSBDriver::CheckSensor: button state response is invalid.");
-//   return SANE_STATUS_IO_ERROR;
-// }
-//
-// if (resp.has_button_press == BROTHER_SENSOR_NONE)
-//   {
-//     status = BROTHER_SENSOR_NONE;
-//     return SANE_STATUS_GOOD;
-//   }
-//
-// DBG (DBG_DETAIL,
-//     "BrotherUSBDriver::CheckSensor: scanner indicates a button was pushed.");
-//
-// /*
-//  * Now we query the button state.
-//  * The request is the same apparently but we get a different response.
-//  * Not really sure I understand because it seems stateful this but it is what we observe.
-//  *
-//  */
-//  res = sanei_usb_control_msg (fd, USB_DIR_IN | USB_TYPE_VENDOR,
-//                               BROTHER_USB_REQ_BUTTONSTATE,
-//                               0, 0, 255, small_buffer);
-//
-//if (res != SANE_STATUS_GOOD)
-//  {
-//    DBG (DBG_WARN,
-//        "BrotherUSBDriver::CheckSensor: failed to send check sensor sequence: %s.",
-//        devicename);
-//      return res;
-//    }
-//
-//  /*
-//   * And the second response is a bit longer and button specific.
-//   *
-//   */
-//  BrotherButtonStateResponse state_resp;
-//
-//  DecodeStatus dec_ret = encoder->DecodeButtonStateResp (small_buffer, 9, state_resp);
-//  if (dec_ret != DECODE_STATUS_GOOD)
-//    {
-//      DBG (DBG_WARN, "BrotherUSBDriver::CheckSensor: button info response is invalid.");
-//      return encoder->DecodeStatusToSaneStatus (dec_ret);;
-//    }
-//
-//  status = state_resp.button_value;
-//
-//  return SANE_STATUS_GOOD;
-//}
+  if (res != SANE_STATUS_GOOD)
+    {
+      FDBG(DBG_SERIOUS, "failed to send check sensor sequence: %s.", devicename.c_str());
+      return res;
+    }
+
+  BrotherButtonQueryResponse resp;
+
+  if (DecodeButtonQueryResp(small_buffer, 4, resp) != SANE_STATUS_GOOD)
+    {
+      FDBGNP(DBG_SERIOUS, "button state response is invalid.");
+      return SANE_STATUS_IO_ERROR;
+    }
+
+  if (resp.has_button_press == BROTHER_SENSOR_NONE)
+    {
+      button_mask = BROTHER_SENSOR_NONE;
+      return SANE_STATUS_GOOD;
+    }
+
+  FDBGNP(DBG_DETAIL, "scanner indicates a button was pushed.");
+
+  /*
+   * Now we query the button state.
+   * The request is the same apparently but we get a different response.
+   * Not really sure I understand because it seems stateful this but it is what we observe.
+   *
+   */
+  res = sanei_usb_control_msg(fd, USB_DIR_IN | USB_TYPE_VENDOR,
+			      BROTHER_USB_REQ_BUTTONSTATE,
+			      0, 0, 255, small_buffer);
+
+  if (res != SANE_STATUS_GOOD)
+    {
+      FDBG(DBG_SERIOUS, "failed to send check sensor sequence: %s.", devicename.c_str());
+      return res;
+    }
+
+  /*
+   * And the second response is a bit longer and button specific.
+   *
+   */
+  BrotherButtonStateResponse state_resp;
+
+  res = DecodeButtonStateResp(small_buffer, 9, state_resp);
+  if (res != SANE_STATUS_GOOD)
+    {
+      FDBGNP(DBG_WARN, "button info response is invalid.");
+      return res;
+    }
+
+  button_mask = state_resp.button_value;
+
+  return SANE_STATUS_GOOD;
+}
+
+SANE_Status BrotherTransportUSB::DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
+						       BrotherButtonStateResponse &response)
+{
+  if (data_len != 9)
+    {
+      return SANE_STATUS_IO_ERROR;
+    }
+
+  BrotherButtonQueryResponse dummy;
+  if (DecodeButtonQueryResp(data, 4, dummy) == SANE_STATUS_GOOD)
+    {
+      /* We may get "no button pressed" responses while waiting for the second
+       * packet containing info on which button was pressed. We encode these
+       * intermediate packets by SANE_STATUS_INVAL. */
+      return SANE_STATUS_INVAL;
+    }
+  if (memcmp(data, "\x09" "\x10" "\x03" "\x20", 4) != 0)
+    {
+      return SANE_STATUS_IO_ERROR;
+    }
+
+  response.button_value = 0;
+
+  switch (data[4])
+    {
+    case 0x05:
+      response.button_value = BROTHER_SENSOR_FILE;
+      break;
+
+    case 0x02:
+      response.button_value = BROTHER_SENSOR_OCR;
+      break;
+
+    case 0x03:
+      response.button_value = BROTHER_SENSOR_IMAGE;
+      break;
+
+    case 0x08:
+      response.button_value = BROTHER_SENSOR_EMAIL;
+      break;
+
+    case 0x00:
+      break;
+
+    default:
+      FDBG(DBG_WARN, "unknown button code: %d.", data[4]);
+      return SANE_STATUS_UNSUPPORTED;
+    }
+
+  return SANE_STATUS_GOOD;
+}
+
+SANE_Status BrotherTransportUSB::DecodeButtonQueryResp(const SANE_Byte *data, size_t data_len,
+						       BrotherButtonQueryResponse &response)
+{
+  /* family4 sometimes begins with a 0x05 */
+  if ((data_len != 4) || (data[0] != 0x05 && data[0] != 0x04) || (data[1] != 0x10)
+      || (data[2] != 0x03))
+    {
+      return SANE_STATUS_IO_ERROR;
+    }
+
+  response.has_button_press = data[3] == 0x10;
+
+  return SANE_STATUS_GOOD;
+}

@@ -60,9 +60,9 @@ public:
 
   virtual void NewBlock() = 0;
 
-  virtual SANE_Status DecodeScanData (const SANE_Byte *src_data, size_t src_data_len,
-                               size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
-                               size_t *dest_data_written) = 0;
+  virtual SANE_Status DecodeScanData(const SANE_Byte *src_data, size_t src_data_len,
+				     size_t *src_data_consumed, SANE_Byte *dst_data,
+				     size_t dest_data_len, size_t *dest_data_written) = 0;
 
   virtual SANE_Bool HasUnprocessedDecodeData() = 0;
 

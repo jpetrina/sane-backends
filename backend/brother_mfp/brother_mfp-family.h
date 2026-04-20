@@ -88,17 +88,6 @@ typedef SANE_Int BrotherSensor;
 
 #define BROTHER_DATA_BLOCK_NONE                 0x00
 
-struct BrotherButtonQueryResponse
-{
-  SANE_Bool has_button_press;
-};
-
-struct BrotherButtonStateResponse
-{
-  BrotherSensor button_value;   // raw value we get from the packet
-};
-
-
 struct BrotherQueryScanInfoResponse
 {
   SANE_Int actual_x_res;
@@ -215,6 +204,8 @@ public:
 
   virtual SANE_Status ReadData(SANE_Byte *data, size_t max_length, size_t *length) = 0;
 
+  virtual SANE_Status ReadButtons(SANE_Int &button_mask) = 0;
+
   virtual SANE_Status SetAsyncIOMode(bool async_io) = 0;
 
   virtual void Cancel() = 0;
@@ -252,6 +243,8 @@ public:
   SANE_Status StartScan() override;
 
   SANE_Status ReadData(SANE_Byte *data, size_t max_length, size_t *length) override;
+
+  SANE_Status ReadButtons(SANE_Int &button_mask) override;
 
   SANE_Status SetAsyncIOMode(bool async_io) override;
 
@@ -460,6 +453,8 @@ public:
   SANE_Status StartScan() override;
 
   SANE_Status ReadData(SANE_Byte *data, size_t max_length, size_t *length) override;
+
+  SANE_Status ReadButtons(SANE_Int &button_mask) override;
 
   SANE_Status SetAsyncIOMode(bool async_io) override;
 
