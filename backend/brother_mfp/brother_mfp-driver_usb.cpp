@@ -112,10 +112,17 @@ SANE_Status BrotherTransportUSB::Connect ()
    *
    */
   res = ExecStartSession();
+  if (res == SANE_STATUS_DEVICE_BUSY)
+    {
+      if (ExecStopSession() == SANE_STATUS_GOOD)
+	{
+	  res = ExecStartSession();
+	}
+    }
+
   if (res != SANE_STATUS_GOOD)
     {
 	FDBG(DBG_SERIOUS, "failed to start session: %d", res);
-	Disconnect();
 	return res;
     }
 

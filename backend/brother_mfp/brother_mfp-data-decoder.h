@@ -131,6 +131,8 @@ private:
     state.src_mgr.term_source = TermSource;
 
     state.cinfo.src = &state.src_mgr;
+
+    state.have_read_header = false;
   }
 
   static void InitSource (j_decompress_ptr cinfo);
