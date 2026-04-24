@@ -21,7 +21,7 @@
 #define DEBUG_DECLARE_ONLY
 
 #include "brother_mfp_tests.h"
-#include "../../backend/brother_mfp/brother_mfp-encoder.h"
+#include "../../backend/brother_mfp/brother_mfp-family.h"
 #include "../genesys/minigtest.h"
 
 /*

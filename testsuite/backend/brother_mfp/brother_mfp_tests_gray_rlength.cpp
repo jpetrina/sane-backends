@@ -22,7 +22,7 @@
 
 #include "../../include/sane/sanei_debug.h"
 #include "brother_mfp_tests.h"
-#include "../../backend/brother_mfp/brother_mfp-encoder.h"
+#include "../../backend/brother_mfp/brother_mfp-data-decoder.h"
 #include "../genesys/minigtest.h"
 
 /*
@@ -31,10 +31,12 @@
  */
 static void test_gray_rlength_no_compress()
 {
-  BrotherGrayRLengthDecoder decoder;
+  BrotherParameters params;
+  params.param_scan_mode = BROTHER_SCAN_MODE_GRAY;
+  BrotherGrayRLengthDecoder decoder(params);
   const SANE_Byte *src_data;
   SANE_Byte dest_data[1024];
-  DecodeStatus res_code;
+  SANE_Status res_code;
   size_t src_data_consumed;
   size_t dest_data_written;
 
@@ -51,7 +53,7 @@ static void test_gray_rlength_no_compress()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)6);
   ASSERT_EQ(dest_data_written, (size_t)5);
 
@@ -67,7 +69,7 @@ static void test_gray_rlength_no_compress()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)2);
   ASSERT_EQ(dest_data_written, (size_t)1);
 
@@ -87,7 +89,7 @@ static void test_gray_rlength_no_compress()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)0);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -101,7 +103,7 @@ static void test_gray_rlength_no_compress()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)0);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -120,17 +122,19 @@ static void test_gray_rlength_no_compress()
                                      1,
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)0);
   ASSERT_EQ(dest_data_written, (size_t)0);
 }
 
 static void test_gray_rlength_compression()
 {
-  BrotherGrayRLengthDecoder decoder;
+  BrotherParameters params;
+  params.param_scan_mode = BROTHER_SCAN_MODE_GRAY;
+  BrotherGrayRLengthDecoder decoder(params);
   const SANE_Byte *src_data;
   SANE_Byte dest_data[1024];
-  DecodeStatus res_code;
+  SANE_Status res_code;
   size_t src_data_consumed;
   size_t dest_data_written;
 
@@ -148,7 +152,7 @@ static void test_gray_rlength_compression()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)2);
   ASSERT_EQ(dest_data_written, (size_t)4);
 
@@ -165,7 +169,7 @@ static void test_gray_rlength_compression()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)2);
   ASSERT_EQ(dest_data_written, (size_t)2);
 
@@ -182,7 +186,7 @@ static void test_gray_rlength_compression()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)2);
   ASSERT_EQ(dest_data_written, (size_t)129);
 
@@ -202,7 +206,7 @@ static void test_gray_rlength_compression()
                                      1,
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)0);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -222,7 +226,7 @@ static void test_gray_rlength_compression()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)0);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -233,7 +237,7 @@ static void test_gray_rlength_compression()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)2);
   ASSERT_EQ(dest_data_written, (size_t)4);
 

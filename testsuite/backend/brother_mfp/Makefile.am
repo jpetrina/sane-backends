@@ -29,6 +29,7 @@ brother_mfp_unit_tests_SOURCES = \
 	brother_mfp_tests_gray_rlength.cpp \
 	brother_mfp_tests_colour_int_rgb.cpp \
 	brother_mfp_tests_colour_jpeg.cpp \
+	brother_mfp_tests_transport_usb.cpp \
 	../genesys/minigtest.cpp
 
 brother_mfp_unit_tests_LDADD = $(TEST_LDADD)

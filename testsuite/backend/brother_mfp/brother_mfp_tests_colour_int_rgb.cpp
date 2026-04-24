@@ -22,7 +22,7 @@
 
 #include "../../include/sane/sanei_debug.h"
 #include "brother_mfp_tests.h"
-#include "../../backend/brother_mfp/brother_mfp-encoder.h"
+#include "../../backend/brother_mfp/brother_mfp-data-decoder.h"
 #include "../genesys/minigtest.h"
 
 /*
@@ -31,10 +31,13 @@
  */
 static void test_colour_int_rgb_enc_rgb()
 {
-  BrotherInterleavedRGBColourDecoder decoder(CAP_MODE_COLOUR);
+  BrotherParameters params;
+  params.param_pixel_x_width = 6;
+  params.param_scan_mode = BROTHER_SCAN_MODE_COLOR;
+  BrotherInterleavedRGBColourDecoder decoder(params, CAP_MODE_COLOUR);
   const SANE_Byte *src_data;
   SANE_Byte dest_data[1024];
-  DecodeStatus res_code;
+  SANE_Status res_code;
   size_t src_data_consumed;
   size_t dest_data_written;
 
@@ -42,10 +45,6 @@ static void test_colour_int_rgb_enc_rgb()
    * Normal decode.
    *
    */
-  BrotherParameters params;
-  params.param_pixel_x_width = 6;
-
-  decoder.NewPage(params);
   src_data = (const SANE_Byte *)"123456";
 
   res_code = decoder.DecodeScanData (src_data,
@@ -55,7 +54,7 @@ static void test_colour_int_rgb_enc_rgb()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)6);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -69,7 +68,7 @@ static void test_colour_int_rgb_enc_rgb()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)6);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -83,7 +82,7 @@ static void test_colour_int_rgb_enc_rgb()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)6);
   ASSERT_EQ(dest_data_written, (size_t)18);
 
@@ -94,10 +93,13 @@ static void test_colour_int_rgb_enc_rgb()
 
 static void test_colour_int_rgb_enc_ycrcb()
 {
-  BrotherInterleavedRGBColourDecoder decoder(CAP_MODE_COLOUR | CAP_ENCODING_RAW_IS_CrYCb);
+  BrotherParameters params;
+  params.param_pixel_x_width = 7;
+  params.param_scan_mode = BROTHER_SCAN_MODE_COLOR;
+  BrotherInterleavedRGBColourDecoder decoder(params, CAP_MODE_COLOUR | CAP_ENCODING_RAW_IS_CrYCb);
   const SANE_Byte *src_data;
   SANE_Byte dest_data[1024];
-  DecodeStatus res_code;
+  SANE_Status res_code;
   size_t src_data_consumed;
   size_t dest_data_written;
 
@@ -105,10 +107,6 @@ static void test_colour_int_rgb_enc_ycrcb()
    * Normal decode.
    *
    */
-  BrotherParameters params;
-  params.param_pixel_x_width = 7;
-
-  decoder.NewPage(params);
   decoder.NewBlock();
   src_data = (const SANE_Byte *)"\x5B" "\x63" "\x60" "\x5D" "\x5D" "\x62" "\x6A";
 
@@ -119,7 +117,7 @@ static void test_colour_int_rgb_enc_ycrcb()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)7);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -133,7 +131,7 @@ static void test_colour_int_rgb_enc_ycrcb()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)7);
   ASSERT_EQ(dest_data_written, (size_t)0);
 
@@ -147,7 +145,7 @@ static void test_colour_int_rgb_enc_ycrcb()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)7);
   ASSERT_EQ(dest_data_written, (size_t)21);
 

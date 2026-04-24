@@ -136,6 +136,8 @@ protected:
 
 class BrotherTransportUSB: public BrotherTransport
 {
+  friend class BrotherTransportUSBTests;
+
 public:
   BrotherTransportUSB (SANE_String_Const device_name) :
       is_acquired(false),

@@ -22,7 +22,7 @@
 
 #include "../../include/sane/sanei_debug.h"
 #include "brother_mfp_tests.h"
-#include "../../backend/brother_mfp/brother_mfp-encoder.h"
+#include "../../backend/brother_mfp/brother_mfp-data-decoder.h"
 #include "../genesys/minigtest.h"
 
 /*
@@ -32,10 +32,13 @@
 
 static void test_colour_jpeg_normal()
 {
-  BrotherJFIFDecoder decoder;
+  BrotherParameters params;
+  params.param_pixel_x_width = 7;
+  params.param_scan_mode = BROTHER_SCAN_MODE_COLOR;
+  BrotherJFIFDecoder decoder(params);
   const SANE_Byte *src_data;
   SANE_Byte dest_data[1024];
-  DecodeStatus res_code;
+  SANE_Status res_code;
   size_t src_data_consumed;
   size_t dest_data_written;
 
@@ -81,10 +84,6 @@ static void test_colour_jpeg_normal()
    * Test JPEG image has expected width.
    *
    */
-  BrotherParameters params;
-  params.param_pixel_x_width = 7;
-
-  decoder.NewPage(params);
   decoder.NewBlock();
 
   res_code = decoder.DecodeScanData (in_buffer,
@@ -94,7 +93,7 @@ static void test_colour_jpeg_normal()
                                      sizeof(dest_data),
                                      &dest_data_written);
 
-  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
   ASSERT_EQ(src_data_consumed, (size_t)(in_ptr - in_buffer));
   ASSERT_EQ(dest_data_written, (size_t)294);
 
@@ -139,7 +138,7 @@ static void test_colour_jpeg_normal()
 //                                     sizeof(dest_data),
 //                                     &dest_data_written);
 //
-//  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+//  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
 //  ASSERT_EQ(src_data_consumed, (size_t)(in_ptr - in_buffer));
 //  ASSERT_EQ(dest_data_written, (size_t)210);
 //
@@ -179,7 +178,7 @@ static void test_colour_jpeg_normal()
 //                                     sizeof(dest_data),
 //                                     &dest_data_written);
 //
-//  ASSERT_EQ(res_code, DECODE_STATUS_GOOD);
+//  ASSERT_EQ(res_code, SANE_STATUS_GOOD);
 //  ASSERT_EQ(src_data_consumed, (size_t)(in_ptr - in_buffer));
 //  ASSERT_EQ(dest_data_written, (size_t)378);
 //

@@ -1747,7 +1747,7 @@ SANE_Status BrotherFamily3::EncodeParameterBlock(SANE_Byte *data, size_t data_le
 			      "B=%u\nN=%u\n" /* brightness, contrast */
 			      "A=%u,%u,%u,%u\n" /* scan area */
 			      "D=%s\n" /* single / duplex */
-			      "U=OFF\nP=OFF\n"		// TODO: perhaps we don't need this?
+//			      "U=OFF\nP=OFF\n"		// TODO: perhaps we don't need this?
 			      "\x80";
   *length = snprintf(
       (char*) data,

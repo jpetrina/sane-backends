@@ -49,7 +49,7 @@
 #include "../include/sane/saneopts.h"
 #include "../include/sane/sanei_config.h"
 #include "../include/sane/sanei_usb.h"
-
+#include "../include/sane/sanei_debug.h"
 
 /*
  * Functionality sets.
@@ -219,6 +219,10 @@ protected:
 
 class BrotherFamily234Base : public BrotherFamily
 {
+  friend class BrotherFamily4Tests;
+  friend class BrotherFamily3Tests;
+  friend class BrotherFamily2Tests;
+
 public:
   explicit BrotherFamily234Base(BrotherFamilyType family_type, BrotherTransportType transport_type,
 				SANE_String_Const device_name, SANE_Word capabilities) :
@@ -296,7 +300,7 @@ private:
   SANE_Status EncodeQueryScanInfoBlock(SANE_Byte *data, size_t data_len, size_t *length);
 
   SANE_Status DecodeQueryScanInfoBlockResp(const SANE_Byte *data, size_t data_len,
-					    BrotherQueryScanInfoResponse &response);
+					   BrotherQueryScanInfoResponse &response);
 
   SANE_Status EncodeSourceStatusBlock(SANE_Byte *data, size_t data_len, size_t *length);
 
@@ -368,6 +372,8 @@ protected:
 
 class BrotherFamily2 : public BrotherFamily234Base
 {
+  friend class BrotherFamily2Tests;
+
 public:
   explicit BrotherFamily2(BrotherTransportType transport_type, SANE_String_Const device_name,
 			  SANE_Word capabilities) :
@@ -388,6 +394,8 @@ protected:
 
 class BrotherFamily3 : public BrotherFamily234Base
 {
+  friend class BrotherFamily3Tests;
+
 public:
   explicit BrotherFamily3(BrotherTransportType transport_type, SANE_String_Const device_name,
 			  SANE_Word capabilities) :
@@ -408,6 +416,8 @@ protected:
 
 class BrotherFamily4 : public BrotherFamily234Base
 {
+  friend class BrotherFamily4Tests;
+
 public:
   explicit BrotherFamily4(BrotherTransportType transport_type, SANE_String_Const device_name,
 			  SANE_Word capabilities) :

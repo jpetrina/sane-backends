@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include<string>
+#include <string>
 #include "../include/sane/sane.h"
 
 #define BACKEND_NAME            brother_mfp
