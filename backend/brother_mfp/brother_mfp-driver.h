@@ -69,12 +69,8 @@ struct BrotherSessionResponse
 
 struct BrotherButtonStateResponse
 {
-  SANE_Int button_value;   // raw value we get from the packet
-};
-
-struct BrotherButtonQueryResponse
-{
-  SANE_Bool has_button_press;
+  SANE_Bool button_detected;
+  SANE_Int button_value;	// not the raw packet value.
 };
 
 #define BROTHER_SENSOR_NONE     0
@@ -230,9 +226,6 @@ private:
 
   SANE_Status DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
 				    BrotherButtonStateResponse &response);
-
-  SANE_Status DecodeButtonQueryResp(const SANE_Byte *data, size_t data_len,
-				    BrotherButtonQueryResponse &response);
 
   SANE_Status PollForReadFlush(useconds_t max_time);
 

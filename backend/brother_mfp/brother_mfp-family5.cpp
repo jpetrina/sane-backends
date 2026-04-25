@@ -1352,58 +1352,6 @@ SANE_Status BrotherFamily5::DecodeScanDataHeader(const SANE_Byte *src_data, size
   return SANE_STATUS_UNSUPPORTED;
 }
 
-SANE_Status BrotherFamily5::DecodeButtonQueryResp (const SANE_Byte *data, size_t data_len,
-                                                           BrotherButtonQueryResponse &response)
-{
-  if ((data_len != 4) || (data[0] != 0x04) || (data[1] != 0x10) || (data[2] != 0x03))
-    {
-      return SANE_STATUS_IO_ERROR;
-    }
-
-  response.has_button_press = data[3] == 0x10;
-
-  return SANE_STATUS_GOOD;
-}
-
-SANE_Status BrotherFamily5::DecodeButtonStateResp (const SANE_Byte *data, size_t data_len,
-                                                           BrotherButtonStateResponse &response)
-{
-  if ((data_len != 9) || (memcmp(data, "\x09" "\x10" "\x03" "\x20", 4) != 0))
-    {
-      return SANE_STATUS_IO_ERROR;
-    }
-
-  response.button_value = 0;
-
-  switch (data[4])
-  {
-    case 0x05:
-      response.button_value = BROTHER_SENSOR_FILE;
-      break;
-
-    case 0x02:
-      response.button_value = BROTHER_SENSOR_OCR;
-      break;
-
-    case 0x03:
-      response.button_value = BROTHER_SENSOR_IMAGE;
-      break;
-
-    case 0x08:
-      response.button_value = BROTHER_SENSOR_EMAIL;
-      break;
-
-    case 0x00:
-      break;
-
-    default:
-      FDBG (DBG_WARN, "unknown button code: %d.", data[4]);
-      return SANE_STATUS_UNSUPPORTED;
-  }
-
-  return SANE_STATUS_GOOD;
-}
-
 SANE_Status BrotherFamily5::CancelScan_Internal()
 {
   SANE_Status res;

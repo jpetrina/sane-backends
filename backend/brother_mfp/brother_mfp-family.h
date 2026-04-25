@@ -320,12 +320,6 @@ private:
 			     size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
 			     size_t *dest_data_written);
 
-  SANE_Status DecodeButtonQueryResp(const SANE_Byte *data, size_t data_len,
-				    BrotherButtonQueryResponse &response);
-
-  SANE_Status DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
-				    BrotherButtonStateResponse &response);
-
 protected:
   void ResetState(bool full)
   {
@@ -525,12 +519,6 @@ private:
   SANE_Status DecodeScanData(const SANE_Byte *src_data, size_t src_data_len,
 			     size_t *src_data_consumed, SANE_Byte *dst_data, size_t dest_data_len,
 			     size_t *dest_data_written);
-
-  SANE_Status DecodeButtonQueryResp(const SANE_Byte *data, size_t data_len,
-				    BrotherButtonQueryResponse &response);
-
-  SANE_Status DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
-				    BrotherButtonStateResponse &response);
 
 private:
   void ResetState(bool full)
