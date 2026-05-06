@@ -2384,8 +2384,6 @@ setvalue(SANE_Handle handle, SANE_Int option, void *value, SANE_Int *info)
 		{
 			DBG(17, "OPT_TL_Y = %d\n", sval->w);
 		}
-		// adf crop set to off
-		s->val[OPT_ADF_CRP].w = 0;
 		break;
 
 	case OPT_SOURCE:
