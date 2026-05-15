@@ -21,14 +21,132 @@
 #define DEBUG_DECLARE_ONLY
 
 #include "../../include/sane/sanei_debug.h"
-#include "brother_mfp_tests.h"
-#include "../../backend/brother_mfp/brother_mfp-data-decoder.h"
 #include "../genesys/minigtest.h"
+
+#include "../../backend/brother_mfp/brother_mfp-data-decoder.h"
+#include "../../backend/brother_mfp/brother_mfp-driver.h"
+#include "../../backend/brother_mfp/brother_mfp-family.h"
+
+#include "brother_mfp_tests.h"
+#include "brother_mfp_tests_usb_mock.h"
 
 /*
  * TEST: BrotherJFIFDecoder()
  *
  */
+
+/*
+ * Full integration test for two identical pages of an "invalid" JFIF response
+ * in the sense that the JFIF header promises fewer JFIF lines than there actually are in the body.
+ * The JFIF decoder needs to handle this out-of-spec response from the device.
+ * 
+ * Two scenarios are covered: One where all expected scanlines are been processed before all
+ * USB packets have arrived (pages 1 + 2), and one where the whole JFIF stream is available when the
+ * decoder tries to process the scanlines (pages 3 + 4). 
+ * 
+ * This behavior was observed on the DCP-L2500D device.
+ */
+static void test_integration_brother4_inconsistent_jfif_size()
+{
+  const size_t REQUESTED_IMAGE_WIDTH = EXAMPLE_JFIF_WIDTH;
+  // We request 16 lines and receive a JPEG whose header promises 16 lines, but the body delivers 17 lines.
+  const size_t REQUESTED_IMAGE_HEIGHT = EXAMPLE_JFIF_HEIGHT - 1;
+  const size_t JFIF_HEADER_PROMISED_HEIGHT_OFFSET = DATA_PACKET_HEADER_LENGTH + 12 * 13 + 8;
+  const size_t FULL_DATA_PACKET_LENGTH = sizeof(EXAMPLE_JFIF);
+
+  const size_t NUM_PAGES = 4;
+  // In one test case, the JFIF body is delivered in two USB packets. This constant controls how large the second USB packet is.
+  const size_t SECOND_PACKET_LENGTH = 1;
+  const size_t FIRST_PACKET_LENGTH = FULL_DATA_PACKET_LENGTH - SECOND_PACKET_LENGTH;
+
+  /** Set up mock responses */
+
+  auto first_data_packet = std::vector<SANE_Byte>(DATA_PACKET_HEADER_LENGTH + FIRST_PACKET_LENGTH);
+  // Set up header
+  memcpy(first_data_packet.data(), DATA_PACKET_HEADER, DATA_PACKET_HEADER_LENGTH);
+  first_data_packet[10] = FIRST_PACKET_LENGTH & 0xff;
+  first_data_packet[11] = (FIRST_PACKET_LENGTH >> 8) & 0xff;
+  // Set up body
+  memcpy(&first_data_packet[DATA_PACKET_HEADER_LENGTH], EXAMPLE_JFIF, FIRST_PACKET_LENGTH);
+  // Make the JFIF header promise fewer scanlines than there are
+  ASSERT_EQ(first_data_packet[JFIF_HEADER_PROMISED_HEIGHT_OFFSET], EXAMPLE_JFIF_HEIGHT);
+  first_data_packet[JFIF_HEADER_PROMISED_HEIGHT_OFFSET] = REQUESTED_IMAGE_HEIGHT;
+  
+  auto second_data_packet = std::vector<SANE_Byte>(DATA_PACKET_HEADER_LENGTH + SECOND_PACKET_LENGTH);
+  // Set up header
+  memcpy(second_data_packet.data(), DATA_PACKET_HEADER, DATA_PACKET_HEADER_LENGTH);
+  second_data_packet[10] = SECOND_PACKET_LENGTH & 0xff;
+  second_data_packet[11] = (SECOND_PACKET_LENGTH >> 8) & 0xff;
+  // Set up body
+  memcpy(&second_data_packet[DATA_PACKET_HEADER_LENGTH], &EXAMPLE_JFIF[FIRST_PACKET_LENGTH], SECOND_PACKET_LENGTH);
+  
+  auto complete_data_packet = std::vector<SANE_Byte>(DATA_PACKET_HEADER_LENGTH + FULL_DATA_PACKET_LENGTH);
+  memcpy(complete_data_packet.data(), DATA_PACKET_HEADER, DATA_PACKET_HEADER_LENGTH);
+  complete_data_packet[10] = FULL_DATA_PACKET_LENGTH & 0xff;
+  complete_data_packet[11] = (FULL_DATA_PACKET_LENGTH >> 8) & 0xff;
+  // Set up body
+  memcpy(&complete_data_packet[DATA_PACKET_HEADER_LENGTH], EXAMPLE_JFIF, FULL_DATA_PACKET_LENGTH);
+  // Make the JFIF header promise fewer scanlines than there are
+  ASSERT_EQ(complete_data_packet[JFIF_HEADER_PROMISED_HEIGHT_OFFSET], EXAMPLE_JFIF_HEIGHT);
+  complete_data_packet[JFIF_HEADER_PROMISED_HEIGHT_OFFSET] = REQUESTED_IMAGE_HEIGHT;
+  
+  auto end_of_frame_packet = std::vector<SANE_Byte>(X_RESPONSE_PAGE_FOLLOWS_LENGTH);
+  memcpy(end_of_frame_packet.data(), X_RESPONSE_PAGE_FOLLOWS, X_RESPONSE_PAGE_FOLLOWS_LENGTH);
+
+  auto end_of_scan_packet = std::vector<SANE_Byte>(X_RESPONSE_END_OF_SCAN_LENGTH);
+  memcpy(end_of_scan_packet.data(), X_RESPONSE_END_OF_SCAN, X_RESPONSE_END_OF_SCAN_LENGTH);
+  
+  // Deliver the same image twice. The image ID is wrong in the headers, but that isn't relevant at the moment.
+  add_mock_x_response(first_data_packet);
+  add_mock_x_response(second_data_packet);
+  add_mock_x_response(end_of_frame_packet);
+  add_mock_x_response(std::vector<SANE_Byte>(first_data_packet));
+  add_mock_x_response(std::vector<SANE_Byte>(second_data_packet));
+  add_mock_x_response(std::vector<SANE_Byte>(end_of_frame_packet));
+  add_mock_x_response(complete_data_packet);
+  add_mock_x_response(std::vector<SANE_Byte>(end_of_frame_packet));
+  add_mock_x_response(std::vector<SANE_Byte>(complete_data_packet));
+  add_mock_x_response(end_of_scan_packet);
+
+  /** Actual test */
+  
+  BrotherFamily4 family(BROTHERTRANSPORT_USB, "mock_device", CAP_MODE_COLOUR | CAP_ENCODING_HAS_JPEG);
+
+  family.SetRes(300, 300);
+  family.SetScanDimensions(0, REQUESTED_IMAGE_WIDTH, 0, REQUESTED_IMAGE_HEIGHT);
+
+  ASSERT_EQ(family.Connect(), SANE_STATUS_GOOD);
+
+  for (size_t page = 0; page < NUM_PAGES; page++) {         
+    ASSERT_EQ(family.StartScan(), SANE_STATUS_GOOD);
+
+    jpeg_decompress_struct reference_jpeg;
+    jpeg_error_mgr jerr;
+    reference_jpeg.err = jpeg_std_error(&jerr);
+    jpeg_create_decompress(&reference_jpeg);
+    jpeg_mem_src(&reference_jpeg, EXAMPLE_JFIF, sizeof(EXAMPLE_JFIF));
+    jpeg_read_header(&reference_jpeg, TRUE);
+    jpeg_start_decompress(&reference_jpeg);
+    
+    size_t num_bytes_read = 0;
+    SANE_Byte read_buffer[EXAMPLE_JFIF_BYTES_PER_LINE];
+    auto reference_buffer = std::vector<SANE_Byte>(EXAMPLE_JFIF_BYTES_PER_LINE);
+    SANE_Byte* lines_to_read[1] = { reference_buffer.data() };
+    
+    for (size_t i = 0; i < REQUESTED_IMAGE_HEIGHT; i++) {
+      ASSERT_EQ(family.ReadData(read_buffer, sizeof(read_buffer), &num_bytes_read), SANE_STATUS_GOOD);
+      ASSERT_EQ(num_bytes_read, EXAMPLE_JFIF_BYTES_PER_LINE);
+      ASSERT_EQ(jpeg_read_scanlines(&reference_jpeg, lines_to_read, 1), 1);
+      ASSERT_EQ(memcmp(read_buffer, reference_buffer.data(), EXAMPLE_JFIF_BYTES_PER_LINE), 0);
+    }
+
+    ASSERT_EQ(family.ReadData(read_buffer, sizeof(read_buffer), &num_bytes_read), page < NUM_PAGES - 1 ? SANE_STATUS_EOF : SANE_STATUS_NO_DOCS);
+
+    jpeg_abort_decompress(&reference_jpeg);
+  }
+
+  family.Disconnect();
+}
 
 static void test_colour_jpeg_normal()
 {
@@ -221,4 +339,5 @@ static void test_colour_jpeg_normal()
 void test_colour_jpeg()
 {
   test_colour_jpeg_normal();
+  test_integration_brother4_inconsistent_jfif_size();
 }
