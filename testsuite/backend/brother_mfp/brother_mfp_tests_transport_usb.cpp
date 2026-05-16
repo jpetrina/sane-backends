@@ -78,6 +78,35 @@ public:
         ASSERT_EQ(decode_resp, SANE_STATUS_IO_ERROR);
       }
   }
+
+  void test_decode_button_resp()
+  {
+    SANE_Status decode_resp;
+    BrotherButtonStateResponse button_resp;
+    BrotherTransportUSB transport("");
+
+    // Real "No button" response from DCP-L2500D
+    const SANE_Byte *data = (const SANE_Byte *)"\x05" "\x10" "\x03" "\x00" "\x01";
+
+    decode_resp = transport.DecodeButtonStateResp(data, 5, button_resp);
+    ASSERT_EQ(decode_resp, SANE_STATUS_GOOD);
+    ASSERT_EQ(button_resp.button_detected, SANE_FALSE);
+
+    // Real "No button" response from DCP-L2500D. The first \x04 happens from time to time.
+    data = (const SANE_Byte *)"\x04" "\x10" "\x03" "\x00" "\x01";
+
+    decode_resp = transport.DecodeButtonStateResp(data, 5, button_resp);
+    ASSERT_EQ(decode_resp, SANE_STATUS_GOOD);
+    ASSERT_EQ(button_resp.button_detected, SANE_FALSE);
+
+    // Real "Image button" response from DCP-L2500D
+    data = (const SANE_Byte *)"\x09" "\x10" "\x03" "\x20" "\x03";
+
+    decode_resp = transport.DecodeButtonStateResp(data, 5, button_resp);
+    ASSERT_EQ(decode_resp, SANE_STATUS_GOOD);
+    ASSERT_EQ(button_resp.button_detected, SANE_TRUE);
+    ASSERT_EQ(button_resp.button_value, BROTHER_SENSOR_IMAGE);
+  }
 };
 
 /*
@@ -145,4 +174,5 @@ void test_family_transport_usb ()
   BrotherTransportUSBTests test_suite;
   // Decodes.
   test_suite.test_decode_session_resp();
+  test_suite.test_decode_button_resp();
 }
