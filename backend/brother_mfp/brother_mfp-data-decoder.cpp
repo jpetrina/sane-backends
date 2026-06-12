@@ -491,13 +491,16 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
   *dest_data_written = 0;
 
   /*
-   * Check if the decoder has finished already.
-   * While we should not normally get here, this check can catch some spurious errors.
-   *
+   * We may get here if all of the requested output lines have been produced, but the scanner is still sending
+   * data in the current frame. This can happen when the scanner returns inconsistent JFIF data.
+   * See the end of this function for more explanations and handling of this edge case.
+   * 
    */
   if (state.cinfo.output_height > 0 && state.cinfo.output_scanline >= state.cinfo.output_height)
   {
-    return SANE_STATUS_INVAL;
+    FDBG(DBG_DETAIL, "Back in compress_buffer even though all output lines of the current frame have been produced. Ignoring the rest of the frame data (%d bytes left).", src_data_len);
+    *src_data_consumed = src_data_len;
+    return SANE_STATUS_GOOD;
   }
 
   FDBG (DBG_DETAIL,
@@ -715,7 +718,11 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
        * As explained above, *src_data_consumed will not account for all the bytes that have been read
        * so libjpeg can restart an unfinished decode. In case we are finished, however, we do want
        * to absorb all the remaining bytes so the caller knows that all the data has been processed.
-       *
+       * 
+       * However, this alone is not sufficient, since there may be more invalid JFIF data in this frame
+       * coming from the scanner that has not been read into the source buffer (see the edge case handling below).
+       * Therefore, we also need to make sure that the remainder of the current frame's source data is
+       * absorbed, which is being done at the start of the function.
        */
       *src_data_consumed = src_data_len;
       FDBGNP (DBG_EVENT, "Converted all scanlines. Finishing.");
@@ -724,14 +731,19 @@ SANE_Status BrotherJFIFDecoder::DecodeScanData_CompressBuffer (const SANE_Byte *
         {
           FDBGNP (DBG_WARN, "Failed to finish JPEG decompress.");
           /*
-           * This can happen under some circumstances which are not entirely clear to me.
-           * It may have to do with the fact that the device sometimes returns invalid JFIF
-           * in the sense that the size in the header doesn't match the image size.
-           * We don't want to abort the whole scan here. Just log the error, set cinfo to zero,
-           * and hope we don't leak too much memory.
+           * Some scanners return invalid JFIF in the sense that the `output_height` in the header does not match
+           * the actual number of lines in the image. This has been observed for the `DCP-L2500D` model.
+           * In this case, `jpeg_finish_decompress` can fail, and we need to abort the JPEG decompression instead.
+           * The correct behaviour here is to finish returning the current page and to proceeding to the next page
+           * (if there is one).
+           * 
+           * `jpeg_abort_decompress` has been observed to preserve `cinfo.output_scanline` and `cinfo.output_height`.
+           * Therefore, the next call to this function can check for `output_scanline >= output_height` and react accordingly.
+           * See the beginning of this function.
            *
            */
-          memset(&state.cinfo, 0, sizeof(state.cinfo));
+          jpeg_abort_decompress(&state.cinfo);
+          FDBG (DBG_DETAIL, "Scanline after abort: %d; Height after abort: %d", state.cinfo.output_scanline, state.cinfo.output_height);
         }
     }
 

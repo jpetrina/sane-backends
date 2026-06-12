@@ -5,13 +5,11 @@
 ##  included LICENSE file for license information.
 
 TEST_LDADD = \
-  ../../../sanei/libsanei.la \
-  ../../../sanei/sanei_usb.lo \
   ../../../sanei/sanei_magic.lo \
   ../../../lib/liblib.la \
   ../../../backend/libbrother_mfp.la \
   ../../../backend/sane_strstatus.lo \
-  $(USB_LIBS) $(XML_LIBS) $(PTHREAD_LIBS) $(JPEG_LIBS)
+  $(XML_LIBS) $(PTHREAD_LIBS) $(JPEG_LIBS)
 
 check_PROGRAMS = brother_mfp_unit_tests
 TESTS = brother_mfp_unit_tests
@@ -21,6 +19,7 @@ AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include -I$(top_srcdir)/include
 
 brother_mfp_unit_tests_SOURCES = \
 	brother_mfp_tests.cpp \
+	brother_mfp_tests_usb_mock.cpp \
 	brother_mfp_tests.h	\
 	brother_mfp_tests_family5.cpp \
 	brother_mfp_tests_family4.cpp \
