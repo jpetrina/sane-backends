@@ -2541,8 +2541,8 @@ init_user (struct fujitsu *s)
     s->page_width = s->max_x;
   }
 
-  /* page height US-Letter */
-  s->page_height = 11 * 1200;
+  /* page height 300 mm as absolute maximum */
+  s->page_height = 300 / 25.4 * 1200;
   set_max_y(s);
   if(s->page_height > s->max_y){
     s->page_height = s->max_y;
