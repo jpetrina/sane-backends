@@ -424,6 +424,7 @@ struct scanner
   int started;
   int reading;
   int cancelled;
+  int in_calibration;
   int side;
   int prev_page;
   int jpeg_stage;
@@ -540,6 +541,7 @@ enum {
 #define COLOR_INTERLACE_2510 7
 #define COLOR_INTERLACE_C120 8
 #define COLOR_INTERLACE_C120_LR 9
+#define COLOR_INTERLACE_GBR_LR 10
 
 #define DUPLEX_INTERLACE_NONE 0
 #define DUPLEX_INTERLACE_FfBb 1
