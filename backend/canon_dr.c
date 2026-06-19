@@ -1852,33 +1852,38 @@ init_model (struct scanner *s)
   }
 
   else if (strstr (s->model_name,"DR-F120")){
-    /* TODO items:
-     * * has_rif = 0 ? is this correct
-     * * has_comp_JPEG = 0 ? is this correct
-     * * need_ccal = need_fcal = need_fcal_buffer = ccal_version = 0 ? is this correct
-     */
 
     /* Required for USB coms */
     s->has_ssm = 0;
     s->has_ssm2 = 1;
+    /* has_ssm_pay_head_len: disabled - may cause regressions */
+    /* s->has_ssm_pay_head_len = 1; */
+
+    /* calibration: disabled.
+     * - COR_CAL (coarse AFE): DR-F120 does not respond
+     * - Fine calibration (fcal_src=SCAN): causes second-scan regression
+     *   (calibration scans leave scanner in unrecoverable state) */
+    /* s->need_ccal = 1; */
+    /* s->ccal_version = 3; */
+    /* s->fcal_src = FCAL_SRC_SCAN; */
+    /* s->fcal_dest = FCAL_DEST_SW; */
 
     /*missing*/
     s->std_res_x[DPI_100] = 1;
     s->std_res_y[DPI_100] = 1;
-    // DPI_150 not supported
+    // DPI_150: hardware rejects "invalid field in parm list"
     s->std_res_x[DPI_200] = 1;
     s->std_res_y[DPI_200] = 1;
     s->std_res_x[DPI_300] = 1;
     s->std_res_y[DPI_300] = 1;
-    // DPI_400 not supported
+    // DPI_400: untested, likely also unsupported
     s->std_res_x[DPI_600]= 1;
     s->std_res_y[DPI_600] = 1;
-    // DPI_1200 not supported
+    // DPI_1200 not supported in X direction
     // NOTE: This scanner supports higher resolutions
     // in the Y direction, but 600 is maximum in X
 
-    // This is true however only the ADF is ever selected in hardware
-    // FIXME: What extra option is needed to select this in the USB comms
+    /* flatbed: now works via SSM2 buffer byte[6] bit 4 (0x10) */
     s->has_flatbed = 1;
 
     /* duplex */
@@ -1891,6 +1896,13 @@ init_model (struct scanner *s)
 
     /* weirdness */
     s->fixed_width = 1;
+    /* TODO: test ppl_mod=8 and unknown_byte2=0x88 after calibration fixed */
+    /* s->ppl_mod = 8; */
+    /* s->unknown_byte2 = 0x88; */
+
+    /* features */
+    s->has_rif = 0;
+    s->has_comp_JPEG = 0;
 
     /* lies */
     s->can_halftone = 0;
@@ -4152,8 +4164,21 @@ ssm_buffer (struct scanner *s)
 
     memset(out,0,outLen);
     set_SSM2_BUFF_unk(out, !s->buffermode);
-    set_SSM2_BUFF_unk2(out, 0x40);
     set_SSM2_BUFF_sync(out, !s->buffermode);
+
+    /* Source selection based on USB capture analysis:
+     *   byte[6] bit 4 (0x10) = flatbed
+     *   byte[6] bit 6 (0x40) = ADF
+     *   byte[6] = 0x00 = calibration/internal */
+    if(s->in_calibration){
+      /* leave byte[6] as 0x00 for calibration mode */
+    }
+    else if(s->s.source == SOURCE_FLATBED){
+      set_SSM2_BUFF_fb(out, 1);
+    }
+    else {
+      set_SSM2_BUFF_adf(out, 1);
+    }
 
     ret = do_cmd (
         s, 1, 0,
@@ -4354,6 +4379,62 @@ ssm2_hw_enhancement (struct scanner *s)
 
   return ret;
 }
+
+/* page 0x04: disabled - causes second-scan regression on DR-F120.
+ * Function and call site both wrapped in #if 0 until investigated. */
+#if 0
+static SANE_Status
+ssm2_page_04 (struct scanner *s, int side)
+{
+  SANE_Status ret = SANE_STATUS_GOOD;
+
+  DBG (10, "ssm2_page_04: start\n");
+
+  if(s->has_ssm2){
+
+    unsigned char cmd[SET_SCAN_MODE2_len];
+    size_t cmdLen = SET_SCAN_MODE2_len;
+
+    unsigned char out[SSM2_PAGE04_PAY_len];
+    size_t outLen = SSM2_PAGE04_PAY_len;
+
+    memset(cmd,0,cmdLen);
+    set_SCSI_opcode(cmd, SET_SCAN_MODE2_code);
+    set_SSM2_page_code(cmd, SM2_pc_unknown_04);
+    set_SSM2_side(cmd, side);
+    set_SSM2_pay_len(cmd, outLen);
+
+    memset(out,0,outLen);
+    set_SSM2_PAGE04_data(out);
+
+    ret = do_cmd (
+        s, 1, 0,
+        cmd, cmdLen,
+        out, outLen,
+        NULL, NULL
+    );
+
+    /* duplex: also send for back side */
+    if (!ret && (s->s.source == SOURCE_ADF_DUPLEX || s->s.source == SOURCE_CARD_DUPLEX)){
+      set_SSM2_side(cmd, 1);
+      ret = do_cmd (
+          s, 1, 0,
+          cmd, cmdLen,
+          out, outLen,
+          NULL, NULL
+      );
+    }
+  }
+
+  else{
+    DBG (10, "ssm2_page_04: unsupported\n");
+  }
+
+  DBG (10, "ssm2_page_04: finish\n");
+
+  return ret;
+}
+#endif
 
 static SANE_Status
 ssm_do (struct scanner *s)
@@ -5484,6 +5565,16 @@ sane_start (SANE_Handle handle)
       goto errors;
     }
 
+    /* page 0x04: TODO - causes second-scan regression on DR-F120,
+     * needs investigation */
+#if 0
+    ret = ssm2_page_04(s, SIDE_FRONT);
+    if (ret != SANE_STATUS_GOOD) {
+      DBG (5, "sane_start: ERROR: cannot ssm2 page 04\n");
+      goto errors;
+    }
+#endif
+
     /* clean scan params for new scan */
     ret = clean_params(s);
     if (ret != SANE_STATUS_GOOD) {
@@ -6434,6 +6525,25 @@ copy_simplex(struct scanner *s, unsigned char * buf, int len, int side)
 
       switch (s->gray_interlace[side]) {
 
+        /* no interleaving: just copy the line as-is.
+         * For simplex ADF front on DR-F120, reverse pixel order (hardware mirror).
+         * Duplex front is already reversed by rmemcpy in copy_duplex. */
+        case GRAY_INTERLACE_NONE:
+        default:
+          DBG (17, "copy_simplex: gray, none\n");
+          if (side == SIDE_FRONT && s->s.source == SOURCE_ADF_FRONT){
+            /* mirrored for simplex ADF front */
+            for (j=bwidth-1; j>=0; j--){
+              line[line_next++] = buf[i+j];
+            }
+          } else {
+            /* normal for flatbed / ADF back / duplex */
+            for (j=0; j<bwidth; j++){
+              line[line_next++] = buf[i+j];
+            }
+          }
+          break;
+
         /* one line has the following format: ggg...GGG
          * where the 'capital' letters are the beginning of the line */
         case GRAY_INTERLACE_gG:
@@ -6501,6 +6611,16 @@ copy_simplex(struct scanner *s, unsigned char * buf, int len, int side)
         case COLOR_INTERLACE_GBR:
           DBG (17, "copy_simplex: color, GBR\n");
           for (j=0; j<pwidth; j++){
+            line[line_next++] = buf[i+j*3+2];
+            line[line_next++] = buf[i+j*3];
+            line[line_next++] = buf[i+j*3+1];
+          }
+          break;
+
+        /* scanner returns color data as gbrgbr..., mirrored left-right */
+        case COLOR_INTERLACE_GBR_LR:
+          DBG (17, "copy_simplex: color, GBR_LR\n");
+          for (j=pwidth-1; j>=0; j--){
             line[line_next++] = buf[i+j*3+2];
             line[line_next++] = buf[i+j*3];
             line[line_next++] = buf[i+j*3+1];
@@ -7064,6 +7184,9 @@ calibrate_AFE (struct scanner *s)
     return ret;
   }
 
+  /* signal ssm_buffer to send byte[6]=0x00 for calibration mode */
+  s->in_calibration = 1;
+
   /* always cal with a short scan in duplex color */
   s->u.tl_y = 0;
   s->u.br_y = lines * 1200 / s->u.dpi_y;
@@ -7260,6 +7383,8 @@ calibrate_AFE (struct scanner *s)
 
   cleanup:
 
+  s->in_calibration = 0;
+
   /* recover user settings */
   s->u.tl_y = old_tl_y;
   s->u.br_y = old_br_y;
@@ -7290,6 +7415,9 @@ calibrate_fine (struct scanner *s)
     DBG (10, "calibrate_fine: not required\n");
     goto cleanup;
   }
+
+  /* signal ssm_buffer to send byte[6]=0x00 for calibration mode */
+  s->in_calibration = 1;
 
   /* don't recalibrate if we've already done it with these params */
   if(s->f_res == s->s.dpi_x && s->f_mode == s->s.mode){
@@ -7323,6 +7451,8 @@ calibrate_fine (struct scanner *s)
   s->f_mode = s->s.mode;
 
   cleanup:
+
+  s->in_calibration = 0;
 
   DBG (10, "calibrate_fine: finish %d\n",ret);
 
@@ -8894,6 +9024,8 @@ static int
 get_color_inter(struct scanner *s, int side, int res)
 {
   int i;
+  int inter;
+
   for(i=0;i<DPI_1200;i++){
     if(res == dpi_list[i])
       break;
@@ -8902,7 +9034,18 @@ get_color_inter(struct scanner *s, int side, int res)
   if(s->color_inter_by_res[i])
     return s->color_inter_by_res[i];
 
-  return s->color_interlace[side];
+  inter = s->color_interlace[side];
+
+  /* DR-F120: ADF front side is mirrored by hardware (byte[6]=0x40 mode).
+   * Flatbed (byte[6]=0x10) is not mirrored. Both use SIDE_FRONT,
+   * so we distinguish by source. GBR_LR reverses pixel order.
+   * Note: duplex already reverses via rmemcpy in copy_duplex. */
+  if(inter == COLOR_INTERLACE_GBR && side == SIDE_FRONT &&
+     s->s.source == SOURCE_ADF_FRONT){
+    return COLOR_INTERLACE_GBR_LR;
+  }
+
+  return inter;
 }
 
 /* s->u.page_x stores the user setting

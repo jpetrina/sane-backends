@@ -471,6 +471,7 @@ post-imprinter off: 0x02000000
 #define SM2_pc_ultra                    0x01
 #define SM2_pc_buffer                   0x02
 #define SM2_pc_hw_enhancement           0x03
+#define SM2_pc_unknown_04               0x04  /* seen in DR-F120 Windows driver */
 #define SM2_pc_dropout                  0x06
 #define SM2_pc_date_time                0x07
 #define SM2_pc_imprinter_settings       0x33
@@ -487,6 +488,7 @@ post-imprinter off: 0x02000000
 #define SET_SCAN_MODE2_len              12
 
 #define set_SSM2_page_code(sb, val)     sb[0x02] = val
+#define set_SSM2_side(sb, val)          sb[0x05] = val  /* 0=front, 1=back */
 #define set_SSM2_pay_len(sb, val)       sb[0x08] = val
 
 /* the payload */
@@ -508,11 +510,17 @@ post-imprinter off: 0x02000000
 /* for BUFFER (0x02) page */
 #define set_SSM2_BUFF_unk(sb, val)           sb[0x03] = val
 #define set_SSM2_BUFF_unk2(sb, val)          sb[0x06] = val
+#define set_SSM2_BUFF_fb(sb, val)            setbitfield(sb+6, 1, 4, val)  /* flatbed */
+#define set_SSM2_BUFF_adf(sb, val)           setbitfield(sb+6, 1, 6, val)  /* ADF enable */
 #define set_SSM2_BUFF_sync(sb, val)          sb[0x09] = val
 
 /* for HARDWARE ENHANCEMENT (0x03) */
 #define set_SSM2_roller_deskew(sb, val)      setbitfield(sb+6, 1, 3, val)
 #define set_SSM2_hw_crop(sb, val)            setbitfield(sb+6, 1, 5, val)
+
+/* for UNKNOWN PAGE (0x04) -- seen in DR-F120 Windows driver */
+#define SSM2_PAGE04_PAY_len                  0x10
+#define set_SSM2_PAGE04_data(sb)             sb[0x02]=0x04; sb[0x03]=0x04
 
 /* for DROPOUT (0x06) page */
 #define set_SSM2_DO_do(sb, val)              sb[0x09] = val
