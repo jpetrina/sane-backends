@@ -4380,6 +4380,9 @@ ssm2_hw_enhancement (struct scanner *s)
   return ret;
 }
 
+/* page 0x04: disabled - causes second-scan regression on DR-F120.
+ * Function and call site both wrapped in #if 0 until investigated. */
+#if 0
 static SANE_Status
 ssm2_page_04 (struct scanner *s, int side)
 {
@@ -4431,6 +4434,7 @@ ssm2_page_04 (struct scanner *s, int side)
 
   return ret;
 }
+#endif
 
 static SANE_Status
 ssm_do (struct scanner *s)
