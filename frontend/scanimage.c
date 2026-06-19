@@ -1438,7 +1438,7 @@ scan_it (FILE *ofp, void* pw)
 
       if (first_frame)
 	{
-          image.num_channels = 1;
+	  image.num_channels = 1;
 	  switch (parm.format)
 	    {
 	    case SANE_FRAME_RED:
@@ -1461,6 +1461,7 @@ scan_it (FILE *ofp, void* pw)
 		  offset = 0;
 		}
 	      else
+		{
 		  switch(output_format)
 		  {
 		  case OUTPUT_TIFF:
@@ -1482,13 +1483,19 @@ scan_it (FILE *ofp, void* pw)
 #endif
 #ifdef HAVE_LIBJPEG
 		  case OUTPUT_PDF:
-		    sane_pdf_start_page ( pw, parm.pixels_per_line, parm.lines,
-		               resolution_value, SANE_PDF_IMAGE_COLOR,
-		               SANE_PDF_ROTATE_OFF);
-		    write_jpeg_header (parm.format, parm.pixels_per_line,
-				       parm.lines, resolution_value,
-				       ofp, &cinfo, &jerr);
-		    break;
+		    {
+		      SANE_Int image_type =
+			  (parm.format == SANE_FRAME_GRAY)?
+			      (parm.depth == 1? SANE_PDF_IMAGE_MONO: SANE_PDF_IMAGE_GRAY): SANE_PDF_IMAGE_COLOR;
+
+		      sane_pdf_start_page(pw, parm.pixels_per_line, parm.lines, resolution_value,
+					  image_type, SANE_PDF_ROTATE_OFF);
+
+		      write_jpeg_header (parm.format, parm.pixels_per_line,
+					 parm.lines, resolution_value,
+					 ofp, &cinfo, &jerr);
+		      break;
+		    }
 		  case OUTPUT_JPEG:
 		    write_jpeg_header (parm.format, parm.pixels_per_line,
 				       parm.lines, resolution_value,
@@ -1496,6 +1503,7 @@ scan_it (FILE *ofp, void* pw)
 		    break;
 #endif
 		  }
+		}
 	      break;
 
             default:
@@ -1686,6 +1694,22 @@ scan_it (FILE *ofp, void* pw)
 			      buf8[col1 * 8 + col8] = (jpegbuf[col1] & (1 << (8 - col8 - 1))) ? 0 : 0xff;
 		          jpeg_write_scanlines(&cinfo, &buf8, 1);
 			  free(buf8);
+			} else if(parm.depth == 16) {
+				// JPEG is an 8-bit format, so we need to throw away the low
+				// byte from each 16-bit value.
+				int col;
+				JSAMPLE *buf8 = malloc(parm.bytes_per_line/2);
+				for(col = 0; col < parm.bytes_per_line; col+=2) {
+					#ifdef WORDS_BIGENDIAN
+						// platform is big-endian, so we want the first byte of each pair
+						buf8[col/2] = jpegbuf[col];
+					#else
+						// platform is little-endian, so we want the second byte of each pair
+						buf8[col/2] = jpegbuf[col+1];
+					#endif
+				}
+				jpeg_write_scanlines(&cinfo, &buf8, 1);
+				free(buf8);
 			} else {
 		          jpeg_write_scanlines(&cinfo, &jpegbuf, 1);
 			}

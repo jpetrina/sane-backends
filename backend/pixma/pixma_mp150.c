@@ -1032,8 +1032,24 @@ handle_interrupt (pixma_t * s, int timeout)
         s->events |= (buf[16] & 0x0f) << 4;
       }
   }
-  else if (s->cfg->pid == LIDE300_PID
-           || s->cfg->pid == LIDE400_PID)
+  else if (s->cfg->pid == LIDE300_PID)
+  /* unknown value in buf[4]
+   * target in buf[0x13] 01=copy; 02=auto; 03=send; 05=start PDF.
+   * "Send" is Button-2, all others are Button-1
+   * LiDE 300 is like the LiDE 400, but doesn't have the PDF Finish button. */
+  {
+    if (buf[0x13] == 0x03)
+    {
+      /* button 2 = cancel / end scan */
+      s->events = PIXMA_EV_BUTTON2 | (buf[0x13] & 0x0f);
+    }
+    else if (buf[0x13])
+    {
+      /* button 1 = start scan */
+      s->events = PIXMA_EV_BUTTON1 | (buf[0x13] & 0x0f);
+    }
+  }
+  else if (s->cfg->pid == LIDE400_PID)
   /* unknown value in buf[4]
    * target in buf[0x13] 01=copy; 02=auto; 03=send; 05=start PDF; 06=finish PDF
    * "Finish PDF" is Button-2, all others are Button-1 */

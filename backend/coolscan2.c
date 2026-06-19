@@ -543,7 +543,7 @@ sane_open (SANE_String_Const name, SANE_Handle * h)
 	  o.size = WSIZE;
 	  o.cap = SANE_CAP_SOFT_SELECT | SANE_CAP_SOFT_DETECT;
 	  o.constraint_type = SANE_CONSTRAINT_WORD_LIST;
-	  word_list = (SANE_Word *) cs2_xmalloc (2 * sizeof (SANE_Word));
+	  word_list = (SANE_Word *) cs2_xmalloc (3 * sizeof (SANE_Word));
 	  if (!word_list)
 	    alloc_failed = 1;
 	  else

@@ -885,13 +885,116 @@ read_dlld (void)
   DBG (5, "sane_init/read_dlld: done.\n");
 }
 
+static void
+read_aliases (const char *aliases)
+{
+  char config_line[PATH_MAX];
+  size_t len;
+
+  FILE *fp = sanei_config_open (aliases);
+  if (!fp)
+  {
+    DBG (5, "sane_init/read_aliases: fopen failed: %s\n", strerror (errno));
+    return;	/* don't insist on aliases file */
+  }
+
+  DBG (5, "sane_init/read_aliases: reading %s\n", aliases);
+  while (sanei_config_read (config_line, sizeof (config_line), fp))
+    {
+      if (config_line[0] == '#')	/* ignore line comments */
+	continue;
+
+      len = strlen (config_line);
+      if (!len)
+	continue;		/* ignore empty lines */
+
+      add_alias (config_line);
+    }
+  fclose (fp);
+}
+
+static void
+read_aliases_d (void)
+{
+  DIR *aliasd;
+  struct dirent *aliases;
+  struct stat st;
+  char aliasdir[PATH_MAX];
+  char aliasfile[PATH_MAX + strlen("/") + NAME_MAX];
+  size_t len, plen;
+  const char *dir_list;
+  char *copy, *next, *dir;
+
+  dir_list = sanei_config_get_paths ();
+  if (!dir_list)
+    {
+      DBG(2, "sane_init/read_aliases_d: Unable to detect configuration directories\n");
+      return;
+    }
+
+  copy = strdup (dir_list);
+
+  for (next = copy; (dir = strsep (&next, DIR_SEP)) != NULL;)
+    {
+      snprintf (aliasdir, sizeof (aliasdir), "%s%s", dir, "/dll.aliases.d");
+
+      DBG(4, "sane_init/read_aliases_d: attempting to open directory `%s'\n", aliasdir);
+
+      aliasd = opendir (aliasdir);
+      if (aliasd)
+	{
+	  /* length of path to parent dir of dll.d/ */
+	  plen = strlen (dir) + 1;
+
+	  DBG(3, "sane_init/read_aliases_d: using config directory `%s'\n", aliasdir);
+	  break;
+	}
+    }
+  free (copy);
+
+  if (aliasd == NULL)
+    {
+      DBG (3, "sane_init/read_aliases_d: opendir failed: %s\n",
+           strerror (errno));
+      return;
+    }
+
+  while ((aliases = readdir (aliasd)) != NULL)
+    {
+      /* dotfile (or directory) */
+      if (aliases->d_name[0] == '.')
+        continue;
+
+      len = strlen (aliases->d_name);
+
+      /* backup files */
+      if ((aliases->d_name[len-1] == '~')
+          || (aliases->d_name[len-1] == '#'))
+        continue;
+
+      snprintf (aliasfile, sizeof(aliasfile), "%s/%s", aliasdir, aliases->d_name);
+
+      DBG (5, "sane_init/read_aliases_d: considering %s\n", aliasfile);
+
+      if (stat (aliasfile, &st) != 0)
+        continue;
+
+      if (!S_ISREG (st.st_mode))
+        continue;
+
+      /* expects a path relative to PATH_SANE_CONFIG_DIR */
+      read_aliases (aliasfile+plen);
+    }
+
+  closedir (aliasd);
+
+  DBG (5, "sane_init/read_aliases_d: done.\n");
+}
+
 SANE_Status
 sane_init (SANE_Int * version_code, SANE_Auth_Callback authorize)
 {
 #ifndef __BEOS__
-  char config_line[PATH_MAX];
-  size_t len;
-  FILE *fp;
   int i;
 #else
   DIR *dir;
@@ -933,23 +1036,11 @@ sane_init (SANE_Int * version_code, SANE_Auth_Callback authorize)
   read_dlld ();
   read_config (DLL_CONFIG_FILE);
 
-  fp = sanei_config_open (DLL_ALIASES_FILE);
-  if (!fp)
-    return SANE_STATUS_GOOD;	/* don't insist on aliases file */
-
-  DBG (5, "sane_init: reading %s\n", DLL_ALIASES_FILE);
-  while (sanei_config_read (config_line, sizeof (config_line), fp))
-    {
-      if (config_line[0] == '#')	/* ignore line comments */
-	continue;
-
-      len = strlen (config_line);
-      if (!len)
-	continue;		/* ignore empty lines */
-
-      add_alias (config_line);
-    }
-  fclose (fp);
+  /*
+   * Read dll.aliases & dll.aliases.d
+   */
+  read_aliases(DLL_ALIASES_FILE);
+  read_aliases_d();
 
 #else
 	/* no ugly config files, just get scanners from their ~/config/add-ons/SANE */

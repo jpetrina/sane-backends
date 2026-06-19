@@ -927,46 +927,46 @@ static void gl843_init_optical_regs_scan(Genesys_Device* dev, const Genesys_Sens
     reg->set8(REG_0x2F, 0x7f);
 
   /* monochrome / color scan */
-    switch (session.params.depth) {
+  reg->find_reg(REG_0x04).value &= ~(REG_0x04_LINEART | REG_0x04_BITSET);
+  switch (session.params.depth) {
+    case 1:
+      reg->find_reg(REG_0x04).value |= REG_0x04_LINEART;
+      break;
     case 8:
-            reg->find_reg(REG_0x04).value &= ~(REG_0x04_LINEART | REG_0x04_BITSET);
       break;
     case 16:
-            reg->find_reg(REG_0x04).value &= ~REG_0x04_LINEART;
-            reg->find_reg(REG_0x04).value |= REG_0x04_BITSET;
+      reg->find_reg(REG_0x04).value |= REG_0x04_BITSET;
       break;
-    }
+  }
 
-    reg->find_reg(REG_0x04).value &= ~(REG_0x04_FILTER | REG_0x04_AFEMOD);
-  if (session.params.channels == 1)
-    {
-      switch (session.params.color_filter)
-	{
-            case ColorFilter::RED:
-                reg->find_reg(REG_0x04).value |= 0x14;
-                break;
-            case ColorFilter::BLUE:
-                reg->find_reg(REG_0x04).value |= 0x1c;
-                break;
-            case ColorFilter::GREEN:
-                reg->find_reg(REG_0x04).value |= 0x18;
-                break;
-            default:
-                break; // should not happen
-	}
-    } else {
-        switch (dev->frontend.layout.type) {
-            case FrontendType::WOLFSON:
-                reg->find_reg(REG_0x04).value |= 0x10; // pixel by pixel
-                break;
-            case FrontendType::ANALOG_DEVICES:
-                reg->find_reg(REG_0x04).value |= 0x20; // slow color pixel by pixel
-                break;
-            default:
-                throw SaneException("Invalid frontend type %d",
-                                    static_cast<unsigned>(dev->frontend.layout.type));
-        }
-    }
+  reg->find_reg(REG_0x04).value &= ~(REG_0x04_FILTER | REG_0x04_AFEMOD);
+  if (session.params.channels == 1) {
+    switch (session.params.color_filter) {
+      case ColorFilter::RED:
+        reg->find_reg(REG_0x04).value |= REG_0x04_FILTER_R;
+        break;
+        case ColorFilter::GREEN:
+        reg->find_reg(REG_0x04).value |= REG_0x04_FILTER_G;
+        break;
+      case ColorFilter::BLUE:
+        reg->find_reg(REG_0x04).value |= REG_0x04_FILTER_B;
+        break;
+      default:
+        break; // should not happen
+	  }
+  }
+
+  switch (dev->frontend.layout.type) {
+    case FrontendType::WOLFSON:
+      reg->find_reg(REG_0x04).value |= REG_0x04_AFEMOD_PXP; // pixel by pixel
+      break;
+    case FrontendType::ANALOG_DEVICES:
+      reg->find_reg(REG_0x04).value |= REG_0x04_AFEMOD_SLOW_PXP; // slow color pixel by pixel
+      break;
+    default:
+      throw SaneException("Invalid frontend type %d",
+                          static_cast<unsigned>(dev->frontend.layout.type));
+  }
 
     const auto& dpihw_sensor = sanei_genesys_find_sensor(dev, session.output_resolution,
                                                          session.params.channels,
@@ -1023,7 +1023,7 @@ void CommandSetGl843::init_regs_for_scan_session(Genesys_Device* dev, const Gene
   slope_dpi = slope_dpi * (1 + dummy);
 
   /* scan_step_type */
-  exposure = sensor.exposure_lperiod;
+  exposure = session.params.exposure_lperiod;
   if (exposure < 0) {
       throw std::runtime_error("Exposure not defined in sensor definition");
   }
@@ -1104,6 +1104,7 @@ ScanSession CommandSetGl843::calculate_scan_session(const Genesys_Device* dev,
     session.params.color_filter = settings.color_filter;
     session.params.contrast_adjustment = settings.contrast;
     session.params.brightness_adjustment = settings.brightness;
+    session.params.exposure_lperiod = settings.exposure_lperiod;
     session.params.flags = flags;
     compute_session(dev, session, sensor);
 
@@ -1417,6 +1418,7 @@ void CommandSetGl843::init_regs_for_shading(Genesys_Device* dev, const Genesys_S
     session.params.color_filter = dev->settings.color_filter;
     session.params.contrast_adjustment = dev->settings.contrast;
     session.params.brightness_adjustment = dev->settings.brightness;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = flags;
     compute_session(dev, session, calib_sensor);
 
@@ -1522,6 +1524,7 @@ void CommandSetGl843::init_regs_for_warmup(Genesys_Device* dev, const Genesys_Se
     session.params.color_filter = dev->settings.color_filter;
     session.params.contrast_adjustment = 0;
     session.params.brightness_adjustment = 0;
+    session.params.exposure_lperiod = dev->settings.exposure_lperiod;
     session.params.flags = flags;
 
     compute_session(dev, session, calib_sensor);

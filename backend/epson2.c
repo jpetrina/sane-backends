@@ -1377,8 +1377,6 @@ init_options(Epson_Scanner *s)
 	s->opt[OPT_SOURCE].constraint_type = SANE_CONSTRAINT_STRING_LIST;
 	s->opt[OPT_SOURCE].constraint.string_list = source_list;
 
-	if (!s->hw->extension)
-		s->opt[OPT_SOURCE].cap |= SANE_CAP_INACTIVE;
 
 	s->val[OPT_SOURCE].w = 0;	/* always use Flatbed as default */
 

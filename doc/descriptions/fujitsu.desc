@@ -683,11 +683,6 @@
 :mfg "Ricoh"                   ; name a manufacturer
 :url "http://www.ricoh.com/"
 
-:model "fi-70F"
-:interface "USB"
-:status :untested
-:usbid "0x05ca" "0x0308"
-
 :model "fi-400F"
 :interface "USB"
 :status :untested
@@ -818,6 +813,11 @@
 :status :good
 :usbid "0x04c5" "0x1632"
 :comment "WiFi not supported."
+
+:model "ScanSnap iX2400"
+:interface "USB"
+:status :untested
+:usbid "0x05ca" "0x03e3"
 
 :model "ScanSnap SV600"
 :interface "USB"

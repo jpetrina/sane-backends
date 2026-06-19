@@ -116,13 +116,14 @@
 #define MF520_PID  0x27f0
 #define MF420_PID  0x27f1
 #define MF260_PID  0x27f4
+#define MF270_PID  0x2892
 #define MF740_PID  0x27fb
 #define MF743_PID  0x27fc
 #define MF750_PID  0x2885
 #define MF640_PID  0x27fe
 #define MF645_PID  0x27fd
 #define MF440_PID  0x2823
-
+#define MF650_PID  0x287b
 
 enum iclass_state_t
 {
@@ -989,11 +990,14 @@ const pixma_config_t pixma_iclass_devices[] = {
   DEV ("Canon i-SENSYS MF520 Series", "MF520", MF520_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF420 Series", "MF420", MF420_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF260 Series", "MF260", MF260_PID, 600, 0, 640, 1050, PIXMA_CAP_JPEG | PIXMA_CAP_ADFDUP),
+  DEV ("Canon i-SENSYS MF270 Series", "MF270", MF270_PID, 600, 0, 640, 1050, PIXMA_CAP_ADF),
   DEV ("Canon i-SENSYS MF740 Series", "MF740", MF740_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
+  DEV ("Canon i-SENSYS MF742C/744C", "MF742C/744C", MF740_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF741C/743C", "MF741C/743C", MF743_PID, 600, 300, 640, 1050, PIXMA_CAP_ADFDUP),       /* ADFDUP restricted to 300dpi */
   DEV ("Canon i-SENSYS MF750 Series", "MF750C", MF750_PID, 600, 300, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF640 Series", "MF642C/643C/644C", MF640_PID, 600, 0, 640, 1050, PIXMA_CAP_ADFDUP),
   DEV ("Canon i-SENSYS MF645C", "MF645C", MF645_PID, 600, 0, 637, 877, PIXMA_CAP_ADFDUP),                    /* max. w = 216mm */
+  DEV ("Canon i-SENSYS MF650C", "MF650C", MF650_PID, 600, 0, 637, 1050, PIXMA_CAP_ADFDUP),                    /* max. w = 216mm */
   DEV ("Canon i-SENSYS MF440 Series", "MF440", MF440_PID, 600, 300, 637, 877, PIXMA_CAP_ADFDUP),
   DEV (NULL, NULL, 0, 0, 0, 0, 0, 0)
 };

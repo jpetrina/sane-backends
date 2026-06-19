@@ -70,6 +70,7 @@ enum Genesys_Option
   OPT_PREVIEW,
   OPT_BIT_DEPTH,
   OPT_RESOLUTION,
+  OPT_EXPOSURE_TIME,
 
   OPT_GEOMETRY_GROUP,
   OPT_TL_X,			/* top-left x */
@@ -198,6 +199,7 @@ struct Genesys_Scanner
     SANE_Word brightness = 0;
     SANE_Word expiration_time = 0;
     bool custom_gamma = false;
+    SANE_Word exposure_time = 0;
 
     SANE_Word pos_top_left_y = 0;
     SANE_Word pos_top_left_x = 0;

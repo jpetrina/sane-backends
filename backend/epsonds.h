@@ -21,6 +21,8 @@
 #define mode_params epsonds_mode_params
 #define source_list epsonds_source_list
 
+#include "sane/config.h"
+
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
@@ -35,6 +37,10 @@
 
 #ifdef NEED_SYS_TYPES_H
 #include <sys/types.h>
+#endif
+
+#ifdef HAVE_OPENSSL
+#include <openssl/ssl.h>
 #endif
 
 #include <string.h> /* for memset and memcpy */
@@ -87,6 +93,8 @@ enum {
 	OPT_LOAD,
 	OPT_ADF_SKEW,
 	OPT_ADF_CRP,
+	OPT_SENSOR_GROUP,
+	OPT_BUTTON_1,
 	NUM_OPTIONS
 };
 
@@ -142,6 +150,8 @@ struct epsonds_device
 	SANE_Byte adf_alignment;	/* left, center, right */
 	SANE_Byte adf_has_dfd;		/* supports double feed detection */
 
+	SANE_Bool has_button;		/* has scan button (interrupt endpoint) */
+
 	SANE_Byte adf_has_crp;		/* supports crp */
 
 	SANE_Bool has_tpu;		/* tpu */
@@ -149,6 +159,7 @@ struct epsonds_device
 	SANE_Range tpu_y_range;	        /* transparency unit y range */
 
 	SANE_Int lut_id;
+	SANE_Bool has_hardware_lut;
 };
 
 typedef struct epsonds_device epsonds_device;
@@ -159,6 +170,12 @@ typedef struct ring_buffer
 	SANE_Int fill, size;
 
 } ring_buffer;
+#ifdef HAVE_OPENSSL
+typedef struct crypt_context {
+    SSL_CTX *ssl;
+    BIO *bio;
+} crypt_context;
+#endif
 
 /* an instance of a scanner */
 
@@ -206,6 +223,10 @@ struct epsonds_scanner
 	SANE_Int   needToConvertBW;
 
 	SANE_Int   scanEnd;
+#ifdef HAVE_OPENSSL
+	crypt_context *cryptContext;
+#endif
+
  };
 
 typedef struct epsonds_scanner epsonds_scanner;

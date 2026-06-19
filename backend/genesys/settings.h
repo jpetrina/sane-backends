@@ -64,6 +64,9 @@ struct Genesys_Settings
     // cache entries expiration time
     int expiration_time = 0;
 
+    // exposure time sent to scanner (i.e. LPERIOD)
+    int exposure_lperiod = 0;
+
     unsigned get_channels() const
     {
         if (scan_mode == ScanColorMode::COLOR_SINGLE_PASS)
@@ -117,6 +120,8 @@ struct SetupParams {
     int contrast_adjustment = NOT_SET_I;
     int brightness_adjustment = NOT_SET_I;
 
+    unsigned exposure_lperiod = NOT_SET;
+
     ScanFlag flags = ScanFlag::NONE;
 
     unsigned get_requested_pixels() const
@@ -134,7 +139,7 @@ struct SetupParams {
             scan_method == static_cast<ScanMethod>(NOT_SET) ||
             scan_mode == static_cast<ScanColorMode>(NOT_SET) ||
             color_filter == static_cast<ColorFilter>(NOT_SET) ||
-            contrast_adjustment == NOT_SET_I || brightness_adjustment == NOT_SET_I)
+            contrast_adjustment == NOT_SET_I || brightness_adjustment == NOT_SET_I || exposure_lperiod == NOT_SET)
         {
             throw std::runtime_error("SetupParams are not valid");
         }
@@ -156,6 +161,7 @@ struct SetupParams {
             color_filter == other.color_filter &&
             contrast_adjustment == other.contrast_adjustment &&
             brightness_adjustment == other.brightness_adjustment &&
+            exposure_lperiod == other.exposure_lperiod &&
             flags == other.flags;
     }
 };
@@ -179,6 +185,7 @@ void serialize(Stream& str, SetupParams& x)
     serialize(str, x.color_filter);
     serialize(str, x.contrast_adjustment);
     serialize(str, x.brightness_adjustment);
+    serialize(str, x.exposure_lperiod);
     serialize(str, x.flags);
 }
 

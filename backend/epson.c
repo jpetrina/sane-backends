@@ -3549,7 +3549,7 @@ sane_open (SANE_String_Const devicename, SANE_Handle * handle)
     return SANE_STATUS_INVAL;
   }
 
-  s = calloc (sizeof (Epson_Scanner), 1);
+  s = calloc (1, sizeof (Epson_Scanner));
   if (!s)
   {
     DBG (1, "out of memory (line %d)\n", __LINE__);
