@@ -27,3 +27,4 @@ extern void test_family2();
 extern void test_gray_rlength();
 extern void test_colour_int_rgb();
 extern void test_colour_jpeg();
+extern void test_family_transport_usb();

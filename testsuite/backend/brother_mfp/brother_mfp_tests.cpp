@@ -35,6 +35,7 @@ int main ()
   test_gray_rlength ();
   test_colour_int_rgb();
   test_colour_jpeg();
+  test_family_transport_usb();
 
   return finish_tests ();
 }

@@ -538,18 +538,13 @@ SANE_Status BrotherTransportUSB::ReadButtons(SANE_Int &button_mask)
   button_mask = 0;
 
   /*
-   * We can get 3 types of response and they are all different lengths.
-   * There is a 4, 5, and 9 byte reply. We get a 9 byte reply when a button
-   * has been pressed. The 4 or 5 byte replies appear otherwise. Not sure
-   * what information these messages convey but we can assume they indicate
-   * that there is no event yet.
-   *
    * Note that when the user is in the process of selecting the button press
    * option, the device is flagged as "Busy" when trying to start a session.
    * When the user finishes the selection by pressing the "Start" button, then
    * it is no longer busy and we can complete the scan.
    *
    */
+  memset(small_buffer, 0, sizeof(small_buffer));
   SANE_Status res = sanei_usb_control_msg(fd, USB_DIR_IN | USB_TYPE_VENDOR,
 					  BROTHER_USB_REQ_BUTTONSTATE,
 					  0, 0, 255, small_buffer);
@@ -561,8 +556,7 @@ SANE_Status BrotherTransportUSB::ReadButtons(SANE_Int &button_mask)
     }
 
   BrotherButtonStateResponse resp;
-
-  if (DecodeButtonStateResp(small_buffer, 255, resp) != SANE_STATUS_GOOD)
+  if (DecodeButtonStateResp(small_buffer, sizeof(small_buffer), resp) != SANE_STATUS_GOOD)
     {
       FDBGNP(DBG_WARN, "button state response is invalid.");
       return SANE_STATUS_IO_ERROR;
@@ -580,57 +574,61 @@ SANE_Status BrotherTransportUSB::ReadButtons(SANE_Int &button_mask)
 SANE_Status BrotherTransportUSB::DecodeButtonStateResp(const SANE_Byte *data, size_t data_len,
 						       BrotherButtonStateResponse &response)
 {
+  if (data_len < 4)
+  {
+    // Can't really happen since this is the size of the buffer,
+    // not the size of the actual response within that buffer.
+    FDBG(DBG_SERIOUS, "Scan button response too short [%d].", data_len);
+    return SANE_STATUS_IO_ERROR;
+  }
+
   /*
-   * Check integrity of response. Note that the length is the size of
-   * the buffer, not the length of the message as that is indicated by
-   * the first byte.
+   * Check if this is a scan button response (identified by magic values)
    *
    */
-  if ((data_len < data[0])|| (data[1] != 0x10) || (data[2] != 0x03))
+  if ((data[1] != 0x10) || (data[2] != 0x03))
     {
       return SANE_STATUS_IO_ERROR;
     }
+ 
+  // According to the old open source backend, data[0] once was the size
+  // of the response, but it has shown to behave erratically for some devices.
+  // The official driver likely does not evaluate data[0] anyway,
+  // so we decide to ignore that value for now.
 
   response.button_detected = SANE_FALSE;
   response.button_value = 0;
 
-  switch (data[0])
+  if (data[3] != 0x20)
   {
-    case 4:
-    case 5:
+    // No button was pressed
+    return SANE_STATUS_GOOD;
+  }
+
+  switch (data[4])
+    {
+    case 0x05:
+      response.button_value = BROTHER_SENSOR_FILE;
       break;
 
-    case 9:
-      switch (data[4])
-        {
-        case 0x05:
-          response.button_value = BROTHER_SENSOR_FILE;
-          break;
+    case 0x02:
+      response.button_value = BROTHER_SENSOR_OCR;
+      break;
 
-        case 0x02:
-          response.button_value = BROTHER_SENSOR_OCR;
-          break;
+    case 0x03:
+      response.button_value = BROTHER_SENSOR_IMAGE;
+      break;
 
-        case 0x03:
-          response.button_value = BROTHER_SENSOR_IMAGE;
-          break;
-
-        case 0x08:
-          response.button_value = BROTHER_SENSOR_EMAIL;
-          break;
-
-        default:
-          FDBG(DBG_SERIOUS, "invalid button query event type [%x02x].", data[4]);
-          return SANE_STATUS_UNSUPPORTED;
-        }
-
-      response.button_detected = SANE_TRUE;
+    case 0x08:
+      response.button_value = BROTHER_SENSOR_EMAIL;
       break;
 
     default:
-      FDBG(DBG_SERIOUS, "invalid response length to button query [%x02x].", data[0]);
-      return SANE_STATUS_IO_ERROR;
-  }
+      FDBG(DBG_SERIOUS, "invalid button query event type [%x02x].", data[4]);
+      return SANE_STATUS_UNSUPPORTED;
+    }
+
+  response.button_detected = SANE_TRUE;
 
   return SANE_STATUS_GOOD;
 }
