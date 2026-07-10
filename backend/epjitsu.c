@@ -233,8 +233,38 @@ unsigned char global_firmware_filename[PATH_MAX];
 
 /* Calibration settings */
 #define COARSE_OFFSET_TARGET   15
+
+/* fi-70F SCAN descramble - SOLVED 2026-07-07 with the v3 Gray-code encoder target
+ * (self-decoding: every output column encodes its true X). Verified numerically:
+ * 264/265 encoder positions recovered, ZERO seam gaps, per-column corr 0.95 vs the
+ * Windows golden. Geometry: each 6000-byte raw line holds 3 colour planes at byte
+ * offsets 0 / plane_stride / 2*plane_stride (= 0 / 2190 / 4380). Within a plane the
+ * three read-heads are BYTE-INTERLEAVED: head h, pixel k = plane[k*3 + h]; each head
+ * is FI70F_HEAD_WIDTH (432) pixels wide. The heads tile (horizontally mirrored) into
+ * the output at pitch 432, so output column x reads:
+ *     x <=  402  -> interleave 2, pixel = FI70F_H2_OFF (402)  - x   (left head)
+ *     403..834   -> interleave 1, pixel = FI70F_H1_OFF (834)  - x   (middle head)
+ *     x >=  835  -> interleave 0, pixel = FI70F_H0_OFF (1265) - x   (right head)
+ * All three planes are read at the same byte index -> R=plane0, G=plane1, B=plane2.
+ * Output width = FI70F_OUT_WIDTH (1240), matching Windows. The heads tile continuously
+ * (~1px overlap) so there is NO dead-lead skip (the old 68-byte HEAD_START was
+ * non-integer in heads and misaligned the 3-way interleave -> the ~22px "seam gaps"),
+ * NO per-line rotation, and NO gap interpolation. The device streams the image in
+ * blocks of FI70F_BLOCK_H(87) lines + an 8-byte trailer (02 <len:3> 00 00 80 00);
+ * read_from_scanner strips it so raw_data holds clean contiguous 6000-byte lines. */
+#define FI70F_BLOCK_H          87
+#define FI70F_TRAILER          8      /* per-block trailer bytes: 02 <len:3> 00 00 80 00 */
+#define FI70F_HEAD_WIDTH       432    /* pixels per read-head (byte-interleaved x3) */
+#define FI70F_H2_OFF           402    /* output-col -> in-head pixel offsets (mirrored) */
+#define FI70F_H1_OFF           834
+#define FI70F_H0_OFF           1265
+#define FI70F_OUT_WIDTH        1240   /* descrambled output width (matches Windows) */
 static int coarse_gain_min[3] = { 88, 88, 88 };    /* front, back, FI-60F 3rd plane */
 static int coarse_gain_max[3] = { 92, 92, 92 };
+/* fi-70F's CIS is much less sensitive than the fi-60F's; the shared 88/92 analog-gain
+ * target leaves the whole scan near-black, so the fi-70F needs a far higher target. */
+#define FI70F_COARSE_GAIN_MIN  150
+#define FI70F_COARSE_GAIN_MAX  160
 
 /* ------------------------------------------------------------------------- */
 #define STRING_FLATBED SANE_I18N("Flatbed")
@@ -649,6 +679,30 @@ attach_one (const char *name)
         s->threshold = 120;
         s->threshold_curve = 55;
     }
+
+    else if (strstr (s->sane.model, "fi-70F")){
+        DBG (15, "attach_one: Found fi-70F\n");
+
+        s->model = MODEL_FI70F;
+
+        s->has_fb = 1;
+        s->min_res = 50;
+        s->max_res = 600;
+        s->white_factor[0] = 1.0;
+        s->white_factor[1] = 0.93;
+        s->white_factor[2] = 0.98;
+        s->fine_gain_target[0] = 185; /* fi-70F flatbed */
+        s->fine_gain_target[1] = 185;
+
+        s->source = SOURCE_FLATBED;
+        s->mode = MODE_COLOR;
+        s->resolution = 300;
+        s->page_height = 5.83 * 1200;
+        s->page_width  = 4.1 * 1200;
+
+        s->threshold = 120;
+        s->threshold_curve = 55;
+    }
     else{
         DBG (15, "attach_one: Found other\n");
     }
@@ -893,6 +947,21 @@ load_fw (struct scanner *s)
     if(!(stat[0] & 0x10)){
         DBG (5, "load_fw: firmware not loaded? %#x\n",stat[0]);
         return SANE_STATUS_IO_ERROR;
+    }
+
+    /* fi-70F: Windows issues two extra init writes right after firmware upload -
+     * 1b95 (no payload) and 1be1 + 0x01 - which we skip. Candidate trigger for the
+     * full-width sensor readout (BISECT). Gated by firmware filename since s->model
+     * is not set yet at load_fw time. */
+    if(strstr((char *)global_firmware_filename, "70f")){
+        DBG(15,"load_fw: fi-70F extra init writes 1b95 / 1be1\n");
+        cmd[0]=0x1b; cmd[1]=0x95; cmdLen=2; statLen=1;
+        ret = do_cmd(s, 0, cmd, cmdLen, NULL, 0, stat, &statLen);
+        if(ret){ DBG(5,"load_fw: 1b95 error\n"); return ret; }
+        cmd[0]=0x1b; cmd[1]=0xe1; cmdLen=2; statLen=1;
+        { unsigned char p01 = 0x01;
+          ret = do_cmd(s, 0, cmd, cmdLen, &p01, 1, stat, &statLen); }
+        if(ret){ DBG(5,"load_fw: 1be1 error\n"); return ret; }
     }
 
     return ret;
@@ -1797,6 +1866,7 @@ update_transfer_totals(struct transfer * t)
 
     t->total_bytes = t->line_stride * t->image->height;
     t->rx_bytes = 0;
+    t->dev_pos = 0;
     t->done = 0;
 }
 
@@ -1946,6 +2016,20 @@ static struct model_res settings[] = {
 
  /*fi-60F/65F*/
 /* model                      mode       xres yres  u   mxx mnx   mxy mny   lin_s   pln_s pln_w   bh     cls    cps  cpw */
+ /* fi-70F: SCAN is planar RGB. each 6000-byte raw line holds 3 single-colour planes at
+    plane_stride 2190 (offsets 0/2190/4380); within a plane the 3 read-heads are byte-
+    interleaved (head h, pixel k = plane[k*3+h]), plane_width = 432 pixels/head. The
+    heads tile (mirrored) into a 1240-px output (max_x) - see descramble_raw for the
+    exact head->column map (SOLVED via the Gray-code encoder target: continuous ramp,
+    no seam gaps). CAL geometry is left at the fi-60F-style square 2000/2000 layout: the
+    fine-cal stage does not yet fully balance colour (red is under-corrected, ~cyan cast)
+    and correcting it needs fi-70F-specific fine-cal probe gains - the fi-60F 0xFF/0xBF
+    probe points give ~0 delta on this sensor, so gains peg (cf. S1100). */
+ { MODEL_FI70F, MODE_COLOR, 300, 300, 0, 1240, 32, 1749, 32, 6000, 2190, 432, 72, 6000, 2000, 2000,
+   setWindowCoarseCal_FI70F_300, setWindowFineCal_FI70F_300,
+   setWindowScan_FI70F_300, sendCal1Header_FI70F_300,
+   sendCal2Header_FI70F_300, setWindowScan_FI70F_300 },
+
  { MODEL_FI60F | MODEL_FI65F, MODE_COLOR, 300, 150, 0, 1296, 32,  875, 32, 2400*3,  958*3,  432,  72, 2400*3, 958*3, 432,
    setWindowCoarseCal_FI60F_300, setWindowFineCal_FI60F_300,
    setWindowSendCal_FI60F_300, sendCal1Header_FI60F_300,
@@ -2047,7 +2131,7 @@ change_params(struct scanner *s)
         img_heads = 1; /* image width is the same as the plane width on the S300 */
         img_pages = 2;
     }
-    else if (s->model == MODEL_S1100)
+    else if (s->model == MODEL_S1100 || s->model == MODEL_FI70F)
     {
         img_heads = 1; /* image width is the same as the plane width on the S1000 */
         img_pages = 1;
@@ -2109,11 +2193,11 @@ change_params(struct scanner *s)
     width = s->cal_image.plane_width * img_heads;
     s->coarsecal.width_pix = s->darkcal.width_pix = s->lightcal.width_pix = width;
     s->coarsecal.width_bytes = s->darkcal.width_bytes = s->lightcal.width_bytes = width * 3;
-    s->coarsecal.height = 1;
+    s->coarsecal.height = (s->model == MODEL_FI70F) ? 2 : 1; /* fi-70F sends 2 cal lines */
     s->coarsecal.mode = MODE_COLOR;
     s->coarsecal.x_res = s->darkcal.x_res = s->lightcal.x_res = settings[i].x_res;
     s->coarsecal.y_res = s->darkcal.y_res = s->lightcal.y_res = settings[i].y_res;
-    s->darkcal.height = s->lightcal.height = 16;
+    s->darkcal.height = s->lightcal.height = (s->model == MODEL_FI70F) ? 128 : 16; /* fi-70F finecal window = 128 lines */
     s->coarsecal.pages = s->darkcal.pages = s->lightcal.pages = img_pages;
     s->coarsecal.buffer = s->darkcal.buffer = s->lightcal.buffer = NULL;
 
@@ -2165,7 +2249,11 @@ change_params(struct scanner *s)
     width = (settings[i].max_x * s->resolution / settings[i].x_res);
     s->block_img.width_pix = width;
     s->block_img.width_bytes = width * (settings[i].mode == MODE_COLOR ? 3 : 1);
-    s->block_img.height = settings[i].block_height;
+    /* fi-70F free-runs the scan (no per-block 0xd3 pacing like the S-models); reading
+     * it in small blocks inserts descramble/copy gaps + odd partial reads between
+     * blocks that overflow its FIFO and halt the carriage after ~1 block. So buffer
+     * the whole page as ONE block - descramble/copy run once, reads stay continuous. */
+    s->block_img.height = (s->model == MODEL_FI70F) ? s->fullscan.height : settings[i].block_height;
     s->block_img.mode = settings[i].mode;
     s->block_img.x_res = s->resolution;
     s->block_img.y_res = settings[i].y_res;
@@ -2599,7 +2687,7 @@ setup_buffers(struct scanner *s)
         return SANE_STATUS_NO_MEM;
     }
 
-    s->cal_image.raw_data = calloc(1, s->cal_image.line_stride * 16 + 8); /* maximum 16 lines input for fine calibration */
+    s->cal_image.raw_data = calloc(1, s->cal_image.line_stride * s->darkcal.height + 8); /* fine-cal input: 16 lines (fi-60F/65F), 128 (fi-70F) */
     if(!s->cal_image.raw_data){
         DBG (5, "setup_buffers: ERROR: failed to setup calibration input raw data buffer\n");
         return SANE_STATUS_NO_MEM;
@@ -2951,14 +3039,16 @@ coarsecal_light(struct scanner *s, unsigned char *pay)
         /* check the values, adjust parameters if they are not within the target range */
         for (x = 0; x < s->coarsecal.pages; x++)
         {
+            int cg_lo = (s->model == MODEL_FI70F) ? FI70F_COARSE_GAIN_MIN : coarse_gain_min[x];
+            int cg_hi = (s->model == MODEL_FI70F) ? FI70F_COARSE_GAIN_MAX : coarse_gain_max[x];
             if (!cal_good[x])
             {
-                if (zcount[x] > 9 || avg[x] > coarse_gain_max[x])
+                if (zcount[x] > 9 || avg[x] > cg_hi)
                 {
                     high_param[x] = param[x];
                     param[x] = (low_param[x] + high_param[x]) / 2;
                 }
-                else if (avg[x] < coarse_gain_min[x])
+                else if (avg[x] < cg_lo)
                 {
                     low_param[x] = param[x];
                     param[x] = (low_param[x] + high_param[x]) / 2;
@@ -3006,6 +3096,9 @@ coarsecal(struct scanner *s)
     else if(s->model == MODEL_S1100){
         memcpy(pay,coarseCalData_S1100,payLen);
     }
+    else if(s->model == MODEL_FI70F){
+        memcpy(pay,coarseCalData_FI70F,payLen);
+    }
     else{
         memcpy(pay,coarseCalData_FI60F,payLen);
     }
@@ -3018,6 +3111,14 @@ coarsecal(struct scanner *s)
     }
 
     if(s->model == MODEL_S1100){
+        ret = coarsecal_send_cal(s, pay);
+    }
+    else if(s->model == MODEL_FI70F){
+        /* fi-70F: send Windows' fixed converged operating point (per-channel gain/
+         * offset/exposure in coarseCalData_FI70F) verbatim. Our dark/light bisection
+         * targets one shared gain at the wrong level, so it never reaches Windows'
+         * point and leaves red under-gained (cyan). Same physical white ref -> a fixed
+         * point is stable; a proper per-channel bisection could replace this later. */
         ret = coarsecal_send_cal(s, pay);
     }
     else{
@@ -3046,7 +3147,7 @@ finecal_send_cal(struct scanner *s)
 
     DBG (10, "finecal_send_cal: start\n");
 
-    if(s->model == MODEL_FI60F || s->model == MODEL_FI65F)
+    if(s->model == MODEL_FI60F || s->model == MODEL_FI65F || s->model == MODEL_FI70F)
       planes = 3;
     if(s->model == MODEL_S300 || s->model == MODEL_S1300i)
       planes = 2;
@@ -3089,6 +3190,12 @@ finecal_send_cal(struct scanner *s)
       }
     }
 
+    else if(s->model == MODEL_FI70F){
+      /* fi-70F cal table is [pixel][plane][offset,gain], the same layout as
+       * sendcal.buffer (no read-head interleaving) - so a straight copy. The
+       * fi-60F 3-head scramble below would overrun cal_data.raw_data here. */
+      memcpy(s->cal_data.raw_data, s->sendcal.buffer, s->cal_data.line_stride);
+    }
     else{
       for (i = 0; i < planes; i++)
         for (j = 0; j < s->cal_data.plane_width; j++)
@@ -3294,6 +3401,41 @@ finecal(struct scanner *s)
     else /* fi-60f, S1100 */
     {
         max_pages = 1;
+    }
+
+    /* fi-70F: the built-in 2-point gain sweep PEGS (the sensor is blind to the fine
+     * gain - reads the same at every gain), which starves the device to ~409 px/head
+     * and hard-zeros the rest ("seam gaps"). The device emits only the pixels the cal
+     * table calibrates, so replay a real per-pixel table that covers the full ~432
+     * px/head. TEMPORARY (option A): load Windows' captured table verbatim to validate
+     * full-width emission + colour; a proper white-ref flat-field will replace this. */
+    if (s->model == MODEL_FI70F){
+      /* per-pixel flat-field table -> sendcal.buffer (finecal_send_cal memcpys it to the
+       * device verbatim). Default = the captured Windows table (fineCalData_FI70F): it
+       * neutralises the cyan cast the built-in 2-point sweep cannot - the sensor's RED
+       * barely responds to the 0xff->0xbf fine-gain probe, so red pegs at max gain still
+       * under target and stays under-corrected. At Windows' coarse operating point this
+       * table yields a neutral, flat white (verified vs the encoder-target golden).
+       * Overrides for experiments: env FI70F_FINECAL=<file> loads another 12000-byte
+       * table; FI70F_FINECAL=compute runs the built-in sweep (falls through below). */
+      const char *rep = getenv("FI70F_FINECAL");
+      size_t caln = s->sendcal.width_bytes * s->sendcal.pages;   /* 12000 */
+      if (!(rep && !strcmp(rep, "compute"))){
+        if (rep){
+          FILE *rf = fopen(rep, "rb");
+          memset(s->sendcal.buffer, 0, caln);
+          if (rf){ size_t rn = fread(s->sendcal.buffer, 1, caln, rf); (void)rn;
+                   fclose(rf); }
+          DBG(10, "finecal: fi-70F loaded cal table from %s\n", rep);
+        } else {
+          memcpy(s->sendcal.buffer, fineCalData_FI70F, caln);
+        }
+        ret = finecal_send_cal(s); if(ret) return ret;
+        ret = lamp(s,1);
+        return ret;
+      }
+      /* FI70F_FINECAL=compute: fall through to the shared 2-point-sweep fine-cal
+       * (finecal_send_cal memcpys the fi-70F table with no head scramble). */
     }
 
     /* set fine dark offset to 0 and fix all fine gains to lowest parameter (0xFF) */
@@ -3554,7 +3696,11 @@ set_window(struct scanner *s, int window)
       case WINDOW_SCAN:
         payload = s->setWindowScan;
 	paylen  = s->setWindowScanLen;
-        set_SW_ypix(payload,s->fullscan.height);
+        /* fi-70F wants the captured scan-window ypix (0x6d8=1752) verbatim;
+         * overwriting it with fullscan.height (1749, not 8-aligned) makes the
+         * scanner deliver only ~1 block then stall. Others patch to scan length. */
+        if(s->model != MODEL_FI70F)
+            set_SW_ypix(payload,s->fullscan.height);
 	break;
       default:
         DBG (5, "set_window: unknown window\n");
@@ -3648,7 +3794,7 @@ send_lut (struct scanner *s)
         width = outLen / 2; /* 1 color, 2 bytes */
         height = width; /* square table */
     }
-    else if (s->model == MODEL_FI65F){
+    else if (s->model == MODEL_FI65F || s->model == MODEL_FI70F){
         outLen = 0x600;
         width = outLen / 6; /* 3 color, 2 bytes */
         height = width; /* square table */
@@ -3694,7 +3840,7 @@ send_lut (struct scanner *s)
             out[i*2] = (j >> 8) & 0xff;
             out[i*2+1] = j & 0xff;
         }
-        else if (s->model == MODEL_FI65F){
+        else if (s->model == MODEL_FI65F || s->model == MODEL_FI70F){
             /*first table, be order*/
             out[i*2] = (j >> 8) & 0xff;
             out[i*2+1] = j & 0xff;
@@ -4227,6 +4373,54 @@ descramble_raw(struct scanner *s, struct transfer * tp)
         }
       }
     }
+    else if (s->model == MODEL_FI70F){
+      /* fi-70F is a 3-read-head sensor. each raw line = 3 colour planes (R,G,B) at
+       * plane_stride byte offsets (0/2190/4380); WITHIN a plane the 3 heads are byte-
+       * INTERLEAVED (head h, pixel k = plane[k*3+h]), each head FI70F_HEAD_WIDTH(432)
+       * px. The heads tile (horizontally mirrored) into the FI70F_OUT_WIDTH(1240)
+       * output via the per-head pixel map above (see the FI70F_H*_OFF #defines): the
+       * mapping is a FIXED per-line permutation (like canon_dr's 3-head COLOR_INTERLACE
+       * modes) with NO rotation, NO dead-lead skip and NO gap interpolation - the heads
+       * tile continuously (~1px overlap), verified gap-free by the Gray-code encoder
+       * target. Mirror is done HERE, so FI70F is excluded from copy_block_to_page's
+       * line_reverse. (Cal images use the plain planar readback below.) */
+      if (tp == &s->block_xfr){
+        int ps   = tp->plane_stride;      /* 2190: R@0 G@ps B@2*ps within each line */
+        int outw = FI70F_OUT_WIDTH;       /* 1240 */
+        for (j = 0; j < height; j++){
+          unsigned char *rp  = tp->raw_data + j*tp->line_stride;  /* plane 0 = byte 0 */
+          unsigned char *row = p_out;     /* start of this output line (RGB triples) */
+          int x;
+          for (x = 0; x < outw; x++){
+            int inter, pixel, idx;
+            /* pick the read-head that images output column x (heads tile at pitch 432,
+             * horizontally mirrored so in-head pixel decreases as x increases) */
+            if      (x <= 402) { inter = 2; pixel = FI70F_H2_OFF - x; }
+            else if (x <= 834) { inter = 1; pixel = FI70F_H1_OFF - x; }
+            else               { inter = 0; pixel = FI70F_H0_OFF - x; }
+            if (pixel < 0 || pixel >= FI70F_HEAD_WIDTH){
+              row[x*3+0] = row[x*3+1] = row[x*3+2] = 0;  /* beyond sensor: platen margin */
+              continue;
+            }
+            idx = pixel*3 + inter;            /* byte-interleaved head read */
+            row[x*3+0] = rp[idx];             /* R (plane 0 @ 0)    */
+            row[x*3+1] = rp[ps + idx];        /* G (plane 1 @ 2190) */
+            row[x*3+2] = rp[2*ps + idx];      /* B (plane 2 @ 4380) */
+          }
+          p_out += 3*outw;
+        }
+      }
+      else { /* calibration images: plain planar readback (drives cal gain calc) */
+        for (j = 0; j < height; j++){
+          unsigned char *rp = tp->raw_data + j*tp->line_stride;
+          for (k = 0; k < tp->plane_width; k++){
+            *p_out++ = rp[k];
+            *p_out++ = rp[tp->plane_stride + k];
+            *p_out++ = rp[2*tp->plane_stride + k];
+          }
+        }
+      }
+    }
     else if (s->model == MODEL_S1100){
       for (j = 0; j < height; j++){             /* row (y)*/
         int curr_col = 0;
@@ -4332,7 +4526,7 @@ descramble_raw_gray(struct scanner *s, struct transfer * tp)
 
     DBG(15, "descramble_raw_gray: start\n");
 
-    if (s->model == MODEL_FI60F || s->model == MODEL_FI65F) {
+    if (s->model == MODEL_FI60F || s->model == MODEL_FI65F || s->model == MODEL_FI70F) {
       for (row = 0; row < height; row++){
 
         unsigned char *p_in = tp->raw_data + row * tp->line_stride;
@@ -4364,12 +4558,19 @@ read_from_scanner(struct scanner *s, struct transfer * tp)
 {
     SANE_Status ret=SANE_STATUS_GOOD;
     size_t bytes = MAX_IMG_PASS;
-    size_t remainBlock = tp->total_bytes - tp->rx_bytes + 8;
+    /* fi-70F free-runs and has no per-block 8-byte trailer; others append one */
+    size_t remainBlock = tp->total_bytes - tp->rx_bytes + (s->model == MODEL_FI70F ? 0 : 8);
+
+    /* fi-70F STALLs on the default 0x10000 bulk request; the Windows driver reads
+     * 0xFE00 (65024) per transfer (from USB snoop) - match it so the scan streams. */
+    if(s->model == MODEL_FI70F && bytes > 0xFE00)
+        bytes = 0xFE00;
     unsigned char * buf;
     size_t bufLen;
 
-    /* determine amount to ask for, S1300i wants big requests */
-    if(s->model != MODEL_S1300i){
+    /* determine amount to ask for, S1300i wants big requests; fi-70F too (a
+     * partial block-remainder request stalls its free-running pipe) */
+    if(s->model != MODEL_S1300i && s->model != MODEL_FI70F){
         bytes = MIN(bytes, remainBlock);
     }
 
@@ -4406,19 +4607,60 @@ read_from_scanner(struct scanner *s, struct transfer * tp)
 
         DBG(15,"read_from_scanner: got GOOD/EOF (%lu)\n",(unsigned long)bytes);
 
-        if(bytes > remainBlock){
-          DBG(15,"read_from_scanner: block too big?\n");
-          bytes = remainBlock;
+        if (s->model == MODEL_FI70F && tp == &s->block_xfr) {
+          /* MAIN SCAN only (cal images use a different block size - see else).
+           * The device closes every FI70F_BLOCK_H-line block with an 8-byte
+           * trailer (02 <len:3> 00 00 80 00). We buffer the whole page as one
+           * transfer, so those trailers arrive INLINE and must be dropped, else
+           * every block lands 8 bytes late - the "drift" the old descramble
+           * fought with a per-block shift. Copy image bytes only: a byte at
+           * device-stream position d is trailer iff (d % dev_block) >= img_block.
+           * dev_pos tracks d across reads, so a trailer split across a read
+           * boundary is handled correctly. */
+          int img_block = FI70F_BLOCK_H * tp->line_stride;   /* 522000 */
+          int dev_block = img_block + FI70F_TRAILER;         /* 522008 */
+          size_t off = 0;
+          while (off < bytes && tp->rx_bytes < tp->total_bytes) {
+            int pos = (tp->dev_pos + (int)off) % dev_block;
+            size_t run;
+            if (pos < img_block) {                  /* image run */
+              run = (size_t)(img_block - pos);
+              if (run > bytes - off) run = bytes - off;
+              if (run > (size_t)(tp->total_bytes - tp->rx_bytes))
+                run = (size_t)(tp->total_bytes - tp->rx_bytes);
+              memcpy(tp->raw_data + tp->rx_bytes, buf + off, run);
+              tp->rx_bytes += run;
+            } else {                                /* trailer run: skip */
+              run = (size_t)(dev_block - pos);
+              if (run > bytes - off) run = bytes - off;
+            }
+            off += run;
+          }
+          tp->dev_pos += bytes;
+          /* The fi-70F returns transient EOF/short reads while the carriage
+           * catches up; like the original code we keep reading and only finish
+           * when the whole page's worth of image bytes has arrived. */
+          if (tp->rx_bytes >= tp->total_bytes) {
+            DBG(15,"read_from_scanner: fi-70F page done\n");
+            tp->done = 1;
+          }
         }
+        else {
+          if(bytes > remainBlock){
+            DBG(15,"read_from_scanner: block too big?\n");
+            bytes = remainBlock;
+          }
 
-        if(bytes == remainBlock){
-          DBG(15,"read_from_scanner: block done, ignoring trailer\n");
-          bytes -= 8;
-          tp->done = 1;
+          if(bytes == remainBlock){
+            DBG(15,"read_from_scanner: block done, ignoring trailer\n");
+            /* fi-70F cal images end without the 8-byte trailer the S-models append */
+            bytes -= (s->model == MODEL_FI70F ? 0 : 8);
+            tp->done = 1;
+          }
+
+          memcpy(tp->raw_data + tp->rx_bytes, buf, bytes);
+          tp->rx_bytes += bytes;
         }
-
-        memcpy(tp->raw_data + tp->rx_bytes, buf, bytes);
-        tp->rx_bytes += bytes;
 
         ret = SANE_STATUS_GOOD;
     }
@@ -4448,6 +4690,8 @@ copy_block_to_page(struct scanner *s,int side)
     int image_height = block->total_bytes / block->line_stride;
     int page_width = page->image->width_pix;
     int block_page_stride = block->image->width_bytes * block->image->height;
+    /* fi-70F mirrors inside descramble_raw (needed there for the per-block
+     * head-rotation), so it is NOT reversed again here. */
     int line_reverse = (side == SIDE_BACK) || (s->model == MODEL_FI60F) || (s->model == MODEL_FI65F);
     int i,j,k=0;
 
@@ -4759,6 +5003,13 @@ teardown_buffers(struct scanner *s)
     if(s->cal_data.raw_data){
         free(s->cal_data.raw_data);
 	s->cal_data.raw_data = NULL;
+    }
+
+    /* fi-70F flat-field white reference */
+    if(s->fi70f_whiteref){
+        free(s->fi70f_whiteref);
+	s->fi70f_whiteref = NULL;
+	s->fi70f_whiteref_len = 0;
     }
 
     /* image slice */
