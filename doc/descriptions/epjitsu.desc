@@ -78,5 +78,6 @@
 
 :model "fi-70F"
 :interface "USB"
-:status :untested
+:status :basic
 :usbid "0x05ca" "0x0308"
+:comment "Full-page colour scans work (read path and 3-head descramble solved). Needs firmware '70f_0000.nal' or '70f_0A00.nal' extracted from the PaperStream IP package. Calibration uses a captured per-pixel reference table; a runtime-computed fine-cal is still work in progress. Button support untested."

@@ -71,6 +71,7 @@ struct transfer {
 
   int total_bytes;
   int rx_bytes;
+  int dev_pos;       /* fi-70F: raw device-stream position, incl. per-block trailers */
   int done;
   int mode;
   int x_res;
@@ -112,6 +113,13 @@ struct scanner
   float white_factor[3];
   int fine_gain_target[2]; /* per-model calibration target [front, back] */
   int adf_height_padding;
+
+  /* fi-70F: software flat-field. its cal window is blind to the fine gain, so the
+   * hardware 2-point fine-cal cannot work; instead we hold the fine gain fixed and
+   * divide each scan column by the captured per-column white reference. */
+  unsigned char *fi70f_whiteref;   /* per-column white, packed RGB, block width */
+  int fi70f_whiteref_len;          /* bytes allocated */
+  int fi70f_wtarget[3];            /* per-channel output white target */
 
   /* the scan size in 1/1200th inches, NOT basic_units or sane units */
   int max_x;
@@ -269,6 +277,7 @@ struct scanner
 #define MODEL_S1100 (1<<3)
 #define MODEL_S1300i (1<<4)
 #define MODEL_FI65F (1<<5)
+#define MODEL_FI70F (1<<6)
 
 #define USB_COMMAND_TIME   10000
 #define USB_DATA_TIME      10000

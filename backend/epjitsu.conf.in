@@ -82,5 +82,5 @@ firmware @DATADIR@/sane/epjitsu/1100i_0A00.nal
 usb 0x04c5 0x1447
 
 # Ricoh fi-70F
-firmware @DATADIR@/sane/epjitsu/70f_XXXX.nal
+firmware @DATADIR@/sane/epjitsu/70f_0000.nal
 usb 0x05ca 0x0308
