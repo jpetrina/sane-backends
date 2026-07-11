@@ -170,6 +170,10 @@ struct scanner
   int tur_timeout;      /* some models are slow to wake up */
   int vpd_length;       /* some models are particular about vpd size */
 
+  int flip_horiz[2];  /* per-side horizontal mirror */
+  int flip_vert[2];   /* per-side vertical mirror */
+  int adf_front_is_duplex; /* R40: ADF Front needs internal duplex scan */
+
   /* --------------------------------------------------------------------- */
   /* immutable values which are set during inquiry probing of the scanner. */
   /* members in order found in scsi data. These can also be in config file */
@@ -547,6 +551,7 @@ enum {
 #define DUPLEX_INTERLACE_2510 3
 #define DUPLEX_INTERLACE_fFBb 4
 #define DUPLEX_INTERLACE_PER_CHANNEL 5
+#define DUPLEX_INTERLACE_2510_SWAP 6
 
 #define JPEG_INTERLACE_ALT 0
 #define JPEG_INTERLACE_NONE 1
@@ -689,6 +694,7 @@ static unsigned char calc_bg_color(struct scanner *s);
 
 static SANE_Status buffer_despeck(struct scanner *s, int side);
 static SANE_Status buffer_deskew(struct scanner *s, int side);
+static void        buffer_mirror(struct scanner *s, int side);
 static SANE_Status buffer_crop(struct scanner *s, int side);
 static int buffer_isblank(struct scanner *s, int side);
 
