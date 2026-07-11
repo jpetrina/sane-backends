@@ -1533,7 +1533,7 @@ init_model (struct scanner *s)
     s->color_interlace[SIDE_BACK] = COLOR_INTERLACE_C120;
     s->duplex_interlace = DUPLEX_INTERLACE_2510_SWAP;
     /* R40 returns images mirrored: front h+vflip, back vflip */
-    s->flip_horiz[SIDE_FRONT] = 1;
+    s->flip_horiz[SIDE_FRONT] = 0;
     s->flip_vert[SIDE_FRONT] = 1;
     s->flip_horiz[SIDE_BACK] = 0;
     s->flip_vert[SIDE_BACK] = 1;
