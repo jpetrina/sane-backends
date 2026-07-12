@@ -1531,7 +1531,13 @@ init_model (struct scanner *s)
     s->gray_interlace[SIDE_BACK] = GRAY_INTERLACE_C120;
     s->color_interlace[SIDE_FRONT] = COLOR_INTERLACE_C120_LR;
     s->color_interlace[SIDE_BACK] = COLOR_INTERLACE_C120;
-    s->duplex_interlace = DUPLEX_INTERLACE_2510;
+    s->duplex_interlace = DUPLEX_INTERLACE_2510_SWAP;
+    /* R40 returns images mirrored: front h+vflip, back vflip */
+    s->flip_horiz[SIDE_FRONT] = 0;
+    s->flip_vert[SIDE_FRONT] = 1;
+    s->flip_horiz[SIDE_BACK] = 0;
+    s->flip_vert[SIDE_BACK] = 1;
+    s->adf_front_is_duplex = 1;
     /*s->duplex_offset = 320; now set in config file*/
     s->fixed_width = 1;
     s->need_ccal = 1;
@@ -5506,6 +5512,11 @@ sane_start (SANE_Handle handle)
       goto errors;
     }
 
+    if(s->adf_front_is_duplex && s->u.source == SOURCE_ADF_FRONT){
+      s->i.source = SOURCE_ADF_DUPLEX;
+      s->s.source = SOURCE_ADF_DUPLEX;
+    }
+
     /* set window command */
     ret = set_window(s);
     if (ret != SANE_STATUS_GOOD) {
@@ -5600,6 +5611,14 @@ sane_start (SANE_Handle handle)
     /* duplex needs to switch sides */
     if(s->s.source == SOURCE_ADF_DUPLEX || s->s.source == SOURCE_CARD_DUPLEX){
       s->side = !s->side;
+    }
+
+
+    if(s->adf_front_is_duplex && s->u.source == SOURCE_ADF_FRONT
+       && s->side == SIDE_BACK){
+      s->u.eof[SIDE_BACK] = 1;
+
+      return sane_start(handle);
     }
 
     /* reset the intermediate params */
@@ -5703,6 +5722,9 @@ sane_start (SANE_Handle handle)
     }
     if(s->swdespeck){
       buffer_despeck(s,s->side);
+    }
+    if(s->flip_horiz[SIDE_FRONT] || s->flip_vert[SIDE_FRONT] || s->flip_horiz[SIDE_BACK] || s->flip_vert[SIDE_BACK]){
+      buffer_mirror(s, s->side);
     }
     if(s->swskip){
       /* Skipping means throwing out this image.
@@ -6771,32 +6793,51 @@ copy_duplex(struct scanner *s, unsigned char * buf, int len)
     return SANE_STATUS_NO_MEM;
   }
 
-  if(s->duplex_interlace == DUPLEX_INTERLACE_2510){
+  if(s->duplex_interlace == DUPLEX_INTERLACE_2510
+    || s->duplex_interlace == DUPLEX_INTERLACE_2510_SWAP){
 
-    DBG (10, "copy_duplex: 2510\n");
+    DBG (10, "copy_duplex: %s\n",
+         s->duplex_interlace == DUPLEX_INTERLACE_2510 ? "2510" : "2510-swap");
 
     for(i=0; i<len; i+=dbwidth){
 
       for(j=0;j<dbwidth;j+=6){
 
-        /* we are actually only partially descrambling,
-         * copy_simplex() does the rest */
+        if(s->duplex_interlace == DUPLEX_INTERLACE_2510_SWAP){
 
-        /* front */
-        /* 2nd head: 2nd byte -> 1st byte */
-        /* 3rd head: 4th byte -> 2nd byte */
-        /* 1st head: 5th byte -> 3rd byte */
-        front[flen++] = buf[i+j+2];
-        front[flen++] = buf[i+j+4];
-        front[flen++] = buf[i+j+5];
+          /* R40: scanner sends back-side data in front byte positions */
+          /* 2nd head: 3rd byte -> 1st byte */
+          /* 3rd head: 0th byte -> 2nd byte */
+          /* 1st head: 1st byte -> 3rd byte */
+          front[flen++] = buf[i+j+3];
+          front[flen++] = buf[i+j];
+          front[flen++] = buf[i+j+1];
 
-        /* back */
-        /* 2nd head: 3rd byte -> 1st byte */
-        /* 3rd head: 0th byte -> 2nd byte */
-        /* 1st head: 1st byte -> 3rd byte */
-        back[blen++] = buf[i+j+3];
-        back[blen++] = buf[i+j];
-        back[blen++] = buf[i+j+1];
+          /* 2nd head: 2nd byte -> 1st byte */
+          /* 3rd head: 4th byte -> 2nd byte */
+          /* 1st head: 5th byte -> 3rd byte */
+          back[blen++] = buf[i+j+2];
+          back[blen++] = buf[i+j+4];
+          back[blen++] = buf[i+j+5];
+        }
+        else{
+
+          /* front */
+          /* 2nd head: 2nd byte -> 1st byte */
+          /* 3rd head: 4th byte -> 2nd byte */
+          /* 1st head: 5th byte -> 3rd byte */
+          front[flen++] = buf[i+j+2];
+          front[flen++] = buf[i+j+4];
+          front[flen++] = buf[i+j+5];
+
+          /* back */
+          /* 2nd head: 3rd byte -> 1st byte */
+          /* 3rd head: 0th byte -> 2nd byte */
+          /* 1st head: 1st byte -> 3rd byte */
+          back[blen++] = buf[i+j+3];
+          back[blen++] = buf[i+j];
+          back[blen++] = buf[i+j+1];
+        }
       }
     }
   }
@@ -9150,6 +9191,97 @@ sane_get_select_fd (SANE_Handle h, SANE_Int *fdp)
  * @@ Section 8 - Image processing functions
  */
 
+static void
+row_hflip(unsigned char *row, int width, int depth, int format)
+{
+  if (depth == 1) {
+    int bytes = (width + 7) / 8;
+    for (int i = 0; i < bytes / 2; i++) {
+      unsigned char tmp = row[i];
+      /* reverse bits in tmp and row[bytes-1-i] */
+      tmp = (unsigned char)(((tmp & 0x80)>>7)|((tmp & 0x40)>>5)|((tmp & 0x20)>>3)|
+                            ((tmp & 0x10)>>1)|((tmp & 0x08)<<1)|((tmp & 0x04)<<3)|
+                            ((tmp & 0x02)<<5)|((tmp & 0x01)<<7));
+      unsigned char tmp2 = row[bytes-1-i];
+      tmp2 = (unsigned char)(((tmp2 & 0x80)>>7)|((tmp2 & 0x40)>>5)|
+                             ((tmp2 & 0x20)>>3)|((tmp2 & 0x10)>>1)|
+                             ((tmp2 & 0x08)<<1)|((tmp2 & 0x04)<<3)|
+                             ((tmp2 & 0x02)<<5)|((tmp2 & 0x01)<<7));
+      row[i] = tmp2;
+      row[bytes-1-i] = tmp;
+    }
+    if (bytes % 2) {
+      int i = bytes / 2;
+      unsigned char tmp = row[i];
+      tmp = (unsigned char)(((tmp & 0x80)>>7)|((tmp & 0x40)>>5)|((tmp & 0x20)>>3)|
+                            ((tmp & 0x10)>>1)|((tmp & 0x08)<<1)|((tmp & 0x04)<<3)|
+                            ((tmp & 0x02)<<5)|((tmp & 0x01)<<7));
+      row[i] = tmp;
+      /* mask unused bits in last byte if width is not multiple of 8 */
+      int extra = bytes * 8 - width;
+      if (extra > 0) row[i] &= (unsigned char)(0xff << extra);
+    }
+  } else if (format == SANE_FRAME_RGB) {
+    int len = width * 3;
+    for (int i = 0; i < len / 2; i += 3) {
+      for (int c = 0; c < 3; c++) {
+        unsigned char tmp = row[i + c];
+        row[i + c] = row[len - 3 - i + c];
+        row[len - 3 - i + c] = tmp;
+      }
+    }
+  } else {
+    int len = width;
+    for (int i = 0; i < len / 2; i++) {
+      unsigned char tmp = row[i];
+      row[i] = row[len - 1 - i];
+      row[len - 1 - i] = tmp;
+    }
+  }
+}
+
+static void
+buffer_mirror(struct scanner *s, int side)
+{
+  int hflip = s->flip_horiz[side];
+  int vflip = s->flip_vert[side];
+
+  if (!hflip && !vflip) return;
+
+  SANE_Parameters params;
+  sane_get_parameters((SANE_Handle)s, &params);
+  int width = params.pixels_per_line;
+  int height = params.lines;
+  int depth = params.depth;
+  int row_bytes;
+
+  if (depth == 1)
+    row_bytes = (width + 7) / 8;
+  else if (params.format == SANE_FRAME_RGB)
+    row_bytes = width * 3;
+  else
+    row_bytes = width;
+
+  if (hflip) {
+    for (int y = 0; y < height; y++)
+      row_hflip(s->buffers[side] + y * row_bytes, width, depth, params.format);
+  }
+
+  if (vflip) {
+    unsigned char *tmp = malloc((size_t)row_bytes);
+    if (!tmp) return;
+    for (int y = 0; y < height / 2; y++) {
+      memcpy(tmp, s->buffers[side] + y * row_bytes, (size_t)row_bytes);
+      memcpy(s->buffers[side] + y * row_bytes,
+             s->buffers[side] + (height - 1 - y) * row_bytes,
+             (size_t)row_bytes);
+      memcpy(s->buffers[side] + (height - 1 - y) * row_bytes, tmp,
+             (size_t)row_bytes);
+    }
+    free(tmp);
+  }
+}
+
 /* Look in image for likely upper and left paper edges, then rotate
  * image so that upper left corner of paper is upper left of image.
  * FIXME: should we do this before we binarize instead of after? */
@@ -9310,7 +9442,9 @@ must_fully_buffer(struct scanner *s)
 {
 
   if(
-    (s->swdeskew || s->swdespeck || s->swcrop)
+    (s->swdeskew || s->swdespeck || s->swcrop
+     || s->flip_horiz[SIDE_FRONT] || s->flip_vert[SIDE_FRONT]
+     || s->flip_horiz[SIDE_BACK] || s->flip_vert[SIDE_BACK])
     && s->s.format != SANE_FRAME_JPEG
   ){
     return 1;
