@@ -1547,6 +1547,10 @@ init_model (struct scanner *s)
     s->std_res_x[DPI_240]=0;
     s->std_res_x[DPI_400]=0;
 
+
+    s->has_function_number = 1;
+    s->can_read_sensors = 1; // the R40 supports the adf-loaded sensor.
+
     /* suspected settings */
     s->ccal_version = 3;
     s->has_df_ultra = 1;
