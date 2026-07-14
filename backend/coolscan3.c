@@ -32,6 +32,8 @@
 
 #include "../include/_stdint.h"
 
+#include "coolscan3-stride.h"
+
 #include "../include/sane/sane.h"
 #include "../include/sane/sanei.h"
 #include "../include/sane/saneopts.h"
@@ -1523,6 +1525,7 @@ sane_read(SANE_Handle h, SANE_Byte * buf, SANE_Int maxlen, SANE_Int * len)
 	cs3_t *s = (cs3_t *) h;
 	SANE_Status status;
 	ssize_t xfer_len_in, xfer_len_line, xfer_len_out;
+	unsigned long sample_pass_stride;
 	unsigned long index;
 	int color, sample_pass;
 	uint8_t *s8 = NULL;
@@ -1605,8 +1608,12 @@ sane_read(SANE_Handle h, SANE_Byte * buf, SANE_Int maxlen, SANE_Int * len)
 		s->n_line_buf = xfer_len_line;
 	}
 
-	/* adapt for multi-sampling */
-	xfer_len_in *= s->samples_per_scan;
+	/* One READ returns every sample pass.  The scanner places each pass at
+	 * the padded single-pass transfer stride, not at the end of the bare
+	 * pixel payload.  Extraction below must use the same stride. */
+	sample_pass_stride = (unsigned long) xfer_len_in;
+	xfer_len_in = cs3_multisample_read_size(
+		xfer_len_in, s->samples_per_scan);
 
 	cs3_scanner_ready(s, CS3_STATUS_READY);
 	cs3_init_buffer(s);
@@ -1642,18 +1649,19 @@ sane_read(SANE_Handle h, SANE_Byte * buf, SANE_Int maxlen, SANE_Int * len)
 							sample_pass < s->samples_per_scan;
 							sample_pass++) {
 						/* source index */
-						int p8 = (sample_pass * s->n_colors + color)
-							* s->logical_width
-							+ (color + 1) * s->odd_padding
-							+ index;
+						unsigned long p8 = cs3_8bit_sample_offset(
+							sample_pass_stride,
+							s->logical_width, color,
+							sample_pass, s->odd_padding, index);
 						m_avg_sum += (double) s->recv_buf[p8];
 					}
 					*s8 = (uint8_t) (m_avg_sum / s->samples_per_scan + 0.5);
 				} else {
 					/* shortcut for single sample */
-					int p8 = s->logical_width * color
-						+ (color + 1) * s->odd_padding
-						+ index;
+					unsigned long p8 = cs3_8bit_sample_offset(
+						sample_pass_stride,
+						s->logical_width, color, 0,
+						s->odd_padding, index);
 					*s8 = s->recv_buf[p8];
 				}
 			}
@@ -1669,15 +1677,19 @@ sane_read(SANE_Handle h, SANE_Byte * buf, SANE_Int maxlen, SANE_Int * len)
 							sample_pass < s->samples_per_scan;
 							sample_pass++) {
 						/* source index */
-						int p16 = 2 * ((sample_pass * s->n_colors + color)
-								* s->logical_width + index);
+						unsigned long p16 = cs3_16bit_sample_offset(
+							sample_pass_stride,
+							s->logical_width, color,
+							sample_pass, index);
 						m_avg_sum += (double) ((s->recv_buf[p16] << 8)
 							+ s->recv_buf[p16 + 1]);
 					}
 					*s16 = (uint16_t) (m_avg_sum / s->samples_per_scan + 0.5);
 				} else {
 					/* shortcut for single sample */
-					int p16 = 2 * (color * s->logical_width + index);
+					unsigned long p16 = cs3_16bit_sample_offset(
+						sample_pass_stride,
+						s->logical_width, color, 0, index);
 
 					*s16 = (s->recv_buf[p16] << 8)
 						+ s->recv_buf[p16 + 1];

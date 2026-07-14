@@ -522,7 +522,7 @@ libsane_coolscan2_la_LIBADD = $(COMMON_LIBS) \
     $(SCSI_LIBS) $(MATH_LIB) $(USB_LIBS) $(RESMGR_LIBS)
 EXTRA_DIST += coolscan2.conf.in
 
-libcoolscan3_la_SOURCES = coolscan3.c
+libcoolscan3_la_SOURCES = coolscan3.c coolscan3-stride.c coolscan3-stride.h
 libcoolscan3_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=coolscan3
 
 nodist_libsane_coolscan3_la_SOURCES = coolscan3-s.c
