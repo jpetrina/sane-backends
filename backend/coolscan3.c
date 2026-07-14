@@ -1267,7 +1267,7 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v,
 						   s->samples_per_scan)) {
 			case CS3_SCAN_MODE_INFRARED_UNSUPPORTED:
 				return SANE_STATUS_UNSUPPORTED;
-			case CS3_SCAN_MODE_INFRARED_MULTISAMPLE_UNSAFE:
+			case CS3_SCAN_MODE_PACKED_LAYOUT_REQUIRED:
 				return SANE_STATUS_INVAL;
 			case CS3_SCAN_MODE_OK:
 				break;
@@ -1503,7 +1503,7 @@ sane_start(SANE_Handle h)
 				   s->infrared, s->samples_per_scan)) {
 	case CS3_SCAN_MODE_INFRARED_UNSUPPORTED:
 		return SANE_STATUS_UNSUPPORTED;
-	case CS3_SCAN_MODE_INFRARED_MULTISAMPLE_UNSAFE:
+	case CS3_SCAN_MODE_PACKED_LAYOUT_REQUIRED:
 		return SANE_STATUS_INVAL;
 	case CS3_SCAN_MODE_OK:
 		break;

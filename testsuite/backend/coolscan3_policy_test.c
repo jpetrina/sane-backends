@@ -20,10 +20,10 @@ main(void)
 
 	assert(cs3_scan_mode_check(1, 0, 4) == CS3_SCAN_MODE_OK);
 	assert(cs3_scan_mode_check(1, 1, 4) ==
-	       CS3_SCAN_MODE_INFRARED_MULTISAMPLE_UNSAFE);
+	       CS3_SCAN_MODE_PACKED_LAYOUT_REQUIRED);
 	assert(cs3_scan_mode_check(1, 1, 1) == CS3_SCAN_MODE_OK);
 	assert(cs3_scan_mode_check(1, 1, 2) ==
-	       CS3_SCAN_MODE_INFRARED_MULTISAMPLE_UNSAFE);
+	       CS3_SCAN_MODE_PACKED_LAYOUT_REQUIRED);
 	assert(cs3_scan_mode_check(0, 1, 1) ==
 	       CS3_SCAN_MODE_INFRARED_UNSUPPORTED);
 	assert(!cs3_start_result_is_scanning(0));

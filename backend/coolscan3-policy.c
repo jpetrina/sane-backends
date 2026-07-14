@@ -18,7 +18,7 @@ cs3_scan_mode_check(int infrared_supported, int infrared,
 	if (infrared && !infrared_supported)
 		return CS3_SCAN_MODE_INFRARED_UNSUPPORTED;
 	if (infrared && samples_per_scan > 1)
-		return CS3_SCAN_MODE_INFRARED_MULTISAMPLE_UNSAFE;
+		return CS3_SCAN_MODE_PACKED_LAYOUT_REQUIRED;
 	return CS3_SCAN_MODE_OK;
 }
 

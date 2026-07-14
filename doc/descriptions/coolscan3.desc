@@ -63,7 +63,7 @@
 :interface "USB"
 :usbid "0x04b0" "0x4002"
 :status :basic
-:comment "On LS-5000 firmware 1.03, 16-bit RGB, RGBI (infrared), autofocus and RGB multi-sampling were verified separately; frame selection was verified on a modified SA-21 operating as SA-30; combined RGBI multi-sampling is intentionally rejected; the tested 8-bit path is rejected by that firmware"
+:comment "On LS-5000 firmware 1.03, 16-bit RGB, RGBI (infrared), autofocus and RGB multi-sampling were verified; frame selection was verified on a modified SA-21 operating as SA-30; the firmware supports packed RGB multi-sampling with one aligned infrared plane, but this backend does not decode that layout and rejects the combined option; the tested 8-bit path is rejected by that firmware"
 
 :model "LS 8000 ED"
 :interface "IEEE-1394"

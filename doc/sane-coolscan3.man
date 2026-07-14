@@ -97,8 +97,13 @@ pixel-interleaved sample alongside red, green, and blue. The published SANE
 API has no RGBI frame type, so the backend reports an RGB frame whose
 bytes-per-line value includes all four samples. A frontend must understand
 this convention before it can save or process the infrared channel.
-Infrared cannot be combined with more than one sample per scan. Preview mode
-remains RGB-only even when this option is enabled.
+The LS-5000 firmware can combine infrared with RGB multi-sampling in one scan.
+That mode uses a packed stream with four independent RGB samples and one
+aligned infrared plane. This backend does not decode the packed layout, so it
+rejects the combined setting before sending a scan command. The captured
+stream does not establish whether the firmware combines several infrared
+readings internally. Preview mode remains RGB-only even when infrared is
+enabled.
 .TP
 .B \-\-depth <n>
 Here <n> can either be 8 or the maximum number of bits supported by the
