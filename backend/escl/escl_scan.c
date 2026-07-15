@@ -29,6 +29,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+#define MAX_RETRIES 20
+#define RETRY_TIMEOUT 1
 
 /**
  * \fn static size_t write_callback(void *str, size_t size, size_t nmemb, void *userp)
@@ -62,6 +66,7 @@ escl_scan(capabilities_t *scanner, const ESCL_Device *device, char *scanJob, cha
     const char *scanner_start = "/NextDocument";
     char scan_cmd[PATH_MAX] = { 0 };
     SANE_Status status = SANE_STATUS_GOOD;
+    long response_code = 0;
 
     if (device == NULL)
         return SANE_STATUS_NO_MEM;
@@ -86,18 +91,25 @@ escl_scan(capabilities_t *scanner, const ESCL_Device *device, char *scanJob, cha
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, scanner);
 
-    scanner->real_read = 0;
-    CURLcode res = curl_easy_perform(curl_handle);
-    if (res != CURLE_OK) {
-        DBG( 10, "Unable to scan: %s\n", curl_easy_strerror(res));
-        status = SANE_STATUS_INVAL;
-        goto cleanup;
-    }
+    for (int i = 0; i < MAX_RETRIES && response_code != 200; i++) {
+        scanner->real_read = 0;
+        CURLcode res = curl_easy_perform(curl_handle);
+        curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &response_code);
+        if (res != CURLE_OK || (response_code != 200 && response_code != 503)) {
+            DBG( 10, "Unable to scan: %s (response code %ld)\n", curl_easy_strerror(res), response_code);
+            status = SANE_STATUS_INVAL;
+            goto cleanup;
+        } else if (response_code == 503) {
+            status = SANE_STATUS_DEVICE_BUSY;
+            sleep(RETRY_TIMEOUT);
+            DBG(10, "Service unavailable: reattempting scan (%d/%d)\n", i + 1, MAX_RETRIES);
+        } else {
+            status = scanner->real_read > 0 ? SANE_STATUS_GOOD : SANE_STATUS_NO_DOCS;
+        }
 
-    if (scanner->real_read)
-        fseek(scanner->tmp, 0, SEEK_SET);
-    else
-        status = SANE_STATUS_NO_DOCS;
+        if (scanner->real_read)
+            fseek(scanner->tmp, 0, SEEK_SET);
+    }
 cleanup:
     curl_easy_cleanup(curl_handle);
     DBG(10, "eSCL scan : [%s]\treal read (%ld)\n", sane_strstatus(status), scanner->real_read);
