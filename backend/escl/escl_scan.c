@@ -30,8 +30,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/sane/sanei.h"
-
 /**
  * \fn static size_t write_callback(void *str, size_t size, size_t nmemb, void *userp)
  * \brief Callback function that writes the image scanned into the temporary file.
