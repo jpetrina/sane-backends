@@ -69,15 +69,14 @@ escl_scan(capabilities_t *scanner, const ESCL_Device *device, char *scanJob, cha
     if (scanner->tmp)
         fclose(scanner->tmp);
     scanner->tmp = tmpfile();
-    if (!scanner->tmp) {
+    if (!scanner->tmp)
+        return SANE_STATUS_NO_MEM;
+
+    curl_handle = curl_easy_init();
+    if (!curl_handle) {
         status = SANE_STATUS_NO_MEM;
         goto cleanup;
     }
-
-    scanner->real_read = 0;
-    curl_handle = curl_easy_init();
-    if (!curl_handle)
-        goto cleanup;
 
     snprintf(scan_cmd, sizeof(scan_cmd), "%s%s%s%s",
              scan_jobs, scanJob, result, scanner_start);
@@ -87,25 +86,24 @@ escl_scan(capabilities_t *scanner, const ESCL_Device *device, char *scanJob, cha
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, scanner);
 
+    scanner->real_read = 0;
     CURLcode res = curl_easy_perform(curl_handle);
     if (res != CURLE_OK) {
         DBG( 10, "Unable to scan: %s\n", curl_easy_strerror(res));
-        scanner->real_read = 0;
         status = SANE_STATUS_INVAL;
         goto cleanup;
     }
 
-    fseek(scanner->tmp, 0, SEEK_SET);
+    if (scanner->real_read)
+        fseek(scanner->tmp, 0, SEEK_SET);
+    else
+        status = SANE_STATUS_NO_DOCS;
 cleanup:
     curl_easy_cleanup(curl_handle);
     DBG(10, "eSCL scan : [%s]\treal read (%ld)\n", sane_strstatus(status), scanner->real_read);
-    if (scanner->real_read == 0)
-    {
-       if (scanner->tmp) {
-           fclose(scanner->tmp);
-           scanner->tmp = NULL;
-       }
-       return SANE_STATUS_NO_DOCS;
+    if (status != SANE_STATUS_GOOD && scanner->tmp) {
+        fclose(scanner->tmp);
+        scanner->tmp = NULL;
     }
     return status;
 }
