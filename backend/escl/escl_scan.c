@@ -64,37 +64,42 @@ escl_scan(capabilities_t *scanner, const ESCL_Device *device, char *scanJob, cha
     SANE_Status status = SANE_STATUS_GOOD;
 
     if (device == NULL)
-        return (SANE_STATUS_NO_MEM);
+        return SANE_STATUS_NO_MEM;
+
+    if (scanner->tmp)
+        fclose(scanner->tmp);
+    scanner->tmp = tmpfile();
+    if (!scanner->tmp) {
+        status = SANE_STATUS_NO_MEM;
+        goto cleanup;
+    }
+
     scanner->real_read = 0;
     curl_handle = curl_easy_init();
-    if (curl_handle != NULL) {
-        snprintf(scan_cmd, sizeof(scan_cmd), "%s%s%s%s",
-                 scan_jobs, scanJob, result, scanner_start);
-        escl_curl_url(curl_handle, device, scan_cmd);
-        curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
-        if (scanner->tmp)
-            fclose(scanner->tmp);
-        scanner->tmp = tmpfile();
-        if (scanner->tmp != NULL) {
-            curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, scanner);
-            CURLcode res = curl_easy_perform(curl_handle);
-            if (res != CURLE_OK) {
-                DBG( 10, "Unable to scan: %s\n", curl_easy_strerror(res));
-                scanner->real_read = 0;
-                fclose(scanner->tmp);
-                scanner->tmp = NULL;
-                status = SANE_STATUS_INVAL;
-		goto cleanup;
-            }
-            fseek(scanner->tmp, 0, SEEK_SET);
-        }
-        else
-            status = SANE_STATUS_NO_MEM;
-cleanup:
-        curl_easy_cleanup(curl_handle);
+    if (!curl_handle)
+        goto cleanup;
+
+    snprintf(scan_cmd, sizeof(scan_cmd), "%s%s%s%s",
+             scan_jobs, scanJob, result, scanner_start);
+    escl_curl_url(curl_handle, device, scan_cmd);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, scanner);
+
+    CURLcode res = curl_easy_perform(curl_handle);
+    if (res != CURLE_OK) {
+        DBG( 10, "Unable to scan: %s\n", curl_easy_strerror(res));
+        scanner->real_read = 0;
+        fclose(scanner->tmp);
+        scanner->tmp = NULL;
+        status = SANE_STATUS_INVAL;
+        goto cleanup;
     }
+
+    fseek(scanner->tmp, 0, SEEK_SET);
+cleanup:
+    curl_easy_cleanup(curl_handle);
     DBG(10, "eSCL scan : [%s]\treal read (%ld)\n", sane_strstatus(status), scanner->real_read);
     if (scanner->real_read == 0)
     {
@@ -104,5 +109,5 @@ cleanup:
        }
        return SANE_STATUS_NO_DOCS;
     }
-    return (status);
+    return status;
 }
