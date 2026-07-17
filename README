@@ -80,6 +80,8 @@ the project's website at http://www.sane-project.org/.
 
         - automake (>=1.15)
 
+		- autopoint (version?)
+
         - libtool (>=2.4.6)
 
         - gettext (>=0.19.8)
