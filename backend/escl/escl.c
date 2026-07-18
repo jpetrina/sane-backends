@@ -78,6 +78,7 @@ typedef struct Handled {
     SANE_Range contrast_range;
     SANE_Range sharpen_range;
     SANE_Range thresold_range;
+    SANE_Range inactive_range;
     SANE_Bool cancel;
     SANE_Bool write_scan_data;
     SANE_Bool decompress_scan_data;
@@ -112,6 +113,8 @@ escl_tls_protocol_supported(char *url)
       curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
       curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
       curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+      curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, ESCL_CONNECT_TIMEOUT);
+      curl_easy_setopt(curl, CURLOPT_TIMEOUT, ESCL_REQUEST_TIMEOUT);
       curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
       curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
       /* Perform the request */
@@ -998,6 +1001,9 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
     s->val[OPT_SCAN_SOURCE].s = strdup (s->scanner->Sources[s->scanner->source]);
 
     /* "Enhancement" group: */
+    s->inactive_range.min = 0;
+    s->inactive_range.max = 255;
+    s->inactive_range.quant = 1;
     s->opt[OPT_ENHANCEMENT_GROUP].title = SANE_I18N ("Enhancement");
     s->opt[OPT_ENHANCEMENT_GROUP].desc = "";    /* not valid for a group */
     s->opt[OPT_ENHANCEMENT_GROUP].type = SANE_TYPE_GROUP;
@@ -1020,8 +1026,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
        s->brightness_range.max=s->scanner->brightness->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_BRIGHTNESS].constraint.range = &range;
+      s->opt[OPT_BRIGHTNESS].constraint.range = &s->inactive_range;
       s->val[OPT_BRIGHTNESS].w = 0;
       s->opt[OPT_BRIGHTNESS].cap |= SANE_CAP_INACTIVE;
     }
@@ -1039,8 +1044,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
        s->contrast_range.max=s->scanner->contrast->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_CONTRAST].constraint.range = &range;
+      s->opt[OPT_CONTRAST].constraint.range = &s->inactive_range;
       s->val[OPT_CONTRAST].w = 0;
       s->opt[OPT_CONTRAST].cap |= SANE_CAP_INACTIVE;
     }
@@ -1058,8 +1062,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
        s->sharpen_range.max=s->scanner->sharpen->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_SHARPEN].constraint.range = &range;
+      s->opt[OPT_SHARPEN].constraint.range = &s->inactive_range;
       s->val[OPT_SHARPEN].w = 0;
       s->opt[OPT_SHARPEN].cap |= SANE_CAP_INACTIVE;
     }
@@ -1078,8 +1081,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
       s->thresold_range.max=s->scanner->threshold->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_THRESHOLD].constraint.range = &range;
+      s->opt[OPT_THRESHOLD].constraint.range = &s->inactive_range;
       s->val[OPT_THRESHOLD].w = 0;
       s->opt[OPT_THRESHOLD].cap |= SANE_CAP_INACTIVE;
     }
@@ -1375,11 +1377,14 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
 {
     DBG (10, "escl sane_control_option\n");
     escl_sane_t *handler = h;
+    SANE_Status status;
 
     if (i)
 	*i = 0;
-    if (n >= NUM_OPTIONS || n < 0)
+    if (!handler || !v || n >= NUM_OPTIONS || n < 0)
 	return (SANE_STATUS_INVAL);
+    if (!SANE_OPTION_IS_ACTIVE(handler->opt[n].cap))
+        return (SANE_STATUS_INVAL);
     if (a == SANE_ACTION_GET_VALUE) {
 	switch (n) {
 	case OPT_TL_X:
@@ -1393,6 +1398,7 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
         case OPT_BRIGHTNESS:
         case OPT_CONTRAST:
         case OPT_SHARPEN:
+	case OPT_THRESHOLD:
 	    *(SANE_Word *) v = handler->val[n].w;
 	    break;
 	case OPT_SCAN_SOURCE:
@@ -1406,6 +1412,11 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
 	return (SANE_STATUS_GOOD);
     }
     if (a == SANE_ACTION_SET_VALUE) {
+	if (!SANE_OPTION_IS_SETTABLE(handler->opt[n].cap))
+	    return (SANE_STATUS_INVAL);
+	status = sanei_constrain_value(&handler->opt[n], v, i);
+	if (status != SANE_STATUS_GOOD)
+	    return status;
 	switch (n) {
 	case OPT_TL_X:
 	case OPT_TL_Y:
@@ -1417,15 +1428,16 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
         case OPT_BRIGHTNESS:
         case OPT_CONTRAST:
         case OPT_SHARPEN:
+	case OPT_THRESHOLD:
 	    handler->val[n].w = *(SANE_Word *) v;
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
 	    break;
 	case OPT_SCAN_SOURCE:
 	    DBG(10, "SET OPT_SCAN_SOURCE(%s)\n", (SANE_String_Const)v);
 	    init_options_small((SANE_String_Const)v, handler);
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
 	    break;
 	case OPT_MODE:
 	    if (handler->val[n].s)
@@ -1453,7 +1465,7 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
             }
             DBG (10, "Color Mode allocation (%s).\n", handler->scanner->caps[handler->scanner->source].default_color);
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
             if (handler->scanner->brightness)
                 handler->opt[OPT_BRIGHTNESS].cap |= SANE_CAP_INACTIVE;
             if (handler->scanner->contrast)
@@ -1479,13 +1491,14 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
             handler->val[n].w = _get_resolution(handler, (int)(*(SANE_Word *) v));
 	    handler->scanner->caps[handler->scanner->source].default_resolution = handler->val[n].w;
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
 	    break;
 	default:
 	    break;
 	}
+	return (SANE_STATUS_GOOD);
     }
-    return (SANE_STATUS_GOOD);
+    return (SANE_STATUS_UNSUPPORTED);
 }
 
 static SANE_Bool
@@ -1530,6 +1543,11 @@ sane_start(SANE_Handle h)
 
     if (handler->device == NULL) {
         DBG(10, "Missing handler device.\n");
+        return (SANE_STATUS_INVAL);
+    }
+    if (handler->val[OPT_BR_X].w <= handler->val[OPT_TL_X].w ||
+        handler->val[OPT_BR_Y].w <= handler->val[OPT_TL_Y].w) {
+        DBG(10, "Invalid scan region\n");
         return (SANE_STATUS_INVAL);
     }
     handler->cancel = SANE_FALSE;
@@ -1586,21 +1604,17 @@ sane_start(SANE_Handle h)
        }
        DBG (10, "Before newjob Color Mode allocation (%s).\n", handler->scanner->caps[handler->scanner->source].default_color);
        handler->scanner->caps[handler->scanner->source].height =
-            MM_TO_PIXEL(handler->val[OPT_BR_Y].w, 300.0);
+            MM_TO_PIXEL((handler->val[OPT_BR_Y].w -
+                         handler->val[OPT_TL_Y].w), 300.0);
        handler->scanner->caps[handler->scanner->source].width =
-            MM_TO_PIXEL(handler->val[OPT_BR_X].w, 300.0);;
-       if (handler->x_range1.min == handler->val[OPT_TL_X].w)
-           handler->scanner->caps[handler->scanner->source].pos_x = 0;
-       else
-           handler->scanner->caps[handler->scanner->source].pos_x =
-               MM_TO_PIXEL((handler->val[OPT_TL_X].w - handler->x_range1.min),
-               300.0);
-       if (handler->y_range1.min == handler->val[OPT_TL_X].w)
-           handler->scanner->caps[handler->scanner->source].pos_y = 0;
-       else
-           handler->scanner->caps[handler->scanner->source].pos_y =
-               MM_TO_PIXEL((handler->val[OPT_TL_Y].w - handler->y_range1.min),
-               300.0);
+            MM_TO_PIXEL((handler->val[OPT_BR_X].w -
+                         handler->val[OPT_TL_X].w), 300.0);
+       handler->scanner->caps[handler->scanner->source].pos_x =
+            MM_TO_PIXEL((handler->val[OPT_TL_X].w - handler->x_range1.min),
+                        300.0);
+       handler->scanner->caps[handler->scanner->source].pos_y =
+            MM_TO_PIXEL((handler->val[OPT_TL_Y].w - handler->y_range1.min),
+                        300.0);
        DBG(10, "Calculate Size Image [%dx%d|%dx%d]\n",
 	        handler->scanner->caps[handler->scanner->source].pos_x,
 	        handler->scanner->caps[handler->scanner->source].pos_y,
@@ -1836,47 +1850,4 @@ SANE_Status
 sane_set_io_mode(SANE_Handle __sane_unused__ handle, SANE_Bool __sane_unused__ non_blocking)
 {
     return (SANE_STATUS_UNSUPPORTED);
-}
-
-/**
- * \fn void escl_curl_url(CURL *handle, const ESCL_Device *device, SANE_String_Const path)
- * \brief Uses the device info in 'device' and the path from 'path' to construct
- *        a full URL.  Sets this URL and any necessary connection options into
- *        'handle'.
- */
-void
-escl_curl_url(CURL *handle, const ESCL_Device *device, SANE_String_Const path)
-{
-    int url_len;
-    char *url;
-
-    url_len = snprintf(NULL, 0, "%s://%s:%d%s",
-                       (device->https ? "https" : "http"), device->ip_address,
-                       device->port_nb, path);
-    url_len++;
-    url = (char *)malloc(url_len);
-    snprintf(url, url_len, "%s://%s:%d%s",
-             (device->https ? "https" : "http"), device->ip_address,
-             device->port_nb, path);
-
-    DBG( 10, "escl_curl_url: URL: %s\n", url );
-    curl_easy_setopt(handle, CURLOPT_URL, url);
-    free(url);
-    DBG( 10, "Before use hack\n");
-    if (device->hack) {
-        DBG( 10, "Use hack\n");
-        curl_easy_setopt(handle, CURLOPT_HTTPHEADER, device->hack);
-    }
-    DBG( 10, "After use hack\n");
-    if (device->https) {
-        DBG( 10, "Ignoring safety certificates, use https\n");
-        curl_easy_setopt(handle, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
-        curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 0L);
-    }
-    if (device->unix_socket != NULL) {
-        DBG( 10, "Using local socket %s\n", device->unix_socket );
-        curl_easy_setopt(handle, CURLOPT_UNIX_SOCKET_PATH,
-                         device->unix_socket);
-    }
 }
