@@ -82,12 +82,11 @@ escl_scan(capabilities_t *scanner, const ESCL_Device *device, char *scanJob, cha
         if (scanner->tmp != NULL) {
             curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, scanner);
             CURLcode res = curl_easy_perform(curl_handle);
-            if (res != CURLE_OK) {
-                DBG( 10, "Unable to scan: %s\n", curl_easy_strerror(res));
+            status = escl_curl_status(curl_handle, res);
+            if (status != SANE_STATUS_GOOD) {
                 scanner->real_read = 0;
                 fclose(scanner->tmp);
                 scanner->tmp = NULL;
-                status = SANE_STATUS_INVAL;
 		goto cleanup;
             }
             fseek(scanner->tmp, 0, SEEK_SET);
@@ -104,7 +103,7 @@ cleanup:
            fclose(scanner->tmp);
            scanner->tmp = NULL;
        }
-       return SANE_STATUS_NO_DOCS;
+       return status == SANE_STATUS_GOOD ? SANE_STATUS_NO_DOCS : status;
     }
     return (status);
 }
