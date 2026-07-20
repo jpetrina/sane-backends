@@ -7,3 +7,5 @@
 if WITH_GENESYS_TESTS
 SUBDIRS = genesys
 endif
+
+SUBDIRS += epsonds    
