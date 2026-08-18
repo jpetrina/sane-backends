@@ -314,6 +314,10 @@ changes input buffer size from the default of 1MB to
 KB.
 
 .TP
+.BR \-t " [\fIseconds\fR], " \-\-scan\-timeout =\fIseconds
+timeout in seconds to wait for a page to be placed in the scanner.
+
+.TP
 .BR \-V ", " \-\-version
 requests that
 .B scanimage

@@ -112,6 +112,7 @@ static struct option basic_options[] = {
   {"batch-increment", required_argument, NULL, OPTION_BATCH_INCREMENT},
   {"batch-print", no_argument, NULL, OPTION_BATCH_PRINT},
   {"batch-prompt", no_argument, NULL, OPTION_BATCH_PROMPT},
+  {"scan-timeout", required_argument, NULL, 't'},
   {"format", required_argument, NULL, OPTION_FORMAT},
   {"accept-md5-only", no_argument, NULL, OPTION_MD5},
   {"icc-profile", required_argument, NULL, 'i'},
@@ -2120,6 +2121,7 @@ main (int argc, char **argv)
   int batch = 0;
   int batch_print = 0;
   int batch_prompt = 0;
+  int scan_timeout = 0;
   int batch_count = BATCH_COUNT_UNLIMITED;
   int batch_start_at = 1;
   int batch_increment = 1;
@@ -2377,6 +2379,9 @@ main (int argc, char **argv)
 	    scanimage_exit (0);
 	    break;
 	  }
+	case 't':
+	  scan_timeout = atoi (optarg);
+	  break;
 	case 'V':
 	  printf ("scanimage (%s) %s; backend version %d.%d.%d\n", PACKAGE,
 		  VERSION, SANE_VERSION_MAJOR (version_code),
@@ -2428,7 +2433,8 @@ Parameters are separated by a blank from single-character options (e.g.\n\
 -A, --all-options          list all available backend options\n\
 -h, --help                 display this help message and exit\n\
 -v, --verbose              give even more status messages\n\
--B, --buffer-size=#        change input buffer size (in kB, default 32)\n");
+-B, --buffer-size=#        change input buffer size (in kB, default 32)\n\
+-t, --scan-timeout=#       timeout in seconds to wait for a page to be placed in the scanner\n");
       printf ("\
 -V, --version              print version information\n");
     }
@@ -2833,6 +2839,14 @@ List of available devices:", prog_name);
 #else
 	  status = sane_start (device);
 #endif
+	  for (int i = 0; status == SANE_STATUS_NO_DOCS && scan_timeout && i < scan_timeout; i++)
+	    {
+	      fprintf (stderr, "%s: sane_start: %s: waiting one second and reattempting (%u/%u)\n",
+	               prog_name, sane_strstatus (status), i + 1, scan_timeout);
+	      sleep(1);
+	      status = sane_start(device);
+	    }
+
 	  if (status != SANE_STATUS_GOOD)
 	    {
 	      fprintf (stderr, "%s: sane_start: %s\n",
@@ -2984,13 +2998,28 @@ List of available devices:", prog_name);
                       ofp = NULL;
                     }
                   unlink (output_file);
+
+		  /* Re-open ofp because batch mode doesn't do it for us */
+		  if (status == SANE_STATUS_NO_DOCS && scan_timeout && output_file != NULL)
+		    {
+		      ofp = fopen (output_file, "w");
+#ifdef HAVE_LIBJPEG
+		      if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
+		        {
+		          sane_pdf_open (&pw, ofp);
+		          sane_pdf_start_doc (pw);
+		        }
+#endif
+		    }
                 }
+	      sane_cancel (device);
 	      break;
 	    }			/* switch */
 	}
-      while ((batch
-	      && (batch_count == BATCH_COUNT_UNLIMITED || --batch_count))
-	     && SANE_STATUS_GOOD == status);
+      while ((status == SANE_STATUS_NO_DOCS && scan_timeout)
+	     || (batch
+	         && (batch_count == BATCH_COUNT_UNLIMITED || --batch_count)
+	         && SANE_STATUS_GOOD == status));
 
       if (batch)
 	{
