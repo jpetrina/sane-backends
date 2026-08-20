@@ -1239,7 +1239,7 @@ pixma_find_scanners (const char **conf_devices, SANE_Bool local_only)
           pixma_devices_all[i] = NULL;
           PDBG (pixma_dbg (3, "Add custom devices mp150 in pixma_devices\n"));
       }
-      if (pixma_custom_mp150_devices_count > 0) {
+      if (pixma_custom_iclass_devices_count > 0) {
           pixma_devices_all[i] = pixma_custom_iclass_devices;
           i++;
           pixma_devices_all[i] = NULL;
