@@ -786,6 +786,12 @@
 :usbid "0x04c5" "0x15fe"
 :comment "Ethernet not supported."
 
+:model "fi-8950"
+:interface "USB"
+:status :good
+:usbid "0x05ca" "0x0309"
+:comment "Ethernet not supported."
+
 :model "N7100"
 :interface "USB Ethernet"
 :status :untested
