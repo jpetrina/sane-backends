@@ -2842,13 +2842,14 @@ List of available devices:", prog_name);
 #endif
 	  if (batch && batch_scan_timeout)
 	    {
-	      for (int i = 0; status == SANE_STATUS_NO_DOCS && i < batch_scan_timeout; i++)
-                {
-                  fprintf (stderr, "%s: sane_start: %s: waiting one second and reattempting (%u/%u)\n",
-                           prog_name, sane_strstatus (status), i + 1, batch_scan_timeout);
-                  sleep(1);
-                  status = sane_start(device);
-                }
+	      time_t deadline = time(NULL) + batch_scan_timeout;
+	      while (status == SANE_STATUS_NO_DOCS && time(NULL) < deadline)
+	        {
+	          fprintf (stderr, "%s: sane_start: %s: Reattempting...\n",
+	                   prog_name, sane_strstatus (status));
+	          usleep(100000);
+	          status = sane_start(device);
+	        }
 	    }
 
 	  if (status != SANE_STATUS_GOOD)
