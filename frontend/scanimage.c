@@ -43,6 +43,7 @@
 #include <libgen.h>     // for basename()
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #ifdef HAVE_LIBPNG
 #include <png.h>
