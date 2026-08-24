@@ -240,6 +240,10 @@ Equivalent to
 .B \-\-batch\-prompt
 will ask for pressing RETURN before scanning a page. This can be used for
 scanning multiple pages without an automatic document feeder.
+
+.TP
+.BR \-\-batch\-wait-docs =\fIseconds
+timeout in seconds to wait for a page to be placed in the scanner.
 .RE
 
 .TP
@@ -312,10 +316,6 @@ level.
 changes input buffer size from the default of 1MB to
 .I size
 KB.
-
-.TP
-.BR \-t " [\fIseconds\fR], " \-\-scan\-timeout =\fIseconds
-timeout in seconds to wait for a page to be placed in the scanner.
 
 .TP
 .BR \-V ", " \-\-version
