@@ -315,28 +315,41 @@ start_capture (V4L_Scanner *s)
   ssize_t result;
 
   cleanup_capture (s);
+
+  /* libv4l2 can emulate read() for streaming-only devices and convert
+     formats such as MJPEG and YUYV to the RGB24 or GREY format requested by
+     sane_start().  Prefer this path so that the conversion layer is not
+     bypassed by direct mmap access. */
+  size = (size_t) s->format.fmt.pix.width
+    * s->format.fmt.pix.height
+    * ((s->params.format == SANE_FRAME_GRAY) ? 1 : 3);
+  if ((size_t) s->format.fmt.pix.bytesperline * s->format.fmt.pix.height > size)
+    size = (size_t) s->format.fmt.pix.bytesperline * s->format.fmt.pix.height;
+  if (s->format.fmt.pix.sizeimage > size)
+    size = s->format.fmt.pix.sizeimage;
+  s->buffer = malloc (size);
+  if (!s->buffer)
+    return SANE_STATUS_NO_MEM;
+  s->buffer_size = size;
+  s->is_mmap = SANE_FALSE;
+  result = v4l2_read (s->fd, s->buffer, size);
+  if (result > 0)
+    {
+      s->frame_size = (size_t) result;
+      s->scanning = SANE_TRUE;
+      return SANE_STATUS_GOOD;
+    }
+  cleanup_capture (s);
+
+  /* Some libv4l2/device combinations expose streaming but do not provide
+     the read emulation.  Keep a direct mmap fallback for those devices. */
   memset (&req, 0, sizeof (req));
   req.count = 1;
   req.type = type;
   req.memory = V4L2_MEMORY_MMAP;
   if (xioctl (s->fd, VIDIOC_REQBUFS, &req) == -1 || req.count < 1)
     {
-      size = s->format.fmt.pix.sizeimage;
-      if (!size)
-        size = (size_t) s->format.fmt.pix.bytesperline
-          * s->format.fmt.pix.height;
-      s->buffer = malloc (size);
-      if (!s->buffer)
-        return SANE_STATUS_NO_MEM;
-      s->buffer_size = size;
-      s->is_mmap = SANE_FALSE;
-      result = v4l2_read (s->fd, s->buffer, size);
-      if (result <= 0)
-        {
-          cleanup_capture (s);
-          return SANE_STATUS_IO_ERROR;
-        }
-      s->frame_size = (size_t) result;
+      return SANE_STATUS_IO_ERROR;
     }
   else
     {
