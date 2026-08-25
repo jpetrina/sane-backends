@@ -81,12 +81,37 @@ xioctl (int fd, unsigned long request, void *arg)
 static SANE_Status
 query_capability (int fd, struct v4l2_capability *cap)
 {
+  __u32 capabilities;
   if (xioctl (fd, VIDIOC_QUERYCAP, cap) == -1)
     return SANE_STATUS_INVAL;
-  if (!(cap->capabilities & V4L2_CAP_VIDEO_CAPTURE)
-      || !(cap->capabilities & (V4L2_CAP_READWRITE | V4L2_CAP_STREAMING)))
+  capabilities = (cap->capabilities & V4L2_CAP_DEVICE_CAPS)
+    ? cap->device_caps : cap->capabilities;
+  if (!(capabilities & V4L2_CAP_VIDEO_CAPTURE)
+      || !(capabilities & (V4L2_CAP_READWRITE | V4L2_CAP_STREAMING)))
     return SANE_STATUS_UNSUPPORTED;
   return SANE_STATUS_GOOD;
+}
+
+static SANE_Bool
+has_supported_format (int fd)
+{
+  struct v4l2_fmtdesc format;
+  unsigned int index;
+
+  for (index = 0; index < 256; index++)
+    {
+      memset (&format, 0, sizeof (format));
+      format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+      format.index = index;
+      if (xioctl (fd, VIDIOC_ENUM_FMT, &format) == -1)
+        break;
+      if (format.pixelformat == V4L2_PIX_FMT_MJPEG
+          || format.pixelformat == V4L2_PIX_FMT_YUYV
+          || format.pixelformat == V4L2_PIX_FMT_RGB24
+          || format.pixelformat == V4L2_PIX_FMT_GREY)
+        return SANE_TRUE;
+    }
+  return SANE_FALSE;
 }
 
 static SANE_Status
@@ -105,6 +130,11 @@ attach (const char *devname)
     return SANE_STATUS_INVAL;
   memset (&cap, 0, sizeof (cap));
   if (query_capability (fd, &cap) != SANE_STATUS_GOOD)
+    {
+      v4l2_close (fd);
+      return SANE_STATUS_UNSUPPORTED;
+    }
+  if (!has_supported_format (fd))
     {
       v4l2_close (fd);
       return SANE_STATUS_UNSUPPORTED;
