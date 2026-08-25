@@ -30,6 +30,7 @@
 #define v4l_h
 
 #include <../include/sane/sane.h>
+#include <linux/videodev2.h>
 
 #define MAX_CHANNELS 32
 
@@ -86,17 +87,15 @@ typedef struct V4L_Scanner
   SANE_Int user_corner;		/* bitmask of user-selected coordinates */
   SANE_Bool scanning;
   SANE_Bool deliver_eof;
-  SANE_Bool is_mmap;		/* Do we use mmap ? */
-  /* state for reading a frame: */
-  size_t num_bytes;		/* # of bytes read so far */
-  size_t bytes_per_frame;	/* total number of bytes in frame */
-  struct video_capability capability;
-  struct video_picture pict;
-  struct video_window window;
-  struct video_mbuf mbuf;
-  struct video_mmap mmap;
+  SANE_Bool is_mmap;
+  SANE_Bool streaming;
+  void *buffer;
+  size_t buffer_size;
+  size_t frame_size;
+  size_t offset;
+  struct v4l2_capability capability;
+  struct v4l2_format format;
   SANE_String_Const channel[MAX_CHANNELS];
-  SANE_Int buffercount;
 }
 V4L_Scanner;
 
