@@ -178,15 +178,12 @@ set_default_format (V4L_Scanner *s)
 static void
 update_parameters (V4L_Scanner *s)
 {
-  s->params.format = (s->format.fmt.pix.pixelformat == V4L2_PIX_FMT_GREY)
-    ? SANE_FRAME_GRAY : SANE_FRAME_RGB;
+  s->params.format = s->gray_mode ? SANE_FRAME_GRAY : SANE_FRAME_RGB;
   s->params.last_frame = SANE_TRUE;
   s->params.pixels_per_line = s->format.fmt.pix.width;
   s->params.lines = s->format.fmt.pix.height;
-  s->params.bytes_per_line = s->format.fmt.pix.bytesperline;
-  if (!s->params.bytes_per_line)
-    s->params.bytes_per_line = s->params.pixels_per_line
-      * ((s->params.format == SANE_FRAME_GRAY) ? 1 : 3);
+  s->params.bytes_per_line = s->params.pixels_per_line
+    * ((s->params.format == SANE_FRAME_GRAY) ? 1 : 3);
   s->params.depth = 8;
 }
 
@@ -335,6 +332,24 @@ cleanup_capture (V4L_Scanner *s)
   s->scanning = SANE_FALSE;
 }
 
+static void
+convert_rgb_to_gray (V4L_Scanner *s)
+{
+  size_t pixels;
+  size_t i;
+  unsigned char *data;
+
+  if (!s->gray_mode)
+    return;
+  pixels = s->frame_size / 3;
+  data = s->buffer;
+  for (i = 0; i < pixels; i++)
+    data[i] = (unsigned char) ((77 * data[3 * i]
+                                + 150 * data[3 * i + 1]
+                                + 29 * data[3 * i + 2]) >> 8);
+  s->frame_size = pixels;
+}
+
 static SANE_Status
 start_capture (V4L_Scanner *s)
 {
@@ -352,7 +367,7 @@ start_capture (V4L_Scanner *s)
      bypassed by direct mmap access. */
   size = (size_t) s->format.fmt.pix.width
     * s->format.fmt.pix.height
-    * ((s->params.format == SANE_FRAME_GRAY) ? 1 : 3);
+    * 3;
   if ((size_t) s->format.fmt.pix.bytesperline * s->format.fmt.pix.height > size)
     size = (size_t) s->format.fmt.pix.bytesperline * s->format.fmt.pix.height;
   if (s->format.fmt.pix.sizeimage > size)
@@ -366,6 +381,7 @@ start_capture (V4L_Scanner *s)
   if (result > 0)
     {
       s->frame_size = (size_t) result;
+      convert_rgb_to_gray (s);
       s->scanning = SANE_TRUE;
       return SANE_STATUS_GOOD;
     }
@@ -412,6 +428,7 @@ start_capture (V4L_Scanner *s)
         }
       s->frame_size = buf.bytesused < s->buffer_size
         ? buf.bytesused : s->buffer_size;
+      convert_rgb_to_gray (s);
     }
   s->scanning = SANE_TRUE;
   return SANE_STATUS_GOOD;
@@ -655,9 +672,10 @@ sane_start (SANE_Handle handle)
   __u32 pixel_format;
   if (!s)
     return SANE_STATUS_INVAL;
-  pixel_format = (s->val[OPT_MODE].s
-                  && strcmp (s->val[OPT_MODE].s, SANE_VALUE_SCAN_MODE_COLOR) == 0)
-    ? V4L2_PIX_FMT_RGB24 : V4L2_PIX_FMT_GREY;
+  s->gray_mode = !(s->val[OPT_MODE].s
+                   && strcmp (s->val[OPT_MODE].s,
+                              SANE_VALUE_SCAN_MODE_COLOR) == 0);
+  pixel_format = V4L2_PIX_FMT_RGB24;
   format = s->format;
   format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   format.fmt.pix.pixelformat = pixel_format;

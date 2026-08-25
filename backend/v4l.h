@@ -87,6 +87,7 @@ typedef struct V4L_Scanner
   SANE_Int user_corner;		/* bitmask of user-selected coordinates */
   SANE_Bool scanning;
   SANE_Bool deliver_eof;
+  SANE_Bool gray_mode;
   SANE_Bool is_mmap;
   SANE_Bool streaming;
   void *buffer;
