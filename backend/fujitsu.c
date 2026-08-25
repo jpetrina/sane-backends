@@ -1724,7 +1724,7 @@ init_vpd (struct fujitsu *s)
   DBG (15, "  back endorser type: %d\n", s->endorser_type_b);
 
   s->endorser_type_f = get_IN_endorser_f_type(in);
-  DBG (15, "  back endorser type: %d\n", s->endorser_type_f);
+  DBG (15, "  front endorser type: %d\n", s->endorser_type_f);
 
   DBG (15, "  connection type: %d\n", get_IN_connection(in));
 
@@ -2474,6 +2474,14 @@ init_model (struct fujitsu *s)
     s->max_y_by_res[2].len = 258000;
     s->max_y_by_res[3].res = 200;
     s->max_y_by_res[3].len = 264000;
+  }
+
+  else if (strstr (s->model_name,"fi-8950")){
+
+    /* VPD reports an ET_40 (80 char) endorser, but the imprinter
+     * rejects strings longer than 43 chars with ILLEGAL REQUEST,
+     * and the previously programmed string is then printed instead */
+    s->endorser_string_len = 43;
   }
 
   DBG (10, "init_model: finish\n");
