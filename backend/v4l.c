@@ -823,9 +823,22 @@ sane_start (SANE_Handle handle)
 {
   V4L_Scanner *s = find_handle (handle);
   struct v4l2_format format;
+  struct v4l2_capability capability;
   __u32 pixel_format;
+  int fd;
   if (!s)
     return SANE_STATUS_INVAL;
+  cleanup_capture (s);
+  fd = v4l2_open (s->devicename, O_RDWR | O_NONBLOCK);
+  if (fd == -1)
+    return SANE_STATUS_IO_ERROR;
+  v4l2_close (s->fd);
+  s->fd = fd;
+  memset (&capability, 0, sizeof (capability));
+  if (query_capability (s->fd, &capability) != SANE_STATUS_GOOD)
+    return SANE_STATUS_IO_ERROR;
+  s->capability = capability;
+  set_default_format (s);
   s->gray_mode = !(s->val[OPT_MODE].s
                    && strcmp (s->val[OPT_MODE].s,
                               SANE_VALUE_SCAN_MODE_COLOR) == 0);
