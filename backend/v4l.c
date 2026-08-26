@@ -514,6 +514,10 @@ start_capture (V4L_Scanner *s)
     return SANE_STATUS_NO_MEM;
   s->buffer_size = size;
   s->is_mmap = SANE_FALSE;
+  /* libv4l2 may implement read() using an internal streaming queue.  Mark
+     the capture active before calling it so cleanup_capture() releases that
+     queue when the next scan starts or the handle is cancelled. */
+  s->streaming = SANE_TRUE;
   if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) == SANE_STATUS_GOOD)
     result = v4l2_read (s->fd, s->buffer, size);
   else
