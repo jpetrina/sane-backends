@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <linux/videodev2.h>
@@ -33,6 +34,7 @@
 #include "v4l.h"
 
 #define V4L_CONFIG_FILE "v4l.conf"
+#define V4L_CAPTURE_TIMEOUT_MS 5000
 
 static const SANE_Device **devlist;
 static V4L_Device *first_dev;
@@ -76,6 +78,24 @@ xioctl (int fd, unsigned long request, void *arg)
     result = v4l2_ioctl (fd, request, arg);
   while (result == -1 && errno == EINTR);
   return result;
+}
+
+static SANE_Status
+wait_for_frame (int fd)
+{
+  struct pollfd poll_fd;
+  int result;
+
+  poll_fd.fd = fd;
+  poll_fd.events = POLLIN | POLLPRI;
+  poll_fd.revents = 0;
+  do
+    result = poll (&poll_fd, 1, V4L_CAPTURE_TIMEOUT_MS);
+  while (result == -1 && errno == EINTR);
+  if (result <= 0
+      || (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+    return SANE_STATUS_IO_ERROR;
+  return SANE_STATUS_GOOD;
 }
 
 static SANE_Status
@@ -125,7 +145,7 @@ attach (const char *devname)
     if (strcmp (dev->sane.name, devname) == 0)
       return SANE_STATUS_GOOD;
 
-  fd = v4l2_open (devname, O_RDWR);
+  fd = v4l2_open (devname, O_RDWR | O_NONBLOCK);
   if (fd == -1)
     return SANE_STATUS_INVAL;
   memset (&cap, 0, sizeof (cap));
@@ -377,7 +397,10 @@ start_capture (V4L_Scanner *s)
     return SANE_STATUS_NO_MEM;
   s->buffer_size = size;
   s->is_mmap = SANE_FALSE;
-  result = v4l2_read (s->fd, s->buffer, size);
+  if (wait_for_frame (s->fd) == SANE_STATUS_GOOD)
+    result = v4l2_read (s->fd, s->buffer, size);
+  else
+    result = -1;
   if (result > 0)
     {
       s->frame_size = (size_t) result;
@@ -421,7 +444,8 @@ start_capture (V4L_Scanner *s)
           return SANE_STATUS_IO_ERROR;
         }
       s->streaming = SANE_TRUE;
-      if (xioctl (s->fd, VIDIOC_DQBUF, &buf) == -1)
+      if (wait_for_frame (s->fd) != SANE_STATUS_GOOD
+          || xioctl (s->fd, VIDIOC_DQBUF, &buf) == -1)
         {
           cleanup_capture (s);
           return SANE_STATUS_IO_ERROR;
@@ -514,7 +538,7 @@ sane_open (SANE_String_Const devname, SANE_Handle *handle)
       break;
   if (!dev)
     return SANE_STATUS_INVAL;
-  fd = v4l2_open (devname, O_RDWR);
+  fd = v4l2_open (devname, O_RDWR | O_NONBLOCK);
   if (fd == -1)
     return SANE_STATUS_INVAL;
   s = calloc (1, sizeof (*s));
