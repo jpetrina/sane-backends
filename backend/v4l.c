@@ -282,9 +282,13 @@ set_default_format (V4L_Scanner *s)
     }
 }
 
-static void
+static SANE_Status
 update_parameters (V4L_Scanner *s)
 {
+  if (s->format.fmt.pix.width == 0 || s->format.fmt.pix.height == 0
+      || s->format.fmt.pix.width > INT_MAX
+      || s->format.fmt.pix.height > INT_MAX)
+    return SANE_STATUS_INVAL;
   s->params.format = s->gray_mode ? SANE_FRAME_GRAY : SANE_FRAME_RGB;
   s->params.last_frame = SANE_TRUE;
   s->params.pixels_per_line = s->format.fmt.pix.width;
@@ -292,6 +296,7 @@ update_parameters (V4L_Scanner *s)
   s->params.bytes_per_line = s->params.pixels_per_line
     * ((s->params.format == SANE_FRAME_GRAY) ? 1 : 3);
   s->params.depth = 8;
+  return SANE_STATUS_GOOD;
 }
 
 static int
@@ -651,7 +656,8 @@ sane_open (SANE_String_Const devname, SANE_Handle *handle)
   set_default_format (s);
   if (init_options (s) != SANE_STATUS_GOOD)
     goto fail;
-  update_parameters (s);
+  if (update_parameters (s) != SANE_STATUS_GOOD)
+    goto fail;
   s->next = first_handle;
   first_handle = s;
   *handle = s;
@@ -770,7 +776,8 @@ sane_get_parameters (SANE_Handle handle, SANE_Parameters *params)
   V4L_Scanner *s = find_handle (handle);
   if (!s || !params)
     return SANE_STATUS_INVAL;
-  update_parameters (s);
+  if (update_parameters (s) != SANE_STATUS_GOOD)
+    return SANE_STATUS_INVAL;
   *params = s->params;
   return SANE_STATUS_GOOD;
 }
@@ -796,7 +803,8 @@ sane_start (SANE_Handle handle)
   if (format.fmt.pix.pixelformat != pixel_format)
     return SANE_STATUS_UNSUPPORTED;
   s->format = format;
-  update_parameters (s);
+  if (update_parameters (s) != SANE_STATUS_GOOD)
+    return SANE_STATUS_INVAL;
   return start_capture (s);
 }
 
