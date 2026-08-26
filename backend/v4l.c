@@ -35,6 +35,7 @@
 
 #define V4L_CONFIG_FILE "v4l.conf"
 #define V4L_CAPTURE_TIMEOUT_MS 5000
+#define V4L_PROBE_TIMEOUT_MS 1000
 
 static const SANE_Device **devlist;
 static V4L_Device *first_dev;
@@ -81,7 +82,7 @@ xioctl (int fd, unsigned long request, void *arg)
 }
 
 static SANE_Status
-wait_for_frame (int fd)
+wait_for_frame (int fd, int timeout_ms)
 {
   struct pollfd poll_fd;
   int result;
@@ -90,7 +91,7 @@ wait_for_frame (int fd)
   poll_fd.events = POLLIN | POLLPRI;
   poll_fd.revents = 0;
   do
-    result = poll (&poll_fd, 1, V4L_CAPTURE_TIMEOUT_MS);
+    result = poll (&poll_fd, 1, timeout_ms);
   while (result == -1 && errno == EINTR);
   if (result <= 0
       || (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
@@ -134,6 +135,87 @@ has_supported_format (int fd)
   return SANE_FALSE;
 }
 
+static SANE_Bool
+probe_capture (int fd)
+{
+  struct v4l2_capability capability;
+  struct v4l2_format format;
+  struct v4l2_requestbuffers request;
+  struct v4l2_buffer buffer;
+  enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  void *mapping = MAP_FAILED;
+  size_t size;
+  ssize_t result;
+  SANE_Bool streaming = SANE_FALSE;
+  SANE_Bool success = SANE_FALSE;
+  __u32 capabilities;
+
+  memset (&capability, 0, sizeof (capability));
+  if (query_capability (fd, &capability) != SANE_STATUS_GOOD)
+    return SANE_FALSE;
+  capabilities = (capability.capabilities & V4L2_CAP_DEVICE_CAPS)
+    ? capability.device_caps : capability.capabilities;
+  memset (&format, 0, sizeof (format));
+  format.type = type;
+  if (xioctl (fd, VIDIOC_G_FMT, &format) == -1)
+    return SANE_FALSE;
+
+  if (capabilities & V4L2_CAP_STREAMING)
+    {
+      memset (&request, 0, sizeof (request));
+      request.count = 1;
+      request.type = type;
+      request.memory = V4L2_MEMORY_MMAP;
+      if (xioctl (fd, VIDIOC_REQBUFS, &request) == -1 || request.count < 1)
+        return SANE_FALSE;
+      memset (&buffer, 0, sizeof (buffer));
+      buffer.type = type;
+      buffer.memory = V4L2_MEMORY_MMAP;
+      buffer.index = 0;
+      if (xioctl (fd, VIDIOC_QUERYBUF, &buffer) == -1)
+        return SANE_FALSE;
+      mapping = v4l2_mmap (NULL, buffer.length, PROT_READ | PROT_WRITE,
+                           MAP_SHARED, fd, buffer.m.offset);
+      if (mapping == MAP_FAILED)
+        return SANE_FALSE;
+      if (xioctl (fd, VIDIOC_QBUF, &buffer) == -1
+          || xioctl (fd, VIDIOC_STREAMON, &type) == -1)
+        goto cleanup;
+      streaming = SANE_TRUE;
+      if (wait_for_frame (fd, V4L_PROBE_TIMEOUT_MS) == SANE_STATUS_GOOD
+          && xioctl (fd, VIDIOC_DQBUF, &buffer) == 0)
+        success = SANE_TRUE;
+      goto cleanup;
+    }
+
+  if (capabilities & V4L2_CAP_READWRITE)
+    {
+      size = format.fmt.pix.sizeimage;
+      if (!size)
+        size = (size_t) format.fmt.pix.width * format.fmt.pix.height * 4;
+      mapping = malloc (size);
+      if (mapping == NULL)
+        return SANE_FALSE;
+      if (wait_for_frame (fd, V4L_PROBE_TIMEOUT_MS) == SANE_STATUS_GOOD)
+        {
+          result = v4l2_read (fd, mapping, size);
+          success = result > 0;
+        }
+    }
+
+cleanup:
+  if (streaming)
+    xioctl (fd, VIDIOC_STREAMOFF, &type);
+  if (mapping != MAP_FAILED)
+    {
+      if (capabilities & V4L2_CAP_STREAMING)
+        v4l2_munmap (mapping, buffer.length);
+      else
+        free (mapping);
+    }
+  return success;
+}
+
 static SANE_Status
 attach (const char *devname)
 {
@@ -155,6 +237,11 @@ attach (const char *devname)
       return SANE_STATUS_UNSUPPORTED;
     }
   if (!has_supported_format (fd))
+    {
+      v4l2_close (fd);
+      return SANE_STATUS_UNSUPPORTED;
+    }
+  if (!probe_capture (fd))
     {
       v4l2_close (fd);
       return SANE_STATUS_UNSUPPORTED;
@@ -397,7 +484,7 @@ start_capture (V4L_Scanner *s)
     return SANE_STATUS_NO_MEM;
   s->buffer_size = size;
   s->is_mmap = SANE_FALSE;
-  if (wait_for_frame (s->fd) == SANE_STATUS_GOOD)
+  if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) == SANE_STATUS_GOOD)
     result = v4l2_read (s->fd, s->buffer, size);
   else
     result = -1;
@@ -444,7 +531,7 @@ start_capture (V4L_Scanner *s)
           return SANE_STATUS_IO_ERROR;
         }
       s->streaming = SANE_TRUE;
-      if (wait_for_frame (s->fd) != SANE_STATUS_GOOD
+      if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) != SANE_STATUS_GOOD
           || xioctl (s->fd, VIDIOC_DQBUF, &buf) == -1)
         {
           cleanup_capture (s);
