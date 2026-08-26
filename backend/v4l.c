@@ -22,6 +22,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <poll.h>
+#include <stdint.h>
 #include <unistd.h>
 
 #include <linux/videodev2.h>
@@ -447,18 +448,42 @@ cleanup_capture (V4L_Scanner *s)
 static void
 convert_rgb_to_gray (V4L_Scanner *s)
 {
-  size_t pixels;
-  size_t i;
+  size_t width = s->format.fmt.pix.width;
+  size_t height = s->format.fmt.pix.height;
+  size_t minimum_stride;
+  size_t stride;
+  size_t rows;
+  size_t row;
+  size_t column;
   unsigned char *data;
+
+  size_t pixels;
 
   if (!s->gray_mode)
     return;
-  pixels = s->frame_size / 3;
+  if (width == 0 || height == 0 || width > SIZE_MAX / 3)
+    {
+      s->frame_size = 0;
+      return;
+    }
+  minimum_stride = width * 3;
+  stride = s->format.fmt.pix.bytesperline;
+  if (stride < minimum_stride)
+    stride = minimum_stride;
+  rows = s->frame_size / stride;
+  if (rows > height)
+    rows = height;
   data = s->buffer;
-  for (i = 0; i < pixels; i++)
-    data[i] = (unsigned char) ((77 * data[3 * i]
-                                + 150 * data[3 * i + 1]
-                                + 29 * data[3 * i + 2]) >> 8);
+  for (row = 0; row < rows; row++)
+    for (column = 0; column < width; column++)
+      {
+        size_t source = row * stride + column * 3;
+        size_t destination = row * width + column;
+        data[destination] = (unsigned char) ((77 * data[source]
+                                              + 150 * data[source + 1]
+                                              + 29 * data[source + 2]) >> 8);
+      }
+  pixels = rows * width;
   s->frame_size = pixels;
 }
 
