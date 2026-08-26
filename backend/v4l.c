@@ -301,7 +301,7 @@ update_parameters (V4L_Scanner *s)
 }
 
 static int
-query_control (V4L_Scanner *s, unsigned id, SANE_Word *value)
+query_control (const V4L_Scanner *s, unsigned id, SANE_Word *value)
 {
   struct v4l2_queryctrl query;
   struct v4l2_control control;
@@ -321,7 +321,7 @@ query_control (V4L_Scanner *s, unsigned id, SANE_Word *value)
 }
 
 static SANE_Status
-set_control (V4L_Scanner *s, unsigned id, SANE_Word value)
+set_control (const V4L_Scanner *s, unsigned id, SANE_Word value)
 {
   struct v4l2_queryctrl query;
   struct v4l2_control control;
@@ -742,7 +742,7 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
 {
   V4L_Scanner *s = find_handle (handle);
   char *copy;
-  SANE_Word *word;
+  const SANE_Word *word;
   if (!s || !value || option < 0 || option >= NUM_OPTIONS)
     return SANE_STATUS_INVAL;
   if (info)
