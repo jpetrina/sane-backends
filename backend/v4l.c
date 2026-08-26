@@ -647,6 +647,7 @@ sane_open (SANE_String_Const devname, SANE_Handle *handle)
   V4L_Scanner *s;
   struct v4l2_input input;
   int fd, i;
+  SANE_Status status = SANE_STATUS_GOOD;
 
   if (!devname || !handle)
     return SANE_STATUS_INVAL;
@@ -666,7 +667,8 @@ sane_open (SANE_String_Const devname, SANE_Handle *handle)
     }
   s->fd = fd;
   s->devicename = devname;
-  if (query_capability (fd, &s->capability) != SANE_STATUS_GOOD)
+  status = query_capability (fd, &s->capability);
+  if (status != SANE_STATUS_GOOD)
     goto fail;
   for (i = 0; i < MAX_CHANNELS; i++)
     {
@@ -676,12 +678,17 @@ sane_open (SANE_String_Const devname, SANE_Handle *handle)
         break;
       s->channel[i] = strdup ((const char *) input.name);
       if (!s->channel[i])
-        goto fail;
+        {
+          status = SANE_STATUS_NO_MEM;
+          goto fail;
+        }
     }
   set_default_format (s);
-  if (init_options (s) != SANE_STATUS_GOOD)
+  status = init_options (s);
+  if (status != SANE_STATUS_GOOD)
     goto fail;
-  if (update_parameters (s) != SANE_STATUS_GOOD)
+  status = update_parameters (s);
+  if (status != SANE_STATUS_GOOD)
     goto fail;
   s->next = first_handle;
   first_handle = s;
@@ -694,7 +701,7 @@ fail:
   free ((void *) s->val[OPT_CHANNEL].s);
   v4l2_close (fd);
   free (s);
-  return SANE_STATUS_INVAL;
+  return status;
 }
 
 void
