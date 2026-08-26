@@ -372,7 +372,8 @@ init_options (V4L_Scanner *s)
 
   s->opt[OPT_CHANNEL] = (SANE_Option_Descriptor) {
     "channel", "Channel", "Selects the V4L2 input channel",
-    SANE_TYPE_STRING, SANE_UNIT_NONE, 1,
+    SANE_TYPE_STRING, SANE_UNIT_NONE,
+    sizeof (((struct v4l2_input *) 0)->name),
     SANE_CAP_SOFT_SELECT | SANE_CAP_SOFT_DETECT,
     SANE_CONSTRAINT_STRING_LIST, { .string_list = s->channel }
   };
