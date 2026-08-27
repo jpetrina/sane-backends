@@ -754,8 +754,7 @@ start_capture (V4L_Scanner *s)
           cleanup_capture (s);
           return SANE_STATUS_IO_ERROR;
         }
-      s->frame_size = buf.bytesused < s->buffer_size
-        ? buf.bytesused : s->buffer_size;
+      s->frame_size = MIN(buf.bytesused, s->buffer_size);
       if (convert_rgb_to_gray (s) != SANE_STATUS_GOOD)
         {
           cleanup_capture (s);
