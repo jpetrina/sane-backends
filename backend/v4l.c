@@ -680,13 +680,9 @@ start_capture (V4L_Scanner *s)
      formats such as MJPEG and YUYV to the RGB24 or GREY format requested by
      sane_start().  Prefer this path so that the conversion layer is not
      bypassed by direct mmap access. */
-  size = (size_t) s->format.fmt.pix.width
-    * s->format.fmt.pix.height
-    * 3;
-  if ((size_t) s->format.fmt.pix.bytesperline * s->format.fmt.pix.height > size)
-    size = (size_t) s->format.fmt.pix.bytesperline * s->format.fmt.pix.height;
-  if (s->format.fmt.pix.sizeimage > size)
-    size = s->format.fmt.pix.sizeimage;
+  size = MAX((size_t) s->format.fmt.pix.width * s->format.fmt.pix.height * 3,
+             MAX((size_t) s->format.fmt.pix.bytesperline * s->format.fmt.pix.height,
+                 s->format.fmt.pix.sizeimage));
   s->buffer = malloc (size);
   if (!s->buffer)
     return SANE_STATUS_NO_MEM;
