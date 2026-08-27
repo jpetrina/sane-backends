@@ -534,8 +534,8 @@ init_options (V4L_Scanner *s)
   s->opt[OPT_HUE].desc = SANE_DESC_HUE;
   s->opt[OPT_COLOR] = s->opt[OPT_BRIGHTNESS];
   s->opt[OPT_COLOR].name = "color";
-  s->opt[OPT_COLOR].title = "Picture color";
-  s->opt[OPT_COLOR].desc = "Sets the picture's color.";
+  s->opt[OPT_COLOR].title = SANE_I18N ("Picture color");
+  s->opt[OPT_COLOR].desc = SANE_I18N ("Sets the picture's color.");
   s->opt[OPT_CONTRAST] = s->opt[OPT_BRIGHTNESS];
   s->opt[OPT_CONTRAST].name = SANE_NAME_CONTRAST;
   s->opt[OPT_CONTRAST].title = SANE_TITLE_CONTRAST;
