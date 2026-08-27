@@ -667,6 +667,7 @@ start_capture (V4L_Scanner *s)
   enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   size_t size;
   ssize_t result;
+  SANE_Status status;
 
   cleanup_capture (s);
 
@@ -693,10 +694,11 @@ start_capture (V4L_Scanner *s)
   if (result > 0)
     {
       s->frame_size = (size_t) result;
-      if (convert_rgb_to_gray (s) != SANE_STATUS_GOOD)
+      status = convert_rgb_to_gray (s);
+      if (status != SANE_STATUS_GOOD)
         {
           cleanup_capture (s);
-          return SANE_STATUS_IO_ERROR;
+          return status;
         }
       if (crop_frame (s) != SANE_STATUS_GOOD)
         {
@@ -747,10 +749,11 @@ start_capture (V4L_Scanner *s)
       return SANE_STATUS_IO_ERROR;
     }
   s->frame_size = MIN(buf.bytesused, s->buffer_size);
-  if (convert_rgb_to_gray (s) != SANE_STATUS_GOOD)
+  status = convert_rgb_to_gray (s);
+  if (status != SANE_STATUS_GOOD)
     {
       cleanup_capture (s);
-      return SANE_STATUS_IO_ERROR;
+      return status;
     }
   if (crop_frame (s) != SANE_STATUS_GOOD)
     {
