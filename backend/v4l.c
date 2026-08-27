@@ -82,6 +82,19 @@ xioctl (int fd, unsigned long request, void *arg)
   return result;
 }
 
+static void
+debug_format (int level, const char *label, const struct v4l2_pix_format *format)
+{
+  DBG (level, "%s: %c%c%c%c %ux%u, bytesperline=%u, sizeimage=%u\n",
+       label,
+       format->pixelformat & 0xff,
+       (format->pixelformat >> 8) & 0xff,
+       (format->pixelformat >> 16) & 0xff,
+       (format->pixelformat >> 24) & 0xff,
+       format->width, format->height, format->bytesperline,
+       format->sizeimage);
+}
+
 static SANE_Status
 wait_for_frame (int fd, int timeout_ms)
 {
@@ -160,9 +173,11 @@ probe_capture (int fd)
   format.type = type;
   if (xioctl (fd, VIDIOC_G_FMT, &format) == -1)
     return SANE_FALSE;
+  debug_format (4, "probe format", &format.fmt.pix);
 
   if (capabilities & V4L2_CAP_STREAMING)
     {
+      DBG (4, "probe: trying mmap streaming\n");
       memset (&request, 0, sizeof (request));
       request.count = 1;
       request.type = type;
@@ -186,11 +201,15 @@ probe_capture (int fd)
       if (wait_for_frame (fd, V4L_PROBE_TIMEOUT_MS) == SANE_STATUS_GOOD
           && xioctl (fd, VIDIOC_DQBUF, &buffer) == 0)
         success = SANE_TRUE;
+      else
+        DBG (3, "probe: first mmap frame timed out or dequeue failed: %s\n",
+             strerror (errno));
       goto cleanup;
     }
 
   if (capabilities & V4L2_CAP_READWRITE)
     {
+      DBG (4, "probe: trying read capture\n");
       size = format.fmt.pix.sizeimage;
       if (!size)
         size = (size_t) format.fmt.pix.width * format.fmt.pix.height * 4;
@@ -201,7 +220,10 @@ probe_capture (int fd)
         {
           result = v4l2_read (fd, mapping, size);
           success = result > 0;
+          DBG (4, "probe: read returned %zd bytes\n", result);
         }
+      else
+        DBG (3, "probe: read frame timed out: %s\n", strerror (errno));
     }
 
 cleanup:
@@ -584,7 +606,13 @@ convert_rgb_to_gray (V4L_Scanner *s)
   size_t pixels;
 
   if (!gray_fallback_as_rgb (s))
-    return SANE_STATUS_GOOD;
+    {
+      DBG (4, "conversion: no RGB-to-gray fallback required\n");
+      return SANE_STATUS_GOOD;
+    }
+  DBG (4, "conversion: RGB24 to grayscale-compatible RGB output, "
+       "width=%zu height=%zu stride=%zu\n", width, height,
+       MAX (s->format.fmt.pix.bytesperline, width * 3));
   if (width == 0 || height == 0 || width > SIZE_MAX / 3)
     {
       s->frame_size = 0;
@@ -634,6 +662,10 @@ crop_frame (V4L_Scanner *s)
   size_t source_stride;
   size_t row;
 
+  DBG (4, "crop: input=%zux%zu, area=%zu,%zu %zux%zu, bytes_per_pixel=%zu\n",
+       source_width, source_height, left, top, width, height,
+       bytes_per_pixel);
+
   if (source_width > SIZE_MAX / bytes_per_pixel)
     {
       s->frame_size = 0;
@@ -670,6 +702,7 @@ start_capture (V4L_Scanner *s)
   SANE_Status status;
 
   cleanup_capture (s);
+  debug_format (4, "capture requested format", &s->format.fmt.pix);
 
   /* libv4l2 can emulate read() for streaming-only devices and convert
      formats such as MJPEG and YUYV to the RGB24 or GREY format requested by
@@ -691,6 +724,7 @@ start_capture (V4L_Scanner *s)
     result = v4l2_read (s->fd, s->buffer, size);
   else
     result = -1;
+  DBG (4, "capture read path: result=%zd, buffer_size=%zu\n", result, size);
   if (result > 0)
     {
       s->frame_size = (size_t) result;
@@ -709,6 +743,7 @@ start_capture (V4L_Scanner *s)
       return SANE_STATUS_GOOD;
     }
   cleanup_capture (s);
+  DBG (3, "capture read path unavailable; trying mmap fallback\n");
 
   /* Some libv4l2/device combinations expose streaming but do not provide
      the read emulation.  Keep a direct mmap fallback for those devices. */
@@ -749,6 +784,8 @@ start_capture (V4L_Scanner *s)
       return SANE_STATUS_IO_ERROR;
     }
   s->frame_size = MIN(buf.bytesused, s->buffer_size);
+  DBG (4, "capture mmap path: bytesused=%u, buffer_size=%zu\n",
+       buf.bytesused, s->buffer_size);
   status = convert_rgb_to_gray (s);
   if (status != SANE_STATUS_GOOD)
     {
@@ -1095,6 +1132,7 @@ sane_start (SANE_Handle handle)
   if (format.fmt.pix.pixelformat != pixel_format)
     return SANE_STATUS_UNSUPPORTED;
   s->format = format;
+  debug_format (3, "negotiated format", &s->format.fmt.pix);
   if (update_parameters (s) != SANE_STATUS_GOOD)
     return SANE_STATUS_INVAL;
   return start_capture (s);
