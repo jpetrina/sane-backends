@@ -1111,7 +1111,7 @@ sane_read (SANE_Handle handle, SANE_Byte *buf, SANE_Int max_len, SANE_Int *lenp)
       return SANE_STATUS_EOF;
     }
   remaining = s->frame_size - s->offset;
-  count = remaining < (size_t) max_len ? remaining : (size_t) max_len;
+  count = MIN(remaining, (size_t) max_len);
   memcpy (buf, (unsigned char *) s->buffer + s->offset, count);
   s->offset += count;
   *lenp = (SANE_Int) count;
