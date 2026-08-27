@@ -911,7 +911,11 @@ sane_close (SANE_Handle handle)
   free ((void *) s->val[OPT_MODE].s);
   free ((void *) s->val[OPT_CHANNEL].s);
   free ((void *) s->val[OPT_FRAME_SIZE].s);
-  v4l2_close (s->fd);
+  if (s->fd >= 0)
+    {
+      v4l2_close (s->fd);
+      s->fd = -1;
+    }
   free (s);
 }
 
@@ -1062,10 +1066,14 @@ sane_start (SANE_Handle handle)
   if (!s)
     return SANE_STATUS_INVAL;
   cleanup_capture (s);
+  if (s->fd >= 0)
+    {
+      v4l2_close (s->fd);
+      s->fd = -1;
+    }
   fd = v4l2_open (s->devicename, O_RDWR | O_NONBLOCK);
   if (fd == -1)
     return SANE_STATUS_IO_ERROR;
-  v4l2_close (s->fd);
   s->fd = fd;
   memset (&capability, 0, sizeof (capability));
   if (query_capability (s->fd, &capability) != SANE_STATUS_GOOD)
