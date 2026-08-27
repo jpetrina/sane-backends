@@ -283,6 +283,13 @@ set_default_format (V4L_Scanner *s)
     }
 }
 
+static SANE_Bool
+gray_fallback_as_rgb (const V4L_Scanner *s)
+{
+  return s->gray_mode
+    && s->format.fmt.pix.pixelformat == V4L2_PIX_FMT_RGB24;
+}
+
 static SANE_Status
 update_parameters (V4L_Scanner *s)
 {
@@ -290,7 +297,8 @@ update_parameters (V4L_Scanner *s)
       || s->format.fmt.pix.width > INT_MAX
       || s->format.fmt.pix.height > INT_MAX)
     return SANE_STATUS_INVAL;
-  s->params.format = s->gray_mode ? SANE_FRAME_GRAY : SANE_FRAME_RGB;
+  s->params.format = gray_fallback_as_rgb (s)
+    ? SANE_FRAME_RGB : (s->gray_mode ? SANE_FRAME_GRAY : SANE_FRAME_RGB);
   s->params.last_frame = SANE_TRUE;
   s->params.pixels_per_line = s->format.fmt.pix.width;
   s->params.lines = s->format.fmt.pix.height;
@@ -446,7 +454,7 @@ cleanup_capture (V4L_Scanner *s)
   s->scanning = SANE_FALSE;
 }
 
-static void
+static SANE_Status
 convert_rgb_to_gray (V4L_Scanner *s)
 {
   size_t width = s->format.fmt.pix.width;
@@ -460,32 +468,43 @@ convert_rgb_to_gray (V4L_Scanner *s)
 
   size_t pixels;
 
-  if (!s->gray_mode)
-    return;
+  if (!gray_fallback_as_rgb (s))
+    return SANE_STATUS_GOOD;
   if (width == 0 || height == 0 || width > SIZE_MAX / 3)
     {
       s->frame_size = 0;
-      return;
+      return SANE_STATUS_INVAL;
     }
   minimum_stride = width * 3;
   stride = s->format.fmt.pix.bytesperline;
   if (stride < minimum_stride)
     stride = minimum_stride;
-  rows = s->frame_size / stride;
-  if (rows > height)
-    rows = height;
+  if (stride > SIZE_MAX / height
+      || stride * height > s->frame_size
+      || width > SIZE_MAX / height
+      || width * height > SIZE_MAX / 3
+      || width * height * 3 > s->buffer_size)
+    {
+      s->frame_size = 0;
+      return SANE_STATUS_IO_ERROR;
+    }
+  rows = height;
   data = s->buffer;
   for (row = 0; row < rows; row++)
     for (column = 0; column < width; column++)
       {
         size_t source = row * stride + column * 3;
-        size_t destination = row * width + column;
-        data[destination] = (unsigned char) ((77 * data[source]
-                                              + 150 * data[source + 1]
-                                              + 29 * data[source + 2]) >> 8);
+        size_t destination = (row * width + column) * 3;
+        unsigned char gray = (unsigned char) ((77 * data[source]
+                                               + 150 * data[source + 1]
+                                               + 29 * data[source + 2]) >> 8);
+        data[destination] = gray;
+        data[destination + 1] = gray;
+        data[destination + 2] = gray;
       }
-  pixels = rows * width;
+  pixels = rows * width * 3;
   s->frame_size = pixels;
+  return SANE_STATUS_GOOD;
 }
 
 static SANE_Status
@@ -526,7 +545,11 @@ start_capture (V4L_Scanner *s)
   if (result > 0)
     {
       s->frame_size = (size_t) result;
-      convert_rgb_to_gray (s);
+      if (convert_rgb_to_gray (s) != SANE_STATUS_GOOD)
+        {
+          cleanup_capture (s);
+          return SANE_STATUS_IO_ERROR;
+        }
       s->scanning = SANE_TRUE;
       return SANE_STATUS_GOOD;
     }
@@ -574,7 +597,11 @@ start_capture (V4L_Scanner *s)
         }
       s->frame_size = buf.bytesused < s->buffer_size
         ? buf.bytesused : s->buffer_size;
-      convert_rgb_to_gray (s);
+      if (convert_rgb_to_gray (s) != SANE_STATUS_GOOD)
+        {
+          cleanup_capture (s);
+          return SANE_STATUS_IO_ERROR;
+        }
     }
   s->scanning = SANE_TRUE;
   return SANE_STATUS_GOOD;
