@@ -718,49 +718,46 @@ start_capture (V4L_Scanner *s)
     {
       return SANE_STATUS_IO_ERROR;
     }
-  else
+  memset (&buf, 0, sizeof (buf));
+  buf.type = type;
+  buf.memory = V4L2_MEMORY_MMAP;
+  buf.index = 0;
+  if (xioctl (s->fd, VIDIOC_QUERYBUF, &buf) == -1)
+    return SANE_STATUS_IO_ERROR;
+  s->buffer_size = buf.length;
+  s->buffer = v4l2_mmap (NULL, buf.length, PROT_READ | PROT_WRITE,
+                         MAP_SHARED, s->fd, buf.m.offset);
+  if (s->buffer == MAP_FAILED)
     {
-      memset (&buf, 0, sizeof (buf));
-      buf.type = type;
-      buf.memory = V4L2_MEMORY_MMAP;
-      buf.index = 0;
-      if (xioctl (s->fd, VIDIOC_QUERYBUF, &buf) == -1)
-        return SANE_STATUS_IO_ERROR;
-      s->buffer_size = buf.length;
-      s->buffer = v4l2_mmap (NULL, buf.length, PROT_READ | PROT_WRITE,
-                             MAP_SHARED, s->fd, buf.m.offset);
-      if (s->buffer == MAP_FAILED)
-        {
-          s->buffer = NULL;
-          return SANE_STATUS_IO_ERROR;
-        }
-      s->is_mmap = SANE_TRUE;
-      if (xioctl (s->fd, VIDIOC_QBUF, &buf) == -1
-          || xioctl (s->fd, VIDIOC_STREAMON, &type) == -1)
-        {
-          cleanup_capture (s);
-          return SANE_STATUS_IO_ERROR;
-        }
-      s->streaming = SANE_TRUE;
-      if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) != SANE_STATUS_GOOD
-          || xioctl (s->fd, VIDIOC_DQBUF, &buf) == -1)
-        {
-          cleanup_capture (s);
-          return SANE_STATUS_IO_ERROR;
-        }
-      s->frame_size = MIN(buf.bytesused, s->buffer_size);
-      if (convert_rgb_to_gray (s) != SANE_STATUS_GOOD)
-        {
-          cleanup_capture (s);
-          return SANE_STATUS_IO_ERROR;
-        }
+      s->buffer = NULL;
+      return SANE_STATUS_IO_ERROR;
     }
-      if (crop_frame (s) != SANE_STATUS_GOOD)
-        {
-          cleanup_capture (s);
-          return SANE_STATUS_INVAL;
-        }
-      s->scanning = SANE_TRUE;
+  s->is_mmap = SANE_TRUE;
+  if (xioctl (s->fd, VIDIOC_QBUF, &buf) == -1
+      || xioctl (s->fd, VIDIOC_STREAMON, &type) == -1)
+    {
+      cleanup_capture (s);
+      return SANE_STATUS_IO_ERROR;
+    }
+  s->streaming = SANE_TRUE;
+  if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) != SANE_STATUS_GOOD
+      || xioctl (s->fd, VIDIOC_DQBUF, &buf) == -1)
+    {
+      cleanup_capture (s);
+      return SANE_STATUS_IO_ERROR;
+    }
+  s->frame_size = MIN(buf.bytesused, s->buffer_size);
+  if (convert_rgb_to_gray (s) != SANE_STATUS_GOOD)
+    {
+      cleanup_capture (s);
+      return SANE_STATUS_IO_ERROR;
+    }
+  if (crop_frame (s) != SANE_STATUS_GOOD)
+    {
+      cleanup_capture (s);
+      return SANE_STATUS_INVAL;
+    }
+  s->scanning = SANE_TRUE;
   return SANE_STATUS_GOOD;
 }
 
