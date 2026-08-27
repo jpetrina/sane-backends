@@ -808,6 +808,7 @@ sane_init (SANE_Int *version_code, SANE_Auth_Callback authorize)
   FILE *fp;
   char *end;
   (void) authorize;
+  DBG_INIT ();
   DBG (3, "sane_init\n");
   if (version_code)
     *version_code = SANE_VERSION_CODE (SANE_CURRENT_MAJOR, SANE_CURRENT_MINOR, BUILD);
