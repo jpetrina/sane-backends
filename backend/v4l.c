@@ -577,11 +577,8 @@ convert_rgb_to_gray (V4L_Scanner *s)
 {
   size_t width = s->format.fmt.pix.width;
   size_t height = s->format.fmt.pix.height;
-  size_t minimum_stride;
   size_t stride;
   size_t rows;
-  size_t row;
-  size_t column;
   unsigned char *data;
 
   size_t pixels;
@@ -593,10 +590,7 @@ convert_rgb_to_gray (V4L_Scanner *s)
       s->frame_size = 0;
       return SANE_STATUS_INVAL;
     }
-  minimum_stride = width * 3;
-  stride = s->format.fmt.pix.bytesperline;
-  if (stride < minimum_stride)
-    stride = minimum_stride;
+  stride = MAX (s->format.fmt.pix.bytesperline, width * 3);
   if (stride > SIZE_MAX / height
       || stride * height > s->frame_size
       || width > SIZE_MAX / height
