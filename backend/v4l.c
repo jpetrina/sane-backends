@@ -608,8 +608,8 @@ convert_rgb_to_gray (V4L_Scanner *s)
     }
   rows = height;
   data = s->buffer;
-  for (row = 0; row < rows; row++)
-    for (column = 0; column < width; column++)
+  for (size_t row = 0; row < rows; row++)
+    for (size_t column = 0; column < width; column++)
       {
         size_t source = row * stride + column * 3;
         size_t destination = (row * width + column) * 3;
