@@ -36,7 +36,7 @@
 
 #define V4L_CONFIG_FILE "v4l.conf"
 #define V4L_CAPTURE_TIMEOUT_MS 5000
-#define V4L_PROBE_TIMEOUT_MS 1000
+#define V4L_PROBE_TIMEOUT_MS 3000
 
 static const SANE_Device **devlist;
 static V4L_Device *first_dev;
