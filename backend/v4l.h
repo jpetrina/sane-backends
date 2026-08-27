@@ -33,6 +33,7 @@
 #include <linux/videodev2.h>
 
 #define MAX_CHANNELS 32
+#define MAX_FRAME_SIZES 64
 
 typedef enum
 {
@@ -48,6 +49,7 @@ typedef enum
   OPT_MODE_GROUP,
   OPT_MODE,
   OPT_CHANNEL,
+  OPT_FRAME_SIZE,
 
   OPT_GEOMETRY_GROUP,
   OPT_TL_X,			/* top-left x */
@@ -97,6 +99,12 @@ typedef struct V4L_Scanner
   struct v4l2_capability capability;
   struct v4l2_format format;
   SANE_String_Const channel[MAX_CHANNELS];
+  SANE_String_Const frame_size_list[MAX_FRAME_SIZES + 1];
+  char frame_size_names[MAX_FRAME_SIZES][32];
+  SANE_Range geometry_range[4];
+  unsigned frame_size_count;
+  __u32 frame_width;
+  __u32 frame_height;
 }
 V4L_Scanner;
 

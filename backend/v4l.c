@@ -283,6 +283,81 @@ set_default_format (V4L_Scanner *s)
     }
 }
 
+static void
+add_frame_size (V4L_Scanner *s, __u32 width, __u32 height)
+{
+  unsigned i;
+  unsigned existing_width;
+  unsigned existing_height;
+  if (!width || !height || s->frame_size_count >= MAX_FRAME_SIZES)
+    return;
+  for (i = 0; i < s->frame_size_count; i++)
+    if (sscanf (s->frame_size_list[i], "%ux%u",
+                &existing_width, &existing_height) == 2
+        && existing_width == width && existing_height == height)
+      return;
+  snprintf (s->frame_size_names[s->frame_size_count],
+            sizeof (s->frame_size_names[0]), "%ux%u", width, height);
+  s->frame_size_list[s->frame_size_count]
+    = s->frame_size_names[s->frame_size_count];
+  s->frame_size_count++;
+}
+
+static void
+query_frame_sizes (V4L_Scanner *s)
+{
+  struct v4l2_fmtdesc format;
+  struct v4l2_frmsizeenum size;
+  unsigned format_index;
+  unsigned size_index;
+
+  s->frame_size_count = 0;
+  for (format_index = 0; format_index < 256; format_index++)
+    {
+      memset (&format, 0, sizeof (format));
+      format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+      format.index = format_index;
+      if (xioctl (s->fd, VIDIOC_ENUM_FMT, &format) == -1)
+        break;
+      if (format.pixelformat != V4L2_PIX_FMT_MJPEG
+          && format.pixelformat != V4L2_PIX_FMT_YUYV
+          && format.pixelformat != V4L2_PIX_FMT_RGB24
+          && format.pixelformat != V4L2_PIX_FMT_GREY)
+        continue;
+      for (size_index = 0; size_index < 256; size_index++)
+        {
+          memset (&size, 0, sizeof (size));
+          size.index = size_index;
+          size.pixel_format = format.pixelformat;
+          if (xioctl (s->fd, VIDIOC_ENUM_FRAMESIZES, &size) == -1)
+            break;
+          if (size.type == V4L2_FRMSIZE_TYPE_DISCRETE)
+            add_frame_size (s, size.discrete.width, size.discrete.height);
+          else if (size.type == V4L2_FRMSIZE_TYPE_STEPWISE
+                   || size.type == V4L2_FRMSIZE_TYPE_CONTINUOUS)
+            {
+              add_frame_size (s, size.stepwise.min_width,
+                              size.stepwise.min_height);
+              add_frame_size (s, size.stepwise.max_width,
+                              size.stepwise.max_height);
+              break;
+            }
+        }
+    }
+  if (s->frame_size_count == 0)
+    add_frame_size (s, s->format.fmt.pix.width, s->format.fmt.pix.height);
+  s->frame_size_list[s->frame_size_count] = NULL;
+  s->frame_width = s->format.fmt.pix.width;
+  s->frame_height = s->format.fmt.pix.height;
+  if (s->frame_size_count > 0)
+    {
+      s->frame_width = 0;
+      s->frame_height = 0;
+      sscanf (s->frame_size_list[0], "%ux%u",
+              &s->frame_width, &s->frame_height);
+    }
+}
+
 static SANE_Bool
 gray_fallback_as_rgb (const V4L_Scanner *s)
 {
@@ -293,15 +368,23 @@ gray_fallback_as_rgb (const V4L_Scanner *s)
 static SANE_Status
 update_parameters (V4L_Scanner *s)
 {
-  if (s->format.fmt.pix.width == 0 || s->format.fmt.pix.height == 0
-      || s->format.fmt.pix.width > INT_MAX
-      || s->format.fmt.pix.height > INT_MAX)
+  SANE_Word width;
+  SANE_Word height;
+  if (s->frame_width == 0 || s->frame_height == 0
+      || s->frame_width > INT_MAX || s->frame_height > INT_MAX)
+    return SANE_STATUS_INVAL;
+  if (s->val[OPT_TL_X].w > s->val[OPT_BR_X].w
+      || s->val[OPT_TL_Y].w > s->val[OPT_BR_Y].w)
+    return SANE_STATUS_INVAL;
+  width = SANE_UNFIX (s->val[OPT_BR_X].w - s->val[OPT_TL_X].w);
+  height = SANE_UNFIX (s->val[OPT_BR_Y].w - s->val[OPT_TL_Y].w);
+  if (width <= 0 || height <= 0)
     return SANE_STATUS_INVAL;
   s->params.format = gray_fallback_as_rgb (s)
     ? SANE_FRAME_RGB : (s->gray_mode ? SANE_FRAME_GRAY : SANE_FRAME_RGB);
   s->params.last_frame = SANE_TRUE;
-  s->params.pixels_per_line = s->format.fmt.pix.width;
-  s->params.lines = s->format.fmt.pix.height;
+  s->params.pixels_per_line = width;
+  s->params.lines = height;
   s->params.bytes_per_line = s->params.pixels_per_line
     * ((s->params.format == SANE_FRAME_GRAY) ? 1 : 3);
   s->params.depth = 8;
@@ -394,12 +477,47 @@ init_options (V4L_Scanner *s)
   else
     s->opt[OPT_CHANNEL].cap |= SANE_CAP_INACTIVE;
 
+  s->opt[OPT_FRAME_SIZE] = (SANE_Option_Descriptor) {
+    "frame-size", "Frame size", "Selects the V4L2 capture dimensions",
+    SANE_TYPE_STRING, SANE_UNIT_NONE, sizeof (s->frame_size_names[0]),
+    SANE_CAP_SOFT_SELECT | SANE_CAP_SOFT_DETECT,
+    SANE_CONSTRAINT_STRING_LIST, { .string_list = s->frame_size_list }
+  };
+  s->val[OPT_FRAME_SIZE].s = strdup (s->frame_size_list[0]);
+  if (!s->val[OPT_FRAME_SIZE].s)
+    return SANE_STATUS_NO_MEM;
+
   s->opt[OPT_GEOMETRY_GROUP] = (SANE_Option_Descriptor) {
     "geometry-group", "Geometry", "", SANE_TYPE_GROUP, SANE_UNIT_NONE,
     0, SANE_CAP_ADVANCED, SANE_CONSTRAINT_NONE, { 0 }
   };
-  for (i = OPT_TL_X; i <= OPT_BR_Y; i++)
-    s->opt[i].cap |= SANE_CAP_INACTIVE;
+  s->geometry_range[0] = (SANE_Range) { 0, SANE_FIX (s->frame_width - 1), SANE_FIX (1) };
+  s->geometry_range[1] = (SANE_Range) { 0, SANE_FIX (s->frame_height - 1), SANE_FIX (1) };
+  s->geometry_range[2] = (SANE_Range) { 1, SANE_FIX (s->frame_width), SANE_FIX (1) };
+  s->geometry_range[3] = (SANE_Range) { 1, SANE_FIX (s->frame_height), SANE_FIX (1) };
+  s->opt[OPT_TL_X] = (SANE_Option_Descriptor) {
+    SANE_NAME_SCAN_TL_X, "Top-left X", "Left edge in pixels",
+    SANE_TYPE_INT, SANE_UNIT_PIXEL, sizeof (SANE_Word),
+    SANE_CAP_SOFT_SELECT | SANE_CAP_SOFT_DETECT, SANE_CONSTRAINT_RANGE,
+    { .range = &s->geometry_range[0] }
+  };
+  s->opt[OPT_TL_Y] = s->opt[OPT_TL_X];
+  s->opt[OPT_TL_Y].name = SANE_NAME_SCAN_TL_Y;
+  s->opt[OPT_TL_Y].title = "Top-left Y";
+  s->opt[OPT_TL_Y].desc = "Top edge in pixels";
+  s->opt[OPT_TL_Y].constraint.range = &s->geometry_range[1];
+  s->opt[OPT_BR_X] = s->opt[OPT_TL_X];
+  s->opt[OPT_BR_X].name = SANE_NAME_SCAN_BR_X;
+  s->opt[OPT_BR_X].title = "Bottom-right X";
+  s->opt[OPT_BR_X].desc = "Right edge in pixels";
+  s->opt[OPT_BR_X].constraint.range = &s->geometry_range[2];
+  s->opt[OPT_BR_Y] = s->opt[OPT_TL_X];
+  s->opt[OPT_BR_Y].name = SANE_NAME_SCAN_BR_Y;
+  s->opt[OPT_BR_Y].title = "Bottom-right Y";
+  s->opt[OPT_BR_Y].desc = "Bottom edge in pixels";
+  s->opt[OPT_BR_Y].constraint.range = &s->geometry_range[3];
+  s->val[OPT_BR_X].w = SANE_FIX (s->frame_width);
+  s->val[OPT_BR_Y].w = SANE_FIX (s->frame_height);
   s->opt[OPT_ENHANCEMENT_GROUP] = (SANE_Option_Descriptor) {
     "enhancement-group", "Enhancement", "", SANE_TYPE_GROUP,
     SANE_UNIT_NONE, 0, 0, SANE_CONSTRAINT_NONE, { 0 }
@@ -508,6 +626,46 @@ convert_rgb_to_gray (V4L_Scanner *s)
 }
 
 static SANE_Status
+crop_frame (V4L_Scanner *s)
+{
+  size_t source_width = s->format.fmt.pix.width;
+  size_t source_height = s->format.fmt.pix.height;
+  size_t left = (size_t) SANE_UNFIX (s->val[OPT_TL_X].w);
+  size_t top = (size_t) SANE_UNFIX (s->val[OPT_TL_Y].w);
+  size_t width = (size_t) SANE_UNFIX
+    (s->val[OPT_BR_X].w - s->val[OPT_TL_X].w);
+  size_t height = (size_t) SANE_UNFIX
+    (s->val[OPT_BR_Y].w - s->val[OPT_TL_Y].w);
+  size_t bytes_per_pixel = s->params.format == SANE_FRAME_GRAY ? 1 : 3;
+  size_t source_stride;
+  size_t row;
+
+  if (source_width > SIZE_MAX / bytes_per_pixel)
+    {
+      s->frame_size = 0;
+      return SANE_STATUS_INVAL;
+    }
+  source_stride = source_width * bytes_per_pixel;
+  if (left >= source_width || top >= source_height || width == 0 || height == 0
+      || left + width > source_width || top + height > source_height
+      || source_stride > SIZE_MAX / source_height
+      || source_stride * source_height > s->buffer_size
+      || width > SIZE_MAX / height
+      || width * height > SIZE_MAX / bytes_per_pixel)
+    {
+      s->frame_size = 0;
+      return SANE_STATUS_INVAL;
+    }
+  for (row = 0; row < height; row++)
+    memmove ((unsigned char *) s->buffer + row * width * bytes_per_pixel,
+             (unsigned char *) s->buffer
+               + (top + row) * source_stride + left * bytes_per_pixel,
+             width * bytes_per_pixel);
+  s->frame_size = width * height * bytes_per_pixel;
+  return SANE_STATUS_GOOD;
+}
+
+static SANE_Status
 start_capture (V4L_Scanner *s)
 {
   struct v4l2_requestbuffers req;
@@ -549,6 +707,11 @@ start_capture (V4L_Scanner *s)
         {
           cleanup_capture (s);
           return SANE_STATUS_IO_ERROR;
+        }
+      if (crop_frame (s) != SANE_STATUS_GOOD)
+        {
+          cleanup_capture (s);
+          return SANE_STATUS_INVAL;
         }
       s->scanning = SANE_TRUE;
       return SANE_STATUS_GOOD;
@@ -603,7 +766,12 @@ start_capture (V4L_Scanner *s)
           return SANE_STATUS_IO_ERROR;
         }
     }
-  s->scanning = SANE_TRUE;
+      if (crop_frame (s) != SANE_STATUS_GOOD)
+        {
+          cleanup_capture (s);
+          return SANE_STATUS_INVAL;
+        }
+      s->scanning = SANE_TRUE;
   return SANE_STATUS_GOOD;
 }
 
@@ -716,6 +884,7 @@ sane_open (SANE_String_Const devname, SANE_Handle *handle)
         }
     }
   set_default_format (s);
+  query_frame_sizes (s);
   status = init_options (s);
   if (status != SANE_STATUS_GOOD)
     goto fail;
@@ -731,6 +900,7 @@ fail:
   free_channels (s);
   free ((void *) s->val[OPT_MODE].s);
   free ((void *) s->val[OPT_CHANNEL].s);
+  free ((void *) s->val[OPT_FRAME_SIZE].s);
   v4l2_close (fd);
   free (s);
   return status;
@@ -751,6 +921,7 @@ sane_close (SANE_Handle handle)
   free_channels (s);
   free ((void *) s->val[OPT_MODE].s);
   free ((void *) s->val[OPT_CHANNEL].s);
+  free ((void *) s->val[OPT_FRAME_SIZE].s);
   v4l2_close (s->fd);
   free (s);
 }
@@ -777,9 +948,11 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
     *info = 0;
   if (action == SANE_ACTION_GET_VALUE)
     {
-      if (option == OPT_MODE || option == OPT_CHANNEL)
+      if (option == OPT_MODE || option == OPT_CHANNEL || option == OPT_FRAME_SIZE)
         strcpy (value, s->val[option].s ? s->val[option].s : "");
-      else if (option == OPT_NUM_OPTS || option >= OPT_BRIGHTNESS)
+      else if (option == OPT_NUM_OPTS
+               || (option >= OPT_TL_X && option <= OPT_BR_Y)
+               || option >= OPT_BRIGHTNESS)
         *(SANE_Word *) value = s->val[option].w;
       else
         return SANE_STATUS_INVAL;
@@ -788,11 +961,39 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
   if (action != SANE_ACTION_SET_VALUE
       || !SANE_OPTION_IS_SETTABLE (s->opt[option].cap))
     return SANE_STATUS_INVAL;
-  if (option == OPT_MODE || option == OPT_CHANNEL)
+  if (option == OPT_MODE || option == OPT_CHANNEL || option == OPT_FRAME_SIZE)
     {
       copy = strdup (value);
       if (!copy)
         return SANE_STATUS_NO_MEM;
+      if (option == OPT_FRAME_SIZE)
+        {
+          unsigned i, width, height;
+          for (i = 0; i < s->frame_size_count; i++)
+            if (strcmp (s->frame_size_list[i], copy) == 0)
+              break;
+          if (i == s->frame_size_count
+              || sscanf (copy, "%ux%u", &width, &height) != 2)
+            {
+              free (copy);
+              return SANE_STATUS_INVAL;
+            }
+          s->frame_width = width;
+          s->frame_height = height;
+          s->geometry_range[0].max = SANE_FIX (width - 1);
+          s->geometry_range[1].max = SANE_FIX (height - 1);
+          s->geometry_range[2].max = SANE_FIX (width);
+          s->geometry_range[3].max = SANE_FIX (height);
+          s->val[OPT_TL_X].w = 0;
+          s->val[OPT_TL_Y].w = 0;
+          s->val[OPT_BR_X].w = SANE_FIX (width);
+          s->val[OPT_BR_Y].w = SANE_FIX (height);
+          free ((void *) s->val[option].s);
+          s->val[option].s = copy;
+          if (info)
+            *info |= SANE_INFO_RELOAD_PARAMS;
+          return SANE_STATUS_GOOD;
+        }
       if (option == OPT_CHANNEL)
         {
           int i;
@@ -821,6 +1022,21 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
       return SANE_STATUS_GOOD;
     }
   word = value;
+  if (option >= OPT_TL_X && option <= OPT_BR_Y)
+    {
+      if (*word < s->opt[option].constraint.range->min
+          || *word > s->opt[option].constraint.range->max)
+        return SANE_STATUS_INVAL;
+      if ((option == OPT_TL_X && *word > s->val[OPT_BR_X].w)
+          || (option == OPT_TL_Y && *word > s->val[OPT_BR_Y].w)
+          || (option == OPT_BR_X && *word < s->val[OPT_TL_X].w)
+          || (option == OPT_BR_Y && *word < s->val[OPT_TL_Y].w))
+        return SANE_STATUS_INVAL;
+      s->val[option].w = *word;
+      if (info)
+        *info |= SANE_INFO_RELOAD_PARAMS;
+      return SANE_STATUS_GOOD;
+    }
   if (option < OPT_BRIGHTNESS || option > OPT_WHITE_LEVEL)
     return SANE_STATUS_INVAL;
   switch (option)
@@ -870,6 +1086,8 @@ sane_start (SANE_Handle handle)
   s->gray_mode = !(s->val[OPT_MODE].s
                    && strcmp (s->val[OPT_MODE].s,
                               SANE_VALUE_SCAN_MODE_COLOR) == 0);
+  s->format.fmt.pix.width = s->frame_width;
+  s->format.fmt.pix.height = s->frame_height;
   pixel_format = V4L2_PIX_FMT_RGB24;
   format = s->format;
   format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
