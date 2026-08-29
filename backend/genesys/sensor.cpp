@@ -51,6 +51,7 @@ std::ostream& operator<<(std::ostream& out, const FrontendType& type)
         case FrontendType::WOLFSON_GL841: out << "WOLFSON_GL841"; break;
         case FrontendType::WOLFSON_GL846: out << "WOLFSON_GL846"; break;
         case FrontendType::ANALOG_DEVICES_GL847: out << "ANALOG_DEVICES_GL847"; break;
+        case FrontendType::ANALOG_DEVICES_GL848: out << "ANALOG_DEVICES_GL848"; break;
         case FrontendType::WOLFSON_GL124: out << "WOLFSON_GL124"; break;
         default: out << "(unknown value)";
     }

@@ -38,6 +38,7 @@
 #define DEBUG_NOT_STATIC
 
 #include "genesys.h"
+#include "gl848.h"
 #include "gl124_registers.h"
 #include "gl841_registers.h"
 #include "gl842_registers.h"
@@ -89,6 +90,13 @@ static SANE_String_Const mode_list[] = {
   SANE_VALUE_SCAN_MODE_GRAY,
     // SANE_TITLE_HALFTONE, not used
     // SANE_VALUE_SCAN_MODE_LINEART, not used
+    nullptr
+};
+
+static SANE_String_Const mode_list_gl848[] = {
+  SANE_VALUE_SCAN_MODE_COLOR,
+  SANE_VALUE_SCAN_MODE_GRAY,
+  SANE_VALUE_SCAN_MODE_LINEART,
     nullptr
 };
 
@@ -277,6 +285,7 @@ void sanei_genesys_init_structs (Genesys_Device * dev)
     if (dev->model->asic_type == AsicType::GL845 ||
         dev->model->asic_type == AsicType::GL846 ||
         dev->model->asic_type == AsicType::GL847 ||
+        dev->model->asic_type == AsicType::GL848 ||
         dev->model->asic_type == AsicType::GL124)
     {
         bool memory_layout_found = false;
@@ -347,7 +356,8 @@ void sanei_genesys_create_default_gamma_table(Genesys_Device* dev,
     } else if (dev->model->asic_type == AsicType::GL124 ||
                dev->model->asic_type == AsicType::GL845 ||
                dev->model->asic_type == AsicType::GL846 ||
-               dev->model->asic_type == AsicType::GL847) {
+               dev->model->asic_type == AsicType::GL847 ||
+               dev->model->asic_type == AsicType::GL848) {
         size = 257;
         max = 65535;
     } else {
@@ -471,7 +481,9 @@ void scanner_clear_scan_and_feed_counts(Genesys_Device& dev)
                                           gl846::REG_0x0D_CLRLNCNT | gl846::REG_0x0D_CLRMCNT);
             break;
         }
-        case AsicType::GL847:{
+        case AsicType::GL847:
+        case AsicType::GL848: {
+            // GL848+ shares the CLRLNCNT / CLRMCNT bit layout with GL847.
             dev.interface->write_register(gl847::REG_0x0D,
                                           gl847::REG_0x0D_CLRLNCNT | gl847::REG_0x0D_CLRMCNT);
             break;
@@ -503,6 +515,7 @@ void scanner_send_slope_table(Genesys_Device* dev, const Genesys_Sensor& sensor,
         case AsicType::GL845:
         case AsicType::GL846:
         case AsicType::GL847:
+        case AsicType::GL848:
         case AsicType::GL124: {
             max_table_nr = 4;
             break;
@@ -577,6 +590,7 @@ void scanner_send_slope_table(Genesys_Device* dev, const Genesys_Sensor& sensor,
         case AsicType::GL845:
         case AsicType::GL846:
         case AsicType::GL847:
+        case AsicType::GL848:
         case AsicType::GL124: {
             // slope table addresses are fixed
             dev->interface->write_ahb(0x10000000 + 0x4000 * table_nr, table.size(),
@@ -632,6 +646,15 @@ bool scanner_is_motor_stopped(Genesys_Device& dev)
             return (!(reg & gl847::REG_0x40_DATAENB) && !(reg & gl847::REG_0x40_MOTMFLG) &&
                     !status.is_motor_enabled);
         }
+        case AsicType::GL848: {
+            // GL848+ does not expose the GL847-style busy/dataenb flags at
+            // register 0x40; the ASIC keeps its live motor / data flags
+            // in REG_STATUS (0x101) alone. That register's bit 0x01
+            // (MOTORENB) drops when the motor is truly stopped, and the
+            // HP vendor driver uses only that bit to decide when to proceed.
+            auto status = scanner_read_status(dev);
+            return !status.is_motor_enabled;
+        }
         case AsicType::GL124: {
             auto status = scanner_read_status(dev);
             auto reg = dev.interface->read_register(gl124::REG_0x100);
@@ -673,6 +696,7 @@ void scanner_stop_action(Genesys_Device& dev)
         case AsicType::GL845:
         case AsicType::GL846:
         case AsicType::GL847:
+        case AsicType::GL848:
         case AsicType::GL124:
             break;
         default:
@@ -713,6 +737,7 @@ void scanner_stop_action_no_move(Genesys_Device& dev, genesys::Genesys_Register_
         case AsicType::GL845:
         case AsicType::GL846:
         case AsicType::GL847:
+        case AsicType::GL848:
         case AsicType::GL124:
             break;
         default:
@@ -886,6 +911,7 @@ void scanner_move_back_home(Genesys_Device& dev, bool wait_until_home)
         case AsicType::GL845:
         case AsicType::GL846:
         case AsicType::GL847:
+        case AsicType::GL848:
         case AsicType::GL124:
             break;
         default:
@@ -995,7 +1021,8 @@ void scanner_move_back_home(Genesys_Device& dev, bool wait_until_home)
             if (status.is_at_home) {
                 dbg.log(DBG_info, "reached home position");
                 if (dev.model->asic_type == AsicType::GL846 ||
-                    dev.model->asic_type == AsicType::GL847)
+                    dev.model->asic_type == AsicType::GL847 ||
+                    dev.model->asic_type == AsicType::GL848)
                 {
                     scanner_stop_action(dev);
                 }
@@ -1764,6 +1791,7 @@ void scanner_coarse_gain_calibration(Genesys_Device& dev, const Genesys_Sensor& 
         dev.model->asic_type == AsicType::GL845 ||
         dev.model->asic_type == AsicType::GL846 ||
         dev.model->asic_type == AsicType::GL847 ||
+        dev.model->asic_type == AsicType::GL848 ||
         dev.model->asic_type == AsicType::GL124)
     {
         if (dev.settings.xres < sensor.full_resolution) {
@@ -1780,7 +1808,8 @@ void scanner_coarse_gain_calibration(Genesys_Device& dev, const Genesys_Sensor& 
     if (dev.model->asic_type == AsicType::GL841 ||
         dev.model->asic_type == AsicType::GL842 ||
         dev.model->asic_type == AsicType::GL843 ||
-        dev.model->asic_type == AsicType::GL847)
+        dev.model->asic_type == AsicType::GL847 ||
+        dev.model->asic_type == AsicType::GL848)
     {
         calib_sensor = &sanei_genesys_find_sensor(&dev, resolution, channels,
                                                   dev.settings.scan_method);
@@ -1967,7 +1996,8 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
         // do nothing
     } else if (dev.model->asic_type == AsicType::GL845 ||
                dev.model->asic_type == AsicType::GL846 ||
-               dev.model->asic_type == AsicType::GL847)
+               dev.model->asic_type == AsicType::GL847 ||
+               dev.model->asic_type == AsicType::GL848)
     {
         move = dev.model->y_offset_calib_white;
         move = static_cast<float>((move * (dev.motor.base_ydpi / 4)) / MM_PER_INCH);
@@ -1989,6 +2019,7 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
         dev.model->asic_type == AsicType::GL845 ||
         dev.model->asic_type == AsicType::GL846 ||
         dev.model->asic_type == AsicType::GL847 ||
+        dev.model->asic_type == AsicType::GL848 ||
         dev.model->asic_type == AsicType::GL124)
     {
         regs = dev.reg; // FIXME: apply this to all ASICs
@@ -2052,6 +2083,7 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
     if (dev.model->asic_type == AsicType::GL845 ||
         dev.model->asic_type == AsicType::GL846 ||
         dev.model->asic_type == AsicType::GL847 ||
+        dev.model->asic_type == AsicType::GL848 ||
         dev.model->asic_type == AsicType::GL124)
     {
         sanei_genesys_set_motor_power(regs, false);
@@ -2158,6 +2190,7 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
     if (dev.model->asic_type == AsicType::GL845 ||
         dev.model->asic_type == AsicType::GL846 ||
         dev.model->asic_type == AsicType::GL847 ||
+        dev.model->asic_type == AsicType::GL848 ||
         dev.model->asic_type == AsicType::GL124)
     {
         // set these values as final ones for scan
@@ -2173,7 +2206,8 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
 
     if (dev.model->asic_type == AsicType::GL845 ||
         dev.model->asic_type == AsicType::GL846 ||
-        dev.model->asic_type == AsicType::GL847)
+        dev.model->asic_type == AsicType::GL847 ||
+        dev.model->asic_type == AsicType::GL848)
     {
         if (move > 20) {
             dev.cmd_set->move_back_home(&dev, true);
@@ -3623,7 +3657,8 @@ static void genesys_flatbed_calibration(Genesys_Device* dev, Genesys_Sensor& sen
             case AsicType::GL841:
             case AsicType::GL845:
             case AsicType::GL846:
-            case AsicType::GL847: {
+            case AsicType::GL847:
+            case AsicType::GL848: {
                 auto calib_exposure = dev->cmd_set->led_calibration(dev, sensor, local_reg);
                 for (auto& sensor_update :
                         sanei_genesys_find_sensors_all_for_write(dev, sensor.method)) {
@@ -3944,7 +3979,11 @@ static void init_regs_for_scan(Genesys_Device& dev, const Genesys_Sensor& sensor
 
             We don't move fast the whole distance since it would involve computing
             acceleration/deceleration distance for scan resolution. So leave a remainder for it so
-            scan makes the final move tuning
+            scan makes the final move tuning.
+
+            GL848+ (HP Scanjet 200) is not in this list: Y offset is a host-side
+            skip and FEEDL is only the park-to-page gap. scanner_move() also
+            programs motor registers this ASIC does not have.
         */
 
         if (dev.settings.get_channels() * dev.settings.yres >= 600 && session.params.starty > 700) {
@@ -4071,18 +4110,21 @@ static void genesys_start_scan(Genesys_Device* dev, bool lamp_off)
         return;
     }
 
-  /*do we really need this? the valid data check should be sufficient -- pierre*/
-  /* waits for head to reach scanning position */
-  expected = dev->reg.get8(0x3d) * 65536
-           + dev->reg.get8(0x3e) * 256
-           + dev->reg.get8(0x3f);
-  do
-    {
-        // wait some time between each test to avoid overloading USB and CPU
-        dev->interface->sleep_ms(100);
-        sanei_genesys_read_feed_steps (dev, &steps);
+    // GL848+: begin_scan() already blocked on register 0x100 (data-ready),
+    // which is after the park-to-page FEEDL. Polling feed-steps here would
+    // sit on a USB register this ASIC does not update the same way and
+    // let the CIS DRAM wrap before the frontend starts reading.
+    if (dev->model->asic_type != AsicType::GL848) {
+        /* waits for head to reach scanning position */
+        expected = dev->reg.get8(0x3d) * 65536
+                 + dev->reg.get8(0x3e) * 256
+                 + dev->reg.get8(0x3f);
+        do {
+            // wait some time between each test to avoid overloading USB and CPU
+            dev->interface->sleep_ms(100);
+            sanei_genesys_read_feed_steps (dev, &steps);
+        } while (steps < expected);
     }
-  while (steps < expected);
 
     wait_until_buffer_non_empty(dev);
 
@@ -4245,23 +4287,45 @@ static Genesys_Settings calculate_scan_settings(Genesys_Scanner* s)
     settings.tl_y = fixed_to_float(s->pos_top_left_y);
     float br_x = fixed_to_float(s->pos_bottom_right_x);
     float br_y = fixed_to_float(s->pos_bottom_right_y);
+    settings.scan_width_mm = br_x - settings.tl_x;
+    settings.scan_height_mm = br_y - settings.tl_y;
 
-    settings.lines = static_cast<unsigned>(((br_y - settings.tl_y) * settings.yres) /
-                                            MM_PER_INCH);
+    if (dev->model->asic_type == AsicType::GL848) {
+        float x0 = settings.tl_x;
+        float y0 = settings.tl_y;
+        float x1 = br_x;
+        float y1 = br_y;
+        if (!dev->ignore_offsets) {
+            x0 += dev->model->x_offset;
+            y0 += dev->model->y_offset;
+            x1 += dev->model->x_offset;
+            y1 += dev->model->y_offset;
+        }
+        const auto geom = gl848::compute_pass_geometry(settings.xres, settings.yres,
+                                                       x0, y0, x1, y1);
+        settings.pixels = geom.output_width;
+        settings.lines = geom.output_height;
+        settings.requested_pixels = settings.pixels;
+        if (settings.scan_mode == ScanColorMode::LINEART && settings.depth < 8) {
+            settings.depth = 8;
+        }
+    } else {
+        settings.lines = static_cast<unsigned>(((br_y - settings.tl_y) * settings.yres) /
+                                                MM_PER_INCH);
 
+        unsigned pixels_per_line = static_cast<unsigned>(((br_x - settings.tl_x) * settings.xres) /
+                                                         MM_PER_INCH);
 
-    unsigned pixels_per_line = static_cast<unsigned>(((br_x - settings.tl_x) * settings.xres) /
-                                                     MM_PER_INCH);
+        const auto& sensor = sanei_genesys_find_sensor(dev, settings.xres, settings.get_channels(),
+                                                       settings.scan_method);
 
-    const auto& sensor = sanei_genesys_find_sensor(dev, settings.xres, settings.get_channels(),
-                                                   settings.scan_method);
+        pixels_per_line = session_adjust_output_pixels(pixels_per_line, *dev, sensor,
+                                                       settings.xres, settings.yres, true);
 
-    pixels_per_line = session_adjust_output_pixels(pixels_per_line, *dev, sensor,
-                                                   settings.xres, settings.yres, true);
-
-    unsigned xres_factor = s->resolution / settings.xres;
-    settings.pixels = pixels_per_line;
-    settings.requested_pixels = pixels_per_line * xres_factor;
+        unsigned xres_factor = s->resolution / settings.xres;
+        settings.pixels = pixels_per_line;
+        settings.requested_pixels = pixels_per_line * xres_factor;
+    }
 
     if (s->color_filter == "Red") {
         settings.color_filter = ColorFilter::RED;
@@ -4300,10 +4364,10 @@ static SANE_Parameters calculate_scan_parameters(const Genesys_Device& dev,
     auto pipeline = build_image_pipeline(dev, session, 0, false);
 
     SANE_Parameters params;
-    if (settings.scan_mode == ScanColorMode::GRAY) {
-        params.format = SANE_FRAME_GRAY;
-    } else {
+    if (settings.scan_mode == ScanColorMode::COLOR_SINGLE_PASS) {
         params.format = SANE_FRAME_RGB;
+    } else {
+        params.format = SANE_FRAME_GRAY;
     }
     // only single-pass scanning supported
     params.last_frame = true;
@@ -4547,9 +4611,16 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_MODE].desc = SANE_DESC_SCAN_MODE;
   s->opt[OPT_MODE].type = SANE_TYPE_STRING;
   s->opt[OPT_MODE].constraint_type = SANE_CONSTRAINT_STRING_LIST;
-  s->opt[OPT_MODE].size = max_string_size (mode_list);
-  s->opt[OPT_MODE].constraint.string_list = mode_list;
-  s->mode = SANE_VALUE_SCAN_MODE_GRAY;
+  if (model->asic_type == AsicType::GL848) {
+      s->opt[OPT_MODE].size = max_string_size(mode_list_gl848);
+      s->opt[OPT_MODE].constraint.string_list = mode_list_gl848;
+      // Color CIS; Gray/Lineart are host conversions of the same pass.
+      s->mode = SANE_VALUE_SCAN_MODE_COLOR;
+  } else {
+      s->opt[OPT_MODE].size = max_string_size(mode_list);
+      s->opt[OPT_MODE].constraint.string_list = mode_list;
+      s->mode = SANE_VALUE_SCAN_MODE_GRAY;
+  }
 
   /* scan source */
     s->opt_source_values.clear();
@@ -4755,7 +4826,8 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_COLOR_FILTER].type = SANE_TYPE_STRING;
   s->opt[OPT_COLOR_FILTER].constraint_type = SANE_CONSTRAINT_STRING_LIST;
   /* true gray not yet supported for GL847 and GL124 scanners */
-    if (!model->is_cis || model->asic_type==AsicType::GL847 || model->asic_type==AsicType::GL124) {
+    if (!model->is_cis || model->asic_type==AsicType::GL847 || model->asic_type==AsicType::GL848
+        || model->asic_type==AsicType::GL124) {
       s->opt[OPT_COLOR_FILTER].size = max_string_size (color_filter_list);
       s->opt[OPT_COLOR_FILTER].constraint.string_list = color_filter_list;
       s->color_filter = s->opt[OPT_COLOR_FILTER].constraint.string_list[1];
@@ -5959,7 +6031,11 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
         case OPT_MODE: {
             s->mode = reinterpret_cast<const char*>(val);
 
-            if (s->mode == SANE_VALUE_SCAN_MODE_GRAY) {
+            if (s->mode == SANE_VALUE_SCAN_MODE_LINEART) {
+                DISABLE(OPT_COLOR_FILTER);
+                create_bpp_list(s, dev->model->bpp_gray_values);
+                s->bit_depth = 8;
+            } else if (s->mode == SANE_VALUE_SCAN_MODE_GRAY) {
                 if (dev->model->asic_type != AsicType::GL646 || !dev->model->is_cis) {
                     ENABLE(OPT_COLOR_FILTER);
                 }
@@ -6113,6 +6189,9 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
 
             // remove file
             unlink(dev->calib_file.c_str());
+            if (dev->cmd_set) {
+                dev->cmd_set->clear_host_side_calibration(dev);
+            }
             // signals that sensors will have to be read again
             *myinfo |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
             break;
