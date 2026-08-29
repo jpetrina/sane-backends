@@ -244,6 +244,19 @@ void genesys_init_motor_tables()
     s_motors->push_back(std::move(motor));
 
 
+    // HP Scanjet 200 (GL848+).
+    // Slope tables are uploaded through AHB in asic_boot (five identical
+    // 59-word ramps from the vendor-driver capture). This genesys motor
+    // profile only supplies base_ydpi=2400 for geometry; the pass itself
+    // does not use MotorSlope acceleration.
+    motor = Genesys_Motor();
+    motor.id = MotorId::HP_SCANJET_200;
+    motor.base_ydpi = 2400;
+    motor.profiles.push_back({MotorSlope::create_from_steps(16249, 2179, 59),
+                              StepType::EIGHTH, 0});
+    s_motors->push_back(std::move(motor));
+
+
     motor = Genesys_Motor();
     motor.id = MotorId::CANON_LIDE_700;
     motor.base_ydpi = 1200;

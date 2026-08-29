@@ -24,6 +24,7 @@
 #include "image.h"
 #include "low.h"
 #include <cmath>
+#include <cstdio>
 #include <numeric>
 
 namespace genesys {
@@ -239,6 +240,25 @@ bool ImagePipelineNodeSwap16BitEndian::get_next_row_data(std::uint8_t* out_data)
     return got_data;
 }
 
+ImagePipelineNodeMirrorRows::ImagePipelineNodeMirrorRows(ImagePipelineNode& source) :
+    source_(source)
+{
+}
+
+bool ImagePipelineNodeMirrorRows::get_next_row_data(std::uint8_t* out_data)
+{
+    bool got_data = source_.get_next_row_data(out_data);
+    auto format = get_format();
+    auto width = get_width();
+    for (std::size_t x = 0; x < width / 2; ++x) {
+        auto left = get_raw_pixel_from_row(out_data, x, format);
+        auto right = get_raw_pixel_from_row(out_data, width - 1 - x, format);
+        set_raw_pixel_to_row(out_data, x, right, format);
+        set_raw_pixel_to_row(out_data, width - 1 - x, left, format);
+    }
+    return got_data;
+}
+
 ImagePipelineNodeInvert::ImagePipelineNodeInvert(ImagePipelineNode& source) :
     source_(source)
 {
@@ -397,37 +417,65 @@ PixelFormat ImagePipelineNodeSplitMonoLines::get_output_format(PixelFormat input
 }
 
 
-ImagePipelineNodeMergeColorToGray::ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source) :
-    source_(source)
+namespace {
+
+void assign_gray_channel_order(ColorOrder order, float red, float green, float blue,
+                               float& ch0, float& ch1, float& ch2)
 {
-
-    output_format_ = get_output_format(source_.get_format());
-    float red_mult = 0.2125f;
-    float green_mult = 0.7154f;
-    float blue_mult = 0.0721f;
-
-    switch (get_pixel_format_color_order(source_.get_format())) {
-        case ColorOrder::RGB: {
-            ch0_mult_ = red_mult;
-            ch1_mult_ = green_mult;
-            ch2_mult_ = blue_mult;
+    switch (order) {
+        case ColorOrder::RGB:
+            ch0 = red; ch1 = green; ch2 = blue;
             break;
-        }
-        case ColorOrder::BGR: {
-            ch0_mult_ = blue_mult;
-            ch1_mult_ = green_mult;
-            ch2_mult_ = red_mult;
+        case ColorOrder::BGR:
+            ch0 = blue; ch1 = green; ch2 = red;
             break;
-        }
-        case ColorOrder::GBR: {
-            ch0_mult_ = green_mult;
-            ch1_mult_ = blue_mult;
-            ch2_mult_ = red_mult;
+        case ColorOrder::GBR:
+            ch0 = green; ch1 = blue; ch2 = red;
             break;
-        }
         default:
             throw SaneException("Unknown color order");
     }
+}
+
+void assign_gray_channel_order(ColorOrder order, unsigned red, unsigned green, unsigned blue,
+                               unsigned& ch0, unsigned& ch1, unsigned& ch2)
+{
+    switch (order) {
+        case ColorOrder::RGB:
+            ch0 = red; ch1 = green; ch2 = blue;
+            break;
+        case ColorOrder::BGR:
+            ch0 = blue; ch1 = green; ch2 = red;
+            break;
+        case ColorOrder::GBR:
+            ch0 = green; ch1 = blue; ch2 = red;
+            break;
+        default:
+            throw SaneException("Unknown color order");
+    }
+}
+
+} // namespace
+
+ImagePipelineNodeMergeColorToGray::ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source) :
+    source_(source)
+{
+    output_format_ = get_output_format(source_.get_format());
+    assign_gray_channel_order(get_pixel_format_color_order(source_.get_format()),
+                              0.2125f, 0.7154f, 0.0721f,
+                              ch0_mult_, ch1_mult_, ch2_mult_);
+    temp_buffer_.resize(source_.get_row_bytes());
+}
+
+ImagePipelineNodeMergeColorToGray::ImagePipelineNodeMergeColorToGray(
+        ImagePipelineNode& source, unsigned wr, unsigned wg, unsigned wb, unsigned wdiv) :
+    source_(source),
+    wdiv_{wdiv == 0 ? 1u : wdiv},
+    integer_weights_{true}
+{
+    output_format_ = get_output_format(source_.get_format());
+    assign_gray_channel_order(get_pixel_format_color_order(source_.get_format()),
+                              wr, wg, wb, w0_, w1_, w2_);
     temp_buffer_.resize(source_.get_row_bytes());
 }
 
@@ -443,8 +491,17 @@ bool ImagePipelineNodeMergeColorToGray::get_next_row_data(std::uint8_t* out_data
         std::uint16_t ch0 = get_raw_channel_from_row(src_data, x, 0, src_format);
         std::uint16_t ch1 = get_raw_channel_from_row(src_data, x, 1, src_format);
         std::uint16_t ch2 = get_raw_channel_from_row(src_data, x, 2, src_format);
-        float mono = ch0 * ch0_mult_ + ch1 * ch1_mult_ + ch2 * ch2_mult_;
-        set_raw_channel_to_row(out_data, x, 0, static_cast<std::uint16_t>(mono), output_format_);
+        std::uint16_t mono = 0;
+        if (integer_weights_) {
+            mono = static_cast<std::uint16_t>(
+                (static_cast<std::uint32_t>(ch0) * w0_ +
+                 static_cast<std::uint32_t>(ch1) * w1_ +
+                 static_cast<std::uint32_t>(ch2) * w2_) / wdiv_);
+        } else {
+            float value = ch0 * ch0_mult_ + ch1 * ch1_mult_ + ch2 * ch2_mult_;
+            mono = static_cast<std::uint16_t>(value);
+        }
+        set_raw_channel_to_row(out_data, x, 0, mono, output_format_);
     }
     return got_data;
 }
@@ -708,6 +765,393 @@ bool ImagePipelineNodeScaleRows::get_next_row_data(std::uint8_t* out_data)
     return got_data;
 }
 
+ImagePipelineNodeDecimateLines::ImagePipelineNodeDecimateLines(ImagePipelineNode& source,
+                                                               unsigned factor) :
+    source_(source),
+    factor_{factor}
+{
+    if (factor_ == 0) {
+        throw SaneException("Decimate factor must be greater than zero");
+    }
+    height_ = source_.get_height() / factor_;
+    temp_.resize(source_.get_row_bytes());
+    accum_.resize(get_width() * get_pixel_channels(get_format()));
+}
+
+bool ImagePipelineNodeDecimateLines::get_next_row_data(std::uint8_t* out_data)
+{
+    auto format = get_format();
+    auto channels = get_pixel_channels(format);
+    auto width = get_width();
+
+    std::fill(accum_.begin(), accum_.end(), 0);
+
+    bool got_data = true;
+    for (unsigned n = 0; n < factor_; ++n) {
+        got_data &= source_.get_next_row_data(temp_.data());
+        for (std::size_t x = 0; x < width; ++x) {
+            for (unsigned c = 0; c < channels; ++c) {
+                accum_[x * channels + c] += get_raw_channel_from_row(temp_.data(), x, c, format);
+            }
+        }
+    }
+
+    for (std::size_t x = 0; x < width; ++x) {
+        for (unsigned c = 0; c < channels; ++c) {
+            set_raw_channel_to_row(out_data, x, c,
+                                   static_cast<std::uint16_t>(accum_[x * channels + c] / factor_),
+                                   format);
+        }
+    }
+    return got_data;
+}
+
+ImagePipelineNodeDecimateColumns::ImagePipelineNodeDecimateColumns(ImagePipelineNode& source,
+                                                                   unsigned factor) :
+    source_(source),
+    factor_{factor}
+{
+    if (factor_ == 0) {
+        throw SaneException("Decimate factor must be greater than zero");
+    }
+    width_ = source_.get_width() / factor_;
+    if (width_ == 0) {
+        width_ = 1;
+    }
+    temp_.resize(source_.get_row_bytes());
+}
+
+bool ImagePipelineNodeDecimateColumns::get_next_row_data(std::uint8_t* out_data)
+{
+    auto format = get_format();
+    auto channels = get_pixel_channels(format);
+    bool got_data = source_.get_next_row_data(temp_.data());
+    const std::size_t src_width = source_.get_width();
+
+    for (std::size_t ox = 0; ox < width_; ++ox) {
+        const std::size_t from = ox * factor_;
+        for (unsigned c = 0; c < channels; ++c) {
+            std::uint32_t sum = 0;
+            unsigned count = 0;
+            for (unsigned k = 0; k < factor_; ++k) {
+                const std::size_t x = from + k;
+                if (x >= src_width) {
+                    break;
+                }
+                sum += get_raw_channel_from_row(temp_.data(), x, c, format);
+                count++;
+            }
+            if (count == 0) {
+                count = 1;
+            }
+            set_raw_channel_to_row(out_data, ox, c,
+                                   static_cast<std::uint16_t>(sum / count),
+                                   format);
+        }
+    }
+    return got_data;
+}
+
+ImagePipelineNodeThreshold8::ImagePipelineNodeThreshold8(ImagePipelineNode& source,
+                                                         std::uint8_t cutoff) :
+    source_(source),
+    cutoff_{cutoff}
+{
+    auto format = source_.get_format();
+    if (get_pixel_format_depth(format) != 8 || get_pixel_channels(format) != 1) {
+        throw SaneException("Threshold8 requires 8-bit gray input");
+    }
+}
+
+bool ImagePipelineNodeThreshold8::get_next_row_data(std::uint8_t* out_data)
+{
+    bool got_data = source_.get_next_row_data(out_data);
+    auto format = get_format();
+    for (std::size_t x = 0, width = get_width(); x < width; ++x) {
+        auto value = get_raw_channel_from_row(out_data, x, 0, format);
+        set_raw_channel_to_row(out_data, x, 0, value >= cutoff_ ? 255 : 0, format);
+    }
+    return got_data;
+}
+
+namespace {
+
+// 600 dpi A4 RGB16 is ~209 MB; 1200 dpi ~837 MB. 2400 dpi spills to a
+// temp file instead of a 3 GB RAM buffer.
+const std::size_t AUTOLEVELS_MAX_BYTES = 1024u * 1024u * 1024u;
+// Same 10% floor / full-scale white as a linear CIS decode without shading.
+const std::uint16_t AUTOLEVELS_FALLBACK_BLACK = 6554;
+const std::uint16_t AUTOLEVELS_FALLBACK_WHITE = 65535;
+
+double encode_srgb(double linear)
+{
+    if (linear <= 0.0) {
+        return 0.0;
+    }
+    if (linear >= 1.0) {
+        return 1.0;
+    }
+    if (linear <= 0.0031308) {
+        return 12.92 * linear;
+    }
+    return 1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
+}
+
+} // namespace
+
+void ImagePipelineNodeAutoLevels::build_srgb_lut(std::uint16_t black, std::uint16_t white,
+                                                 std::vector<std::uint16_t>& lut)
+{
+    lut.assign(65536, 0);
+    const double lo = black;
+    const double span = std::max(1.0, static_cast<double>(white) - lo);
+    for (unsigned v = static_cast<unsigned>(black) + 1; v < 65536; ++v) {
+        double linear = (static_cast<double>(v) - lo) / span;
+        if (linear > 1.0) {
+            linear = 1.0;
+        }
+        lut[v] = static_cast<std::uint16_t>(encode_srgb(linear) * 65535.0 + 0.5);
+    }
+}
+
+ImagePipelineNodeAutoLevels::ImagePipelineNodeAutoLevels(ImagePipelineNode& source) :
+    source_(source)
+{
+    const auto depth = get_pixel_format_depth(source_.get_format());
+    const std::size_t bytes = source_.get_height() * source_.get_row_bytes();
+    streaming_ = depth != 16 || bytes > AUTOLEVELS_MAX_BYTES;
+    if (streaming_) {
+        build_srgb_lut(AUTOLEVELS_FALLBACK_BLACK, AUTOLEVELS_FALLBACK_WHITE, lut_);
+        ready_ = true;
+        DBG(DBG_info, "AutoLevels: streaming fallback black=%u white=%u (%zu bytes)\n",
+            AUTOLEVELS_FALLBACK_BLACK, AUTOLEVELS_FALLBACK_WHITE, bytes);
+    }
+}
+
+ImagePipelineNodeAutoLevels::ImagePipelineNodeAutoLevels(ImagePipelineNode& source,
+                                                         std::uint16_t black,
+                                                         std::uint16_t white) :
+    ImagePipelineNodeAutoLevels(source, black, white, false)
+{
+}
+
+ImagePipelineNodeAutoLevels::ImagePipelineNodeAutoLevels(ImagePipelineNode& source,
+                                                         std::uint16_t black,
+                                                         std::uint16_t white,
+                                                         bool adapt_black) :
+    source_(source),
+    adapt_black_{adapt_black},
+    floor_black_{black},
+    white_{white == 0 ? std::uint16_t{1} : white}
+{
+    const auto depth = get_pixel_format_depth(source_.get_format());
+    const std::size_t bytes = source_.get_height() * source_.get_row_bytes();
+    if (adapt_black_ && depth == 16) {
+        streaming_ = false;
+        ready_ = false;
+        DBG(DBG_info, "AutoLevels: calibrated adapt black floor=%u white=%u (%zu bytes)%s\n",
+            floor_black_, white_, bytes,
+            bytes > AUTOLEVELS_MAX_BYTES ? " (spill)" : "");
+        return;
+    }
+    streaming_ = true;
+    ready_ = true;
+    build_srgb_lut(floor_black_, white_, lut_);
+    DBG(DBG_info, "AutoLevels: fixed black=%u white=%u (%zu bytes)\n",
+        floor_black_, white_, bytes);
+}
+
+bool ImagePipelineNodeAutoLevels::eof() const
+{
+    if (streaming_) {
+        return source_.eof();
+    }
+    return next_row_ >= get_height();
+}
+
+void ImagePipelineNodeAutoLevels::apply_lut_to_row(std::uint8_t* row)
+{
+    auto format = get_format();
+    auto channels = get_pixel_channels(format);
+    auto width = get_width();
+    for (std::size_t x = 0; x < width; ++x) {
+        for (unsigned c = 0; c < channels; ++c) {
+            auto value = get_raw_channel_from_row(row, x, c, format);
+            set_raw_channel_to_row(row, x, c, lut_[value], format);
+        }
+    }
+}
+
+void ImagePipelineNodeAutoLevels::ensure_lut()
+{
+    if (ready_) {
+        return;
+    }
+
+    auto format = get_format();
+    auto channels = get_pixel_channels(format);
+    auto width = get_width();
+    const std::size_t height = get_height();
+    const std::size_t row_bytes = get_row_bytes();
+    const std::size_t bytes = height * row_bytes;
+    const bool spill = adapt_black_ && bytes > AUTOLEVELS_MAX_BYTES;
+
+    std::vector<std::uint8_t> scratch;
+    if (spill) {
+        std::FILE* fp = std::tmpfile();
+        if (fp == nullptr) {
+            DBG(DBG_warn, "AutoLevels: tmpfile failed, using floor black=%u\n",
+                floor_black_);
+            build_srgb_lut(floor_black_, white_, lut_);
+            streaming_ = true;
+            ready_ = true;
+            return;
+        }
+        spill_file_.reset(fp);
+        scratch.resize(row_bytes);
+        DBG(DBG_info, "AutoLevels: spilling %zu bytes to temp file\n", bytes);
+    } else {
+        buffer_.resize(bytes);
+    }
+
+    std::vector<std::uint32_t> hist(65536, 0);
+    std::uint64_t total = 0;
+    for (std::size_t y = 0; y < height; ++y) {
+        std::uint8_t* row = spill ? scratch.data() : buffer_.data() + y * row_bytes;
+        source_.get_next_row_data(row);
+        if (spill && std::fwrite(row, 1, row_bytes, spill_file_.get()) != row_bytes) {
+            DBG(DBG_error, "AutoLevels: temp write failed at row %zu\n", y);
+        }
+        for (std::size_t x = 0; x < width; ++x) {
+            for (unsigned c = 0; c < channels; ++c) {
+                hist[get_raw_channel_from_row(row, x, c, format)]++;
+                total++;
+            }
+        }
+    }
+
+    std::uint16_t black = 0;
+    std::uint16_t white = 65535;
+    if (adapt_black_) {
+        white = white_;
+        black = floor_black_;
+        if (total > 0) {
+            const std::uint64_t idx_lo = total / 200;
+            std::uint64_t acc = 0;
+            for (unsigned v = 0; v < 65536; ++v) {
+                acc += hist[v];
+                if (acc > idx_lo) {
+                    black = static_cast<std::uint16_t>(v);
+                    break;
+                }
+            }
+        }
+        if (black > floor_black_) {
+            black = floor_black_;
+        }
+        DBG(DBG_info, "AutoLevels: calibrated black=%u (floor=%u) white=%u samples=%llu\n",
+            black, floor_black_, white, static_cast<unsigned long long>(total));
+    } else if (total > 0) {
+        const std::uint64_t idx_lo = total * 2 / 100;
+        const std::uint64_t idx_hi = total * 98 / 100;
+        std::uint64_t acc = 0;
+        bool have_black = false;
+        for (unsigned v = 0; v < 65536; ++v) {
+            acc += hist[v];
+            if (!have_black && acc > idx_lo) {
+                black = static_cast<std::uint16_t>(v);
+                have_black = true;
+            }
+            if (acc > idx_hi) {
+                white = static_cast<std::uint16_t>(v);
+                break;
+            }
+        }
+        DBG(DBG_info, "AutoLevels: percentile black=%u white=%u samples=%llu\n",
+            black, white, static_cast<unsigned long long>(total));
+    }
+    if (white <= black) {
+        white = static_cast<std::uint16_t>(std::min(65535, static_cast<int>(black) + 1));
+    }
+
+    build_srgb_lut(black, white, lut_);
+
+    if (spill) {
+        std::rewind(spill_file_.get());
+    } else {
+        for (std::size_t y = 0; y < height; ++y) {
+            apply_lut_to_row(buffer_.data() + y * row_bytes);
+        }
+    }
+    ready_ = true;
+}
+
+bool ImagePipelineNodeAutoLevels::get_next_row_data(std::uint8_t* out_data)
+{
+    if (streaming_) {
+        bool got_data = source_.get_next_row_data(out_data);
+        if (get_pixel_format_depth(get_format()) == 16) {
+            apply_lut_to_row(out_data);
+        }
+        return got_data;
+    }
+
+    ensure_lut();
+    if (next_row_ >= get_height()) {
+        std::fill(out_data, out_data + get_row_bytes(), 0);
+        return false;
+    }
+    if (spill_file_) {
+        const std::size_t row_bytes = get_row_bytes();
+        if (std::fread(out_data, 1, row_bytes, spill_file_.get()) != row_bytes) {
+            std::fill(out_data, out_data + row_bytes, 0);
+            return false;
+        }
+        apply_lut_to_row(out_data);
+    } else {
+        std::memcpy(out_data, buffer_.data() + next_row_ * get_row_bytes(), get_row_bytes());
+    }
+    next_row_++;
+    return true;
+}
+
+ImagePipelineNodeFlatField::ImagePipelineNodeFlatField(ImagePipelineNode& source,
+                                                       std::vector<std::uint16_t> ref_r,
+                                                       std::vector<std::uint16_t> ref_g,
+                                                       std::vector<std::uint16_t> ref_b,
+                                                       std::uint16_t target) :
+    source_(source),
+    target_{target == 0 ? std::uint16_t{1} : target}
+{
+    ref_[0] = std::move(ref_r);
+    ref_[1] = std::move(ref_g);
+    ref_[2] = std::move(ref_b);
+}
+
+bool ImagePipelineNodeFlatField::get_next_row_data(std::uint8_t* out_data)
+{
+    bool got_data = source_.get_next_row_data(out_data);
+    auto format = get_format();
+    auto channels = get_pixel_channels(format);
+    auto width = get_width();
+    const unsigned use_ch = std::min(channels, 3u);
+    for (std::size_t x = 0; x < width; ++x) {
+        for (unsigned c = 0; c < use_ch; ++c) {
+            if (x >= ref_[c].size()) {
+                continue;
+            }
+            const std::uint16_t ref = ref_[c][x];
+            if (ref <= 256) {
+                continue;
+            }
+            std::uint32_t value = get_raw_channel_from_row(out_data, x, c, format);
+            value = std::min<std::uint32_t>(65535, value * target_ / ref);
+            set_raw_channel_to_row(out_data, x, c, static_cast<std::uint16_t>(value), format);
+        }
+    }
+    return got_data;
+}
+
 bool ImagePipelineNodeExtract::get_next_row_data(std::uint8_t* out_data)
 {
     bool got_data = true;
@@ -740,14 +1184,14 @@ bool ImagePipelineNodeExtract::get_next_row_data(std::uint8_t* out_data)
             set_raw_pixel_to_row(out_data, i + x_src_width, RawPixel{}, format);
         }
     } else {
-        std::size_t bpp = get_pixel_format_depth(format) / 8;
+        std::size_t pixel_bytes = get_pixel_row_bytes(format, 1);
         if (x_src_width > 0) {
-            std::memcpy(out_data, cached_line_.data() + offset_x_ * bpp,
-                        x_src_width * bpp);
+            std::memcpy(out_data, cached_line_.data() + offset_x_ * pixel_bytes,
+                        x_src_width * pixel_bytes);
         }
         if (x_pad_after > 0) {
-            std::fill(out_data + x_src_width * bpp,
-                      out_data + (x_src_width + x_pad_after) * bpp, 0);
+            std::fill(out_data + x_src_width * pixel_bytes,
+                      out_data + (x_src_width + x_pad_after) * pixel_bytes, 0);
         }
     }
 

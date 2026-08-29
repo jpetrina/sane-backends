@@ -29,6 +29,7 @@ void test_image_pipeline();
 void test_motor();
 void test_row_buffer();
 void test_utilities();
+void test_gl848();
 
 } // namespace genesys
 

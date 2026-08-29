@@ -770,6 +770,8 @@ libgenesys_la_SOURCES = genesys/genesys.cpp genesys/genesys.h \
     genesys/gl843.cpp genesys/gl843.h genesys/gl843_registers.h \
     genesys/gl846.cpp genesys/gl846.h genesys/gl846_registers.h \
     genesys/gl847.cpp genesys/gl847.h genesys/gl847_registers.h \
+    genesys/gl848.cpp genesys/gl848.h genesys/gl848_registers.h \
+    genesys/gl848_scan_tables.h \
     genesys/row_buffer.h \
     genesys/image_buffer.h genesys/image_buffer.cpp \
     genesys/image_pipeline.h genesys/image_pipeline.cpp \
