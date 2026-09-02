@@ -797,6 +797,12 @@ start_capture (V4L_Scanner *s)
 
   /* Some libv4l2/device combinations expose streaming but do not provide
      the read emulation.  Keep a direct mmap fallback for those devices. */
+  if (s->format_converted)
+    {
+      DBG (3, "capture read path unavailable; negotiated format requires "
+           "libv4l2 conversion, mmap fallback is not safe\n");
+      return SANE_STATUS_UNSUPPORTED;
+    }
   memset (&req, 0, sizeof (req));
   req.count = 1;
   req.type = type;
@@ -1180,8 +1186,13 @@ sane_start (SANE_Handle handle)
   format.fmt.pix.field = V4L2_FIELD_ANY;
   if (xioctl (s->fd, VIDIOC_S_FMT, &format) == -1)
     return SANE_STATUS_INVAL;
-  if (format.fmt.pix.pixelformat != pixel_format)
-    return SANE_STATUS_UNSUPPORTED;
+  s->format_converted = format.fmt.pix.pixelformat != pixel_format;
+  if (s->format_converted)
+    DBG (3, "negotiated native format differs from requested RGB24; "
+         "using libv4l2 conversion\n");
+  /* Keep the format requested from libv4l2 as the logical SANE frame format.
+     A direct mmap fallback is disabled above when conversion is required. */
+  format.fmt.pix.pixelformat = pixel_format;
   s->format = format;
   debug_format (3, "negotiated format", &s->format.fmt.pix);
   if (update_parameters (s) != SANE_STATUS_GOOD)
