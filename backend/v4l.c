@@ -214,6 +214,7 @@ probe_capture (int fd)
   size_t size;
   ssize_t result;
   SANE_Bool streaming = SANE_FALSE;
+  SANE_Bool mmap_capture = SANE_FALSE;
   SANE_Bool success = SANE_FALSE;
   __u32 capabilities;
 
@@ -227,6 +228,30 @@ probe_capture (int fd)
   if (xioctl (fd, VIDIOC_G_FMT, &format) == -1)
     return SANE_FALSE;
   debug_format (4, "probe format", &format.fmt.pix);
+
+  if (capabilities & V4L2_CAP_READWRITE)
+    {
+      DBG (4, "probe: trying read capture\n");
+      size = format.fmt.pix.sizeimage;
+      if (!size)
+        size = (size_t) format.fmt.pix.width * format.fmt.pix.height * 4;
+      mapping = malloc (size);
+      if (mapping == NULL)
+        return SANE_FALSE;
+      if (wait_for_frame (fd, V4L_PROBE_TIMEOUT_MS) == SANE_STATUS_GOOD)
+        {
+          result = v4l2_read (fd, mapping, size);
+          success = result > 0;
+          DBG (4, "probe: read returned %zd bytes\n", result);
+        }
+      else
+        DBG (3, "probe: read frame timed out: %s\n",
+             strerror (errno));
+      if (success)
+        goto cleanup;
+      free (mapping);
+      mapping = MAP_FAILED;
+    }
 
   if (capabilities & V4L2_CAP_STREAMING)
     {
@@ -247,6 +272,7 @@ probe_capture (int fd)
                            MAP_SHARED, fd, buffer.m.offset);
       if (mapping == MAP_FAILED)
         return SANE_FALSE;
+      mmap_capture = SANE_TRUE;
       if (xioctl (fd, VIDIOC_QBUF, &buffer) == -1
           || xioctl (fd, VIDIOC_STREAMON, &type) == -1)
         goto cleanup;
@@ -257,26 +283,6 @@ probe_capture (int fd)
       else
         DBG (3, "probe: first mmap frame timed out or dequeue failed: %s\n",
              strerror (errno));
-      goto cleanup;
-    }
-
-  if (capabilities & V4L2_CAP_READWRITE)
-    {
-      DBG (4, "probe: trying read capture\n");
-      size = format.fmt.pix.sizeimage;
-      if (!size)
-        size = (size_t) format.fmt.pix.width * format.fmt.pix.height * 4;
-      mapping = malloc (size);
-      if (mapping == NULL)
-        return SANE_FALSE;
-      if (wait_for_frame (fd, V4L_PROBE_TIMEOUT_MS) == SANE_STATUS_GOOD)
-        {
-          result = v4l2_read (fd, mapping, size);
-          success = result > 0;
-          DBG (4, "probe: read returned %zd bytes\n", result);
-        }
-      else
-        DBG (3, "probe: read frame timed out: %s\n", strerror (errno));
     }
 
 cleanup:
@@ -284,7 +290,7 @@ cleanup:
     xioctl (fd, VIDIOC_STREAMOFF, &type);
   if (mapping != MAP_FAILED)
     {
-      if (capabilities & V4L2_CAP_STREAMING)
+      if (mmap_capture)
         v4l2_munmap (mapping, buffer.length);
       else
         free (mapping);
