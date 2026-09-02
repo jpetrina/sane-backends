@@ -114,6 +114,31 @@ wait_for_frame (int fd, int timeout_ms)
 }
 
 static SANE_Status
+dequeue_frame (int fd, struct v4l2_buffer *buf, int timeout_ms)
+{
+  int elapsed = 0;
+
+  while (elapsed < timeout_ms)
+    {
+      if (wait_for_frame (fd, 250) == SANE_STATUS_GOOD)
+        {
+          if (xioctl (fd, VIDIOC_DQBUF, buf) == 0)
+            return SANE_STATUS_GOOD;
+
+          if (errno != EAGAIN)
+            return SANE_STATUS_IO_ERROR;
+
+          DBG (4, "mmap capture: VIDIOC_DQBUF returned EAGAIN, retrying\n");
+        }
+
+      elapsed += 250;
+    }
+
+  DBG (3, "mmap capture: timed out waiting for a dequeued frame\n");
+  return SANE_STATUS_IO_ERROR;
+}
+
+static SANE_Status
 query_capability (int fd, struct v4l2_capability *cap)
 {
   __u32 capabilities;
@@ -777,8 +802,8 @@ start_capture (V4L_Scanner *s)
       return SANE_STATUS_IO_ERROR;
     }
   s->streaming = SANE_TRUE;
-  if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) != SANE_STATUS_GOOD
-      || xioctl (s->fd, VIDIOC_DQBUF, &buf) == -1)
+  if (dequeue_frame (s->fd, &buf, V4L_CAPTURE_TIMEOUT_MS)
+      != SANE_STATUS_GOOD)
     {
       cleanup_capture (s);
       return SANE_STATUS_IO_ERROR;
