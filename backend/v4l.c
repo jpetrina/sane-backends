@@ -23,6 +23,7 @@
 #include <sys/mman.h>
 #include <poll.h>
 #include <stdint.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <linux/videodev2.h>
@@ -117,11 +118,26 @@ wait_for_frame (int fd, int timeout_ms)
 static SANE_Status
 dequeue_frame (int fd, struct v4l2_buffer *buf, int timeout_ms)
 {
-  int elapsed = 0;
+  struct timespec start;
+  struct timespec now;
 
-  while (elapsed < timeout_ms)
+  if (clock_gettime (CLOCK_MONOTONIC, &start) == -1)
+    return SANE_STATUS_IO_ERROR;
+
+  while (1)
     {
-      if (wait_for_frame (fd, 250) == SANE_STATUS_GOOD)
+      int elapsed;
+      int wait_ms;
+
+      if (clock_gettime (CLOCK_MONOTONIC, &now) == -1)
+        return SANE_STATUS_IO_ERROR;
+      elapsed = (int) ((now.tv_sec - start.tv_sec) * 1000
+                       + (now.tv_nsec - start.tv_nsec) / 1000000);
+      if (elapsed >= timeout_ms)
+        break;
+      wait_ms = MIN (250, timeout_ms - elapsed);
+
+      if (wait_for_frame (fd, wait_ms) == SANE_STATUS_GOOD)
         {
           if (xioctl (fd, VIDIOC_DQBUF, buf) == 0)
             return SANE_STATUS_GOOD;
@@ -131,8 +147,6 @@ dequeue_frame (int fd, struct v4l2_buffer *buf, int timeout_ms)
 
           DBG (4, "mmap capture: VIDIOC_DQBUF returned EAGAIN, retrying\n");
         }
-
-      elapsed += 250;
     }
 
   DBG (3, "mmap capture: timed out waiting for a dequeued frame\n");
