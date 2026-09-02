@@ -138,6 +138,33 @@ dequeue_frame (int fd, struct v4l2_buffer *buf, int timeout_ms)
   return SANE_STATUS_IO_ERROR;
 }
 
+static ssize_t
+read_frame (int fd, void *buffer, size_t size, int timeout_ms)
+{
+  int elapsed = 0;
+
+  while (elapsed < timeout_ms)
+    {
+      if (wait_for_frame (fd, 250) == SANE_STATUS_GOOD)
+        {
+          ssize_t result = v4l2_read (fd, buffer, size);
+          if (result > 0)
+            return result;
+
+          if (result == -1 && errno != EAGAIN)
+            return -1;
+
+          DBG (4, "capture read path: v4l2_read returned EAGAIN, retrying\n");
+        }
+
+      elapsed += 250;
+    }
+
+  DBG (3, "capture read path: timed out waiting for a readable frame\n");
+  errno = ETIMEDOUT;
+  return -1;
+}
+
 static SANE_Status
 query_capability (int fd, struct v4l2_capability *cap)
 {
@@ -745,10 +772,7 @@ start_capture (V4L_Scanner *s)
      the capture active before calling it so cleanup_capture() releases that
      queue when the next scan starts or the handle is cancelled. */
   s->streaming = SANE_TRUE;
-  if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) == SANE_STATUS_GOOD)
-    result = v4l2_read (s->fd, s->buffer, size);
-  else
-    result = -1;
+  result = read_frame (s->fd, s->buffer, size, V4L_CAPTURE_TIMEOUT_MS);
   DBG (4, "capture read path: result=%zd, buffer_size=%zu\n", result, size);
   if (result > 0)
     {
