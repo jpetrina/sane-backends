@@ -1163,6 +1163,7 @@ sane_start (SANE_Handle handle)
   struct v4l2_capability capability;
   __u32 pixel_format;
   int fd;
+  SANE_Status status;
   if (!s)
     return SANE_STATUS_INVAL;
   cleanup_capture (s);
@@ -1176,8 +1177,9 @@ sane_start (SANE_Handle handle)
     return SANE_STATUS_IO_ERROR;
   s->fd = fd;
   memset (&capability, 0, sizeof (capability));
-  if (query_capability (s->fd, &capability) != SANE_STATUS_GOOD)
-    return SANE_STATUS_IO_ERROR;
+  status = query_capability (s->fd, &capability);
+  if (status != SANE_STATUS_GOOD)
+    goto fail;
   s->capability = capability;
   set_default_format (s);
   s->gray_mode = !(s->val[OPT_MODE].s
@@ -1191,7 +1193,10 @@ sane_start (SANE_Handle handle)
   format.fmt.pix.pixelformat = pixel_format;
   format.fmt.pix.field = V4L2_FIELD_ANY;
   if (xioctl (s->fd, VIDIOC_S_FMT, &format) == -1)
-    return SANE_STATUS_INVAL;
+    {
+      status = SANE_STATUS_INVAL;
+      goto fail;
+    }
   s->format_converted = format.fmt.pix.pixelformat != pixel_format;
   if (s->format_converted)
     DBG (3, "negotiated native format differs from requested RGB24; "
@@ -1201,9 +1206,21 @@ sane_start (SANE_Handle handle)
   format.fmt.pix.pixelformat = pixel_format;
   s->format = format;
   debug_format (3, "negotiated format", &s->format.fmt.pix);
-  if (update_parameters (s) != SANE_STATUS_GOOD)
-    return SANE_STATUS_INVAL;
-  return start_capture (s);
+  status = update_parameters (s);
+  if (status != SANE_STATUS_GOOD)
+    goto fail;
+  status = start_capture (s);
+  if (status == SANE_STATUS_GOOD)
+    return status;
+
+fail:
+  cleanup_capture (s);
+  if (s->fd >= 0)
+    {
+      v4l2_close (s->fd);
+      s->fd = -1;
+    }
+  return status;
 }
 
 SANE_Status
