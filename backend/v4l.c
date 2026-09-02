@@ -102,12 +102,13 @@ wait_for_frame (int fd, int timeout_ms)
   int result;
 
   poll_fd.fd = fd;
-  poll_fd.events = POLLIN | POLLPRI;
+  poll_fd.events = POLLIN;
   poll_fd.revents = 0;
   do
     result = poll (&poll_fd, 1, timeout_ms);
   while (result == -1 && errno == EINTR);
   if (result <= 0
+      || !(poll_fd.revents & POLLIN)
       || (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
     return SANE_STATUS_IO_ERROR;
   return SANE_STATUS_GOOD;
