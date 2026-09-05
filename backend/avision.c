@@ -4004,6 +4004,11 @@ string_for_button (Avision_Scanner* s, uint8_t button)
   return "scan";
 }
 
+/* Flag and count packed into the first byte of the interrupt packet, see
+   read_button_state() below. */
+#define AV_INT_PRESS_FLAG  0x80
+#define AV_INT_PRESS_COUNT 0x7F
+
 /* Poll the interrupt endpoint for a button event and latch what was pressed.
    Presses arrive as one-shot events, so they are remembered in
    s->button_state until a frontend reads the matching sensor option. Returns
@@ -4012,8 +4017,20 @@ static SANE_Status
 read_button_state (Avision_Scanner* s)
 {
   Avision_Device* dev = s->hw;
+
+  /* The interrupt packet, as the ScanJet Pro 3000 s2 reports it:
+
+       byte 0     AV_INT_PRESS_FLAG is set when a press is being reported,
+                  the low bits (AV_INT_PRESS_COUNT) hold the number of
+                  valid entries in buttons[]
+       byte 1-5   the buttons pressed, 1 based, as in get_button_status()
+       byte 6     the digit shown on the front panel display
+       byte 7-15  always zero on this device
+
+     In practice only one button at a time is reported, but the count is
+     honoured rather than assumed. */
   struct {
-    uint8_t press_state;
+    uint8_t press_count; /* AV_INT_PRESS_FLAG | number of buttons */
     uint8_t buttons[5];
     uint8_t display;
     uint8_t reserved[9];
@@ -4035,12 +4052,18 @@ read_button_state (Avision_Scanner* s)
     return SANE_STATUS_GOOD; /* nothing pending, the common case */
 
   DBG (5, "read_button_state: got %lu bytes, state %02x, first %02x\n",
-       (u_long)size, result.press_state, result.buttons[0]);
+       (u_long)size, result.press_count, result.buttons[0]);
 
-  if (!(result.press_state >> 7))
+  if (!(result.press_count & AV_INT_PRESS_FLAG))
     return SANE_STATUS_GOOD; /* no press flagged */
 
-  pressed = result.press_state & 0x7F;
+  /* The count comes straight from the device, so clamp it to both the size
+     of the array and to what this packet actually delivered - otherwise a
+     bogus or truncated report walks into the zero filled tail of result and
+     latches presses that never happened. */
+  pressed = result.press_count & AV_INT_PRESS_COUNT;
+  if (pressed > size - 1)
+    pressed = (unsigned int) size - 1;
   if (pressed > sizeof (result.buttons))
     pressed = sizeof (result.buttons);
 
@@ -8224,7 +8247,14 @@ reader_process (void *data)
                   free (tmp);
                 }
               else
-                DBG (1, "reader_process: no memory to de-interleave columns\n");
+                {
+                  /* Without the regrouping the page would be written out
+                     visibly combed, so fail the scan rather than hand the
+                     frontend a corrupt image. This leaves the read loop. */
+                  DBG (1, "reader_process: no memory to de-interleave columns\n");
+                  exit_status = SANE_STATUS_NO_MEM;
+                  break;
+                }
             }
         }
 
