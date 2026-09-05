@@ -910,7 +910,7 @@ static Avision_HWEntry Avision_Device_List [] =
     { "HP", "3000s2",
       0x03f0, 0x3e05,
       "Hewlett-Packard", "ScanJet Pro 3000 s2",
-      AV_INT_BUTTON | AV_CANCEL_BUTTON |
+      AV_INT_BUTTON | AV_CANCEL_BUTTON | AV_NO_BUTTON_SYNTH |
       AV_USE_2ND_BULK_EP | AV_NO_DETECT_ACCESSORIES | AV_READ_STRIPE_32 |
       AV_ADF_MIRRORS_IMAGE | AV_COLUMN_INTERLEAVED_3,
       { 0, {0, 0}, {{0, 0}, {0, 0}} }
@@ -4004,83 +4004,10 @@ string_for_button (Avision_Scanner* s, uint8_t button)
   return "scan";
 }
 
-/* Flag and count packed into the first byte of the interrupt packet, see
-   read_button_state() below. */
+/* Flag and count packed into the first byte of the button status packet,
+   see get_button_status() below. */
 #define AV_INT_PRESS_FLAG  0x80
 #define AV_INT_PRESS_COUNT 0x7F
-
-/* Poll the interrupt endpoint for a button event and latch what was pressed.
-   Presses arrive as one-shot events, so they are remembered in
-   s->button_state until a frontend reads the matching sensor option. Returns
-   quietly when nothing is pending - this is called on every sensor read. */
-static SANE_Status
-read_button_state (Avision_Scanner* s)
-{
-  Avision_Device* dev = s->hw;
-
-  /* The interrupt packet, as the ScanJet Pro 3000 s2 reports it:
-
-       byte 0     AV_INT_PRESS_FLAG is set when a press is being reported,
-                  the low bits (AV_INT_PRESS_COUNT) hold the number of
-                  valid entries in buttons[]
-       byte 1-5   the buttons pressed, 1 based, as in get_button_status()
-       byte 6     the digit shown on the front panel display
-       byte 7-15  always zero on this device
-
-     In practice only one button at a time is reported, but the count is
-     honoured rather than assumed. */
-  struct {
-    uint8_t press_count; /* AV_INT_PRESS_FLAG | number of buttons */
-    uint8_t buttons[5];
-    uint8_t display;
-    uint8_t reserved[9];
-  } result;
-  size_t size = 8;
-  SANE_Status status;
-  unsigned int i, pressed;
-
-  if (!(dev->hw->feature_type & AV_INT_BUTTON))
-    return SANE_STATUS_UNSUPPORTED;
-
-  memset (&result, 0, sizeof (result));
-
-  /* Either an event is already queued and this returns at once, or there is
-     nothing to report - do not stall the frontend waiting for a press. */
-  sanei_usb_set_timeout (100);
-  status = sanei_usb_read_int (s->av_con.usb_dn, (uint8_t*)&result, &size);
-  if (status != SANE_STATUS_GOOD || size < 2)
-    return SANE_STATUS_GOOD; /* nothing pending, the common case */
-
-  DBG (5, "read_button_state: got %lu bytes, state %02x, first %02x\n",
-       (u_long)size, result.press_count, result.buttons[0]);
-
-  if (!(result.press_count & AV_INT_PRESS_FLAG))
-    return SANE_STATUS_GOOD; /* no press flagged */
-
-  /* The count comes straight from the device, so clamp it to both the size
-     of the array and to what this packet actually delivered - otherwise a
-     bogus or truncated report walks into the zero filled tail of result and
-     latches presses that never happened. */
-  pressed = result.press_count & AV_INT_PRESS_COUNT;
-  if (pressed > size - 1)
-    pressed = (unsigned int) size - 1;
-  if (pressed > sizeof (result.buttons))
-    pressed = sizeof (result.buttons);
-
-  for (i = 0; i < pressed; ++i) {
-    /* the reported values are 1 based, as in get_button_status() */
-    const uint8_t button = result.buttons[i] - 1;
-    DBG (3, "read_button_state: button %d pressed\n", button);
-    /* index 1 is the cancel/stop key, the others are scan/start keys -
-       the same convention string_for_button() uses */
-    if (button == 1)
-      s->button_state[1] = SANE_TRUE;
-    else
-      s->button_state[0] = SANE_TRUE;
-  }
-
-  return SANE_STATUS_GOOD;
-}
 
 static SANE_Status
 get_button_status (Avision_Scanner* s)
@@ -4092,8 +4019,21 @@ get_button_status (Avision_Scanner* s)
   size_t size;
   SANE_Status status;
   /* was only 6 in an old SPEC - maybe we need a feature override :-( -ReneR */
+
+  /* The button status packet, as returned both by the SCSI read below and
+     by the interrupt endpoint on AV_INT_BUTTON devices:
+
+       byte 0     AV_INT_PRESS_FLAG is set when a press is being reported,
+                  the low bits (AV_INT_PRESS_COUNT) hold the number of
+                  valid entries in buttons[]
+       byte 1-5   the buttons pressed, 1 based
+       byte 6     the 7 segment LED display on the AV220 et.al.
+       byte 7-15  reserved
+
+     In practice one button at a time is reported, but the count is
+     honoured rather than assumed. */
   struct {
-     uint8_t press_state;
+     uint8_t press_count; /* AV_INT_PRESS_FLAG | number of buttons */
      uint8_t buttons[5];
      uint8_t display; /* AV220 et.al. 7 segment LED display */
      uint8_t reserved[9];
@@ -4103,6 +4043,9 @@ get_button_status (Avision_Scanner* s)
 
   DBG (3, "get_button_status:\n");
 
+  /* Zero up front: a short interrupt read below fills only the leading
+     bytes, and everything past them has to read as "not pressed". */
+  memset (&result, 0, sizeof (result));
   size = sizeof (result);
 
   /* AV220 et.al. */
@@ -4125,6 +4068,10 @@ get_button_status (Avision_Scanner* s)
     }
   else
     {
+      /* Devices flagged AV_NO_BUTTON_SYNTH report the packet as documented,
+         so the fixups below must not invent a press for them. */
+      const SANE_Bool synth_press = !(dev->hw->feature_type & AV_NO_BUTTON_SYNTH);
+
       /* only try to read the first 8 bytes ...*/
       size = 8;
 
@@ -4143,25 +4090,22 @@ get_button_status (Avision_Scanner* s)
 	return SANE_STATUS_GOOD;
       }
 
-      if (size < sizeof (result))
-	memset ((char*)result.buttons + size, 0, sizeof (result) - size);
-
       /* hack to fill in meaningful values for the AV 210 / 610 and
 	 under some conditions the AV 220 */
-      if (size == 1) { /* AV 210, AV 610 */
+      if (synth_press && size == 1) { /* AV 210, AV 610 */
 	DBG (1, "get_button_status: just one byte, filling the rest\n");
 
-	if (result.press_state > 0) {
+	if (result.press_count > 0) {
 	  debug_print_raw (6, "get_button_status: raw data\n",
 			   (uint8_t*)&result, size);
-	  result.buttons[0] = result.press_state;
-	  result.press_state = 0x80 | 1;
+	  result.buttons[0] = result.press_count;
+	  result.press_count = AV_INT_PRESS_FLAG | 1;
 	  size = 2;
 	}
 	else /* nothing pressed */
 	  return SANE_STATUS_GOOD;
       }
-      else if (size >= 8 && result.press_state == 0) { /* AV 220 */
+      else if (synth_press && size >= 8 && result.press_count == 0) { /* AV 220 */
 
 	debug_print_raw (6, "get_button_status: raw data\n",
 		   (uint8_t*)&result, size);
@@ -4169,7 +4113,7 @@ get_button_status (Avision_Scanner* s)
 	DBG (1, "get_button_status: zero buttons  - filling values ...\n");
 
 	/* simulate button press of the last button ... */
-	result.press_state = 0x80 | 1;
+	result.press_count = AV_INT_PRESS_FLAG | 1;
 	result.buttons[0] = (uint8_t) dev->inquiry_buttons; /* 1 based */
       }
     }
@@ -4177,7 +4121,7 @@ get_button_status (Avision_Scanner* s)
   debug_print_raw (6, "get_button_status: raw data\n",
 		   (uint8_t*)&result, size);
 
-  DBG (3, "get_button_status: [0]  Button status: %x\n", result.press_state);
+  DBG (3, "get_button_status: [0]  Button status: %x\n", result.press_count);
   for (i = 0; i < 5; ++i)
     DBG (3, "get_button_status: [%d]  Button number %d: %x\n", i+1, i,
 	 result.buttons[i]);
@@ -4197,10 +4141,19 @@ get_button_status (Avision_Scanner* s)
     if (result.display > 0)
       add_token ("%d", result.display);
 
-    if (result.press_state >> 7) /* AV220 et.al. bit 6 is long/short press? */
+    if (result.press_count & AV_INT_PRESS_FLAG) /* AV220 et.al. bit 6 is long/short press? */
       {
+	unsigned int buttons_pressed = result.press_count & AV_INT_PRESS_COUNT;
 
-	const unsigned int buttons_pressed = result.press_state & 0x7F;
+	/* The count comes straight from the device, so clamp it to both the
+	   size of the array and to what the packet actually delivered -
+	   otherwise a bogus or truncated report reads past buttons[] and
+	   reports presses that never happened. */
+	if (size > 0 && buttons_pressed > size - 1)
+	  buttons_pressed = (unsigned int) size - 1;
+	if (buttons_pressed > sizeof (result.buttons))
+	  buttons_pressed = sizeof (result.buttons);
+
 	DBG (3, "get_button_status: %d button(s) pressed\n", buttons_pressed);
 
 	/* reset the hardware button status */
@@ -9299,20 +9252,24 @@ sane_control_option (SANE_Handle handle, SANE_Int option,
 
 	  /* Boolean options. */
         case OPT_OPTION_ADF:
+        case OPT_OPTION_LIGHTBOX:
+          *(SANE_Bool*) val = s->val[option].b;
+          return SANE_STATUS_GOOD;
+
 	case OPT_SCAN_SW:
 	case OPT_CANCEL_SW:
 	  {
-	    /* a press is reported exactly once, then cleared */
+	    /* Poll for a press and report it exactly once. get_button_status()
+	       latches into button_state[] however the press is observed, so
+	       these sensors and the message option cannot swallow each other's
+	       events. Both are inactive unless the device has AV_INT_BUTTON,
+	       so this always takes the interrupt path. */
 	    int b = (option == OPT_CANCEL_SW) ? 1 : 0;
-	    read_button_state (s);
+	    get_button_status (s);
 	    *(SANE_Word*) val = s->button_state[b];
 	    s->button_state[b] = SANE_FALSE;
 	  }
 	  return SANE_STATUS_GOOD;
-
-        case OPT_OPTION_LIGHTBOX:
-          *(SANE_Bool*) val = s->val[option].b;
-          return SANE_STATUS_GOOD;
 
 	} /* end switch option */
     } /* end if GET_ACTION_GET_VALUE */

@@ -319,6 +319,13 @@ typedef struct Avision_HWEntry {
      affected. (HP ScanJet Pro 3000 s2.) */
   #define AV_COLUMN_INTERLEAVED_3 ((uint64_t)1<<48)
 
+  /* Device reports button presses exactly as documented: a packet without
+     the press flag means nothing was pressed. The AV 210 / 610 and AV 220
+     fixups in get_button_status(), which turn such a packet into a press of
+     the last button, must not be applied to it - they would invent presses
+     out of ordinary idle reports. (HP ScanJet Pro 3000 s2.) */
+  #define AV_NO_BUTTON_SYNTH ((uint64_t)1<<49)
+
     /* maybe more ...*/
   uint64_t feature_type;
 
