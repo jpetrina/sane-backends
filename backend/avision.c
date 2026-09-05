@@ -8170,7 +8170,6 @@ reader_process (void *data)
               const unsigned int lines = useful_bytes / bpl;
               unsigned int off [3];
               unsigned int k, n, acc = 0;
-              uint8_t* tmp = malloc (bpl);
 
               /* segment k holds every segs'th pixel starting at k */
               for (k = 0; k < segs; ++k) {
@@ -8179,6 +8178,7 @@ reader_process (void *data)
                 acc += n;
               }
 
+              uint8_t* tmp = malloc (bpl);
               if (tmp)
                 {
                   unsigned int l, i, m, b;
