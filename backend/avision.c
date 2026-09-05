@@ -4183,6 +4183,14 @@ get_button_status (Avision_Scanner* s)
 
 	for (i = 0; i < buttons_pressed; ++i) {
 	  const uint8_t button = result.buttons[i] - 1; /* 1 based ... */
+
+	  /* A NULL label is the cancel key - the convention this function
+	     already uses below. Which index that is varies by model: on the
+	     AV 610 index 1 is "copy" and on the Xerox and Visioneer units it
+	     is "simplex", so it must not be assumed. Models with no cancel
+	     key never report the cancel sensor. */
+	  const char* label = string_for_button (s, button);
+
 	  DBG (3, "get_button_status: button %d pressed\n", button);
 
 	  /* Latch for the sensor options too. Button events are one-shot: a
@@ -4190,7 +4198,7 @@ get_button_status (Avision_Scanner* s)
 	     before the scan/cancel sensors could report it. scanbd polls the
 	     message option unconditionally, so without this it swallows every
 	     button press. */
-	  if (button == 1)
+	  if (!label)
 	    s->button_state[1] = SANE_TRUE;
 	  else
 	    s->button_state[0] = SANE_TRUE;
@@ -4199,7 +4207,6 @@ get_button_status (Avision_Scanner* s)
 		 button);
 	  }
 	  else {
-	    const char* label = string_for_button (s, button);
 	    if (label)
 	      add_token ("%s", label);
 	    else
