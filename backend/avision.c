@@ -907,6 +907,17 @@ static Avision_HWEntry Avision_Device_List [] =
     /* status="good" */
 
 #endif
+    { "HP", "3000s2",
+      0x03f0, 0x3e05,
+      "Hewlett-Packard", "ScanJet Pro 3000 s2",
+      AV_INT_BUTTON | AV_CANCEL_BUTTON | AV_NO_BUTTON_SYNTH |
+      AV_USE_2ND_BULK_EP | AV_NO_DETECT_ACCESSORIES | AV_READ_STRIPE_32 |
+      AV_ADF_MIRRORS_IMAGE | AV_COLUMN_INTERLEAVED_3,
+      { 0, {0, 0}, {{0, 0}, {0, 0}} }
+    },
+    /* comment="1 pass, 600 dpi, sheetfed duplex ADF - USB 2.0" */
+    /* status="good" */
+
     { "Minolta", "#2882",
       0, 0,
       "Minolta", "Dimage Scan Dual I",
@@ -2485,6 +2496,25 @@ static SANE_Status avision_open_extended (const char* device_name,
   }
 }
 
+/* Some devices expose more than one bulk endpoint pair and only answer on the
+   second one. sanei_usb keeps the first pair it enumerates and ignores the
+   rest, so point it at the right endpoints before any command is sent. This
+   has to run after every open, not just at attach time. */
+static void avision_set_endpoints (Avision_Connection* av_con,
+				   const Avision_HWEntry* hw)
+{
+  if (av_con->connection_type != AV_USB)
+    return;
+  if (!hw || !(hw->feature_type & AV_USE_2ND_BULK_EP))
+    return;
+
+  DBG (3, "avision_set_endpoints: using 2nd bulk endpoint pair (0x02/0x82)\n");
+  sanei_usb_set_endpoint (av_con->usb_dn,
+			  USB_DIR_OUT | USB_ENDPOINT_TYPE_BULK, 0x02);
+  sanei_usb_set_endpoint (av_con->usb_dn,
+			  USB_DIR_IN  | USB_ENDPOINT_TYPE_BULK, 0x82);
+}
+
 static void avision_close (Avision_Connection* av_con)
 {
   if (av_con->connection_type == AV_SCSI) {
@@ -3945,7 +3975,8 @@ string_for_button (Avision_Scanner* s, uint8_t button)
   if (strcmp (dev->sane.model, "AV210C2") == 0 ||
       strcmp (dev->sane.model, "AV210D2+") == 0 ||
       strcmp (dev->sane.model, "AV220C2") == 0 ||
-      strcmp (dev->sane.model, "AV610C2") == 0
+      strcmp (dev->sane.model, "AV610C2") == 0 ||
+      strcmp (dev->sane.model, "ScanJet Pro 3000 s2") == 0
       )
     {
       if (button == 1)
@@ -3973,6 +4004,11 @@ string_for_button (Avision_Scanner* s, uint8_t button)
   return "scan";
 }
 
+/* Flag and count packed into the first byte of the button status packet,
+   see get_button_status() below. */
+#define AV_INT_PRESS_FLAG  0x80
+#define AV_INT_PRESS_COUNT 0x7F
+
 static SANE_Status
 get_button_status (Avision_Scanner* s)
 {
@@ -3983,8 +4019,21 @@ get_button_status (Avision_Scanner* s)
   size_t size;
   SANE_Status status;
   /* was only 6 in an old SPEC - maybe we need a feature override :-( -ReneR */
+
+  /* The button status packet, as returned both by the SCSI read below and
+     by the interrupt endpoint on AV_INT_BUTTON devices:
+
+       byte 0     AV_INT_PRESS_FLAG is set when a press is being reported,
+                  the low bits (AV_INT_PRESS_COUNT) hold the number of
+                  valid entries in buttons[]
+       byte 1-5   the buttons pressed, 1 based
+       byte 6     the 7 segment LED display on the AV220 et.al.
+       byte 7-15  reserved
+
+     In practice one button at a time is reported, but the count is
+     honoured rather than assumed. */
   struct {
-     uint8_t press_state;
+     uint8_t press_count; /* AV_INT_PRESS_FLAG | number of buttons */
      uint8_t buttons[5];
      uint8_t display; /* AV220 et.al. 7 segment LED display */
      uint8_t reserved[9];
@@ -3994,6 +4043,9 @@ get_button_status (Avision_Scanner* s)
 
   DBG (3, "get_button_status:\n");
 
+  /* Zero up front: a short interrupt read below fills only the leading
+     bytes, and everything past them has to read as "not pressed". */
+  memset (&result, 0, sizeof (result));
   size = sizeof (result);
 
   /* AV220 et.al. */
@@ -4016,6 +4068,10 @@ get_button_status (Avision_Scanner* s)
     }
   else
     {
+      /* Devices flagged AV_NO_BUTTON_SYNTH report the packet as documented,
+         so the fixups below must not invent a press for them. */
+      const SANE_Bool synth_press = !(dev->hw->feature_type & AV_NO_BUTTON_SYNTH);
+
       /* only try to read the first 8 bytes ...*/
       size = 8;
 
@@ -4034,25 +4090,22 @@ get_button_status (Avision_Scanner* s)
 	return SANE_STATUS_GOOD;
       }
 
-      if (size < sizeof (result))
-	memset ((char*)result.buttons + size, 0, sizeof (result) - size);
-
       /* hack to fill in meaningful values for the AV 210 / 610 and
 	 under some conditions the AV 220 */
-      if (size == 1) { /* AV 210, AV 610 */
+      if (synth_press && size == 1) { /* AV 210, AV 610 */
 	DBG (1, "get_button_status: just one byte, filling the rest\n");
 
-	if (result.press_state > 0) {
+	if (result.press_count > 0) {
 	  debug_print_raw (6, "get_button_status: raw data\n",
 			   (uint8_t*)&result, size);
-	  result.buttons[0] = result.press_state;
-	  result.press_state = 0x80 | 1;
+	  result.buttons[0] = result.press_count;
+	  result.press_count = AV_INT_PRESS_FLAG | 1;
 	  size = 2;
 	}
 	else /* nothing pressed */
 	  return SANE_STATUS_GOOD;
       }
-      else if (size >= 8 && result.press_state == 0) { /* AV 220 */
+      else if (synth_press && size >= 8 && result.press_count == 0) { /* AV 220 */
 
 	debug_print_raw (6, "get_button_status: raw data\n",
 		   (uint8_t*)&result, size);
@@ -4060,7 +4113,7 @@ get_button_status (Avision_Scanner* s)
 	DBG (1, "get_button_status: zero buttons  - filling values ...\n");
 
 	/* simulate button press of the last button ... */
-	result.press_state = 0x80 | 1;
+	result.press_count = AV_INT_PRESS_FLAG | 1;
 	result.buttons[0] = (uint8_t) dev->inquiry_buttons; /* 1 based */
       }
     }
@@ -4068,7 +4121,7 @@ get_button_status (Avision_Scanner* s)
   debug_print_raw (6, "get_button_status: raw data\n",
 		   (uint8_t*)&result, size);
 
-  DBG (3, "get_button_status: [0]  Button status: %x\n", result.press_state);
+  DBG (3, "get_button_status: [0]  Button status: %x\n", result.press_count);
   for (i = 0; i < 5; ++i)
     DBG (3, "get_button_status: [%d]  Button number %d: %x\n", i+1, i,
 	 result.buttons[i]);
@@ -4088,10 +4141,19 @@ get_button_status (Avision_Scanner* s)
     if (result.display > 0)
       add_token ("%d", result.display);
 
-    if (result.press_state >> 7) /* AV220 et.al. bit 6 is long/short press? */
+    if (result.press_count & AV_INT_PRESS_FLAG) /* AV220 et.al. bit 6 is long/short press? */
       {
+	unsigned int buttons_pressed = result.press_count & AV_INT_PRESS_COUNT;
 
-	const unsigned int buttons_pressed = result.press_state & 0x7F;
+	/* The count comes straight from the device, so clamp it to both the
+	   size of the array and to what the packet actually delivered -
+	   otherwise a bogus or truncated report reads past buttons[] and
+	   reports presses that never happened. */
+	if (size > 0 && buttons_pressed > size - 1)
+	  buttons_pressed = (unsigned int) size - 1;
+	if (buttons_pressed > sizeof (result.buttons))
+	  buttons_pressed = sizeof (result.buttons);
+
 	DBG (3, "get_button_status: %d button(s) pressed\n", buttons_pressed);
 
 	/* reset the hardware button status */
@@ -4121,13 +4183,30 @@ get_button_status (Avision_Scanner* s)
 
 	for (i = 0; i < buttons_pressed; ++i) {
 	  const uint8_t button = result.buttons[i] - 1; /* 1 based ... */
+
+	  /* A NULL label is the cancel key - the convention this function
+	     already uses below. Which index that is varies by model: on the
+	     AV 610 index 1 is "copy" and on the Xerox and Visioneer units it
+	     is "simplex", so it must not be assumed. Models with no cancel
+	     key never report the cancel sensor. */
+	  const char* label = string_for_button (s, button);
+
 	  DBG (3, "get_button_status: button %d pressed\n", button);
+
+	  /* Latch for the sensor options too. Button events are one-shot: a
+	     frontend polling this option would otherwise consume the press
+	     before the scan/cancel sensors could report it. scanbd polls the
+	     message option unconditionally, so without this it swallows every
+	     button press. */
+	  if (!label)
+	    s->button_state[1] = SANE_TRUE;
+	  else
+	    s->button_state[0] = SANE_TRUE;
 	  if (button >= dev->inquiry_buttons) {
 	    DBG (1, "get_button_status: button %d not allocated as not indicated in inquiry\n",
 		 button);
 	  }
 	  else {
-	    const char* label = string_for_button (s, button);
 	    if (label)
 	      add_token ("%s", label);
 	    else
@@ -4357,6 +4436,8 @@ attach (SANE_String_Const devname, Avision_ConnectionType con_type,
     DBG (1, "attach: open failed (%s)\n", sane_strstatus (status));
     return SANE_STATUS_INVAL;
   }
+
+  avision_set_endpoints (&av_con, attaching_hw);
 
   /* first: get the standard inquiry? */
   status = inquiry (av_con, result, AVISION_INQUIRY_SIZE_V1);
@@ -4752,7 +4833,6 @@ get_double ( &(result[48] ) ));
   dev->inquiry_batch_scan = BIT (result[95], 0); /* AV122, DM152 */
 
   dev->inquiry_detect_accessories = BIT (result[93], 7);
-
   if (Avision_Device_List [model_num].feature_type & AV_NO_DETECT_ACCESSORIES) {
     DBG (1, "attach: overriding inquiry_detect_accessories (device flag)\n");
     dev->inquiry_detect_accessories = 0;
@@ -4780,6 +4860,8 @@ get_double ( &(result[48] ) ));
   dev->inquiry_needs_line_pack = BIT (result[94], 6);
 
   dev->inquiry_adf_need_mirror = BIT (result[51], 0);
+  if (Avision_Device_List [model_num].feature_type & AV_ADF_MIRRORS_IMAGE)
+    dev->inquiry_adf_need_mirror = 1;
   dev->inquiry_adf_bgr_order = BIT (result[93], 6);
   if (Avision_Device_List [model_num].feature_type & AV_ADF_BGR_ORDER_INVERT)
     dev->inquiry_adf_bgr_order = ! dev->inquiry_adf_bgr_order;
@@ -5000,6 +5082,10 @@ get_double ( &(result[48] ) ));
     dev->read_stripe_size = 32;
   else  /* tested on AV3200 with it's max of 300dpi @color */
     dev->read_stripe_size = 8; /* maybe made dynamic on scan res ... */
+
+  /* some ASICs in the 16-line range actually transfer 32 lines per stripe */
+  if (Avision_Device_List [model_num].feature_type & AV_READ_STRIPE_32)
+    dev->read_stripe_size = 32;
 
   /* normally the data_dq is 0x0a0d - but some newer scanner hang with it ... */
   if (dev->inquiry_new_protocol) /* TODO: match on ASIC? which model hung? */
@@ -7527,6 +7613,45 @@ init_options (Avision_Scanner* s)
   s->val[OPT_OPTION_LIGHTBOX].w = dev->inquiry_light_box_present;
   s->opt[OPT_OPTION_LIGHTBOX].cap =  SANE_CAP_SOFT_DETECT | SANE_CAP_ADVANCED;
 
+  /* "Sensors" group: read-only front panel buttons, polled by scanbd et al. */
+  s->opt[OPT_SENSORS_GROUP].name = SANE_NAME_SENSORS;
+  s->opt[OPT_SENSORS_GROUP].title = SANE_TITLE_SENSORS;
+  s->opt[OPT_SENSORS_GROUP].desc = SANE_DESC_SENSORS;
+  s->opt[OPT_SENSORS_GROUP].type = SANE_TYPE_GROUP;
+  s->opt[OPT_SENSORS_GROUP].constraint_type = SANE_CONSTRAINT_NONE;
+
+  s->opt[OPT_SCAN_SW].name = SANE_NAME_SCAN;
+  s->opt[OPT_SCAN_SW].title = SANE_TITLE_SCAN;
+  s->opt[OPT_SCAN_SW].desc = SANE_DESC_SCAN;
+  s->opt[OPT_SCAN_SW].type = SANE_TYPE_BOOL;
+  s->opt[OPT_SCAN_SW].unit = SANE_UNIT_NONE;
+  s->opt[OPT_SCAN_SW].size = sizeof(SANE_Word);
+  s->opt[OPT_SCAN_SW].constraint_type = SANE_CONSTRAINT_NONE;
+  s->opt[OPT_SCAN_SW].cap =
+    SANE_CAP_SOFT_DETECT | SANE_CAP_HARD_SELECT | SANE_CAP_ADVANCED;
+  s->val[OPT_SCAN_SW].w = SANE_FALSE;
+
+  s->opt[OPT_CANCEL_SW].name = "cancel";
+  s->opt[OPT_CANCEL_SW].title = SANE_I18N("Cancel button");
+  s->opt[OPT_CANCEL_SW].desc = SANE_I18N("Cancel or stop button.");
+  s->opt[OPT_CANCEL_SW].type = SANE_TYPE_BOOL;
+  s->opt[OPT_CANCEL_SW].unit = SANE_UNIT_NONE;
+  s->opt[OPT_CANCEL_SW].size = sizeof(SANE_Word);
+  s->opt[OPT_CANCEL_SW].constraint_type = SANE_CONSTRAINT_NONE;
+  s->opt[OPT_CANCEL_SW].cap =
+    SANE_CAP_SOFT_DETECT | SANE_CAP_HARD_SELECT | SANE_CAP_ADVANCED;
+  s->val[OPT_CANCEL_SW].w = SANE_FALSE;
+
+  /* only meaningful where the device reports buttons and pushes events */
+  if (!dev->inquiry_buttons || !(dev->hw->feature_type & AV_INT_BUTTON)) {
+    s->opt[OPT_SCAN_SW].cap |= SANE_CAP_INACTIVE;
+    s->opt[OPT_CANCEL_SW].cap |= SANE_CAP_INACTIVE;
+  }
+  else if (dev->inquiry_buttons < 2) {
+    /* single-button devices have no separate cancel key */
+    s->opt[OPT_CANCEL_SW].cap |= SANE_CAP_INACTIVE;
+  }
+
   return SANE_STATUS_GOOD;
 }
 
@@ -8023,6 +8148,75 @@ reader_process (void *data)
 	} /* end if AV_TRUECOLOR* */
 
       /* FURTHER POST-PROCESSING ON THE FINAL OUTPUT DATA */
+
+      /* Some devices read the sensor out in several interleaved segments
+         when scanning below their native resolution: the pixels of a line
+         arrive round-robin from each segment, so reading straight through
+         interleaves that many parts of the page. Regroup them before any
+         other post-processing. */
+      if ((dev->hw->feature_type & AV_COLUMN_INTERLEAVED_3) &&
+          s->avdimen.hw_xres < dev->inquiry_optical_res)
+        {
+          const unsigned int segs = 3;
+          const unsigned int px = (unsigned int) s->avdimen.hw_pixels_per_line;
+          const unsigned int bpl = (unsigned int) s->avdimen.hw_bytes_per_line;
+
+          /* only meaningful for whole bytes per pixel; the line does not
+             have to split evenly -- the leading segments just get the odd
+             pixels */
+          if (px && bpl % px == 0)
+            {
+              const unsigned int bpp = bpl / px;
+              const unsigned int lines = useful_bytes / bpl;
+              unsigned int off [3];
+              unsigned int k, n, acc = 0;
+
+              /* segment k holds every segs'th pixel starting at k */
+              for (k = 0; k < segs; ++k) {
+                off[k] = acc;
+                n = (px + segs - 1 - k) / segs;
+                acc += n;
+              }
+
+              uint8_t* tmp = malloc (bpl);
+              if (tmp)
+                {
+                  unsigned int l, i, m, b;
+
+                  DBG (3, "reader_process: de-interleaving %d segments, "
+                       "%d pixels (%d/%d/%d), %d bytes/pixel\n",
+                       segs, px, off[1], off[2] - off[1], px - off[2], bpp);
+
+                  for (l = 0; l < lines; ++l)
+                    {
+                      uint8_t* line = out_data + (size_t) l * bpl;
+                      memcpy (tmp, line, bpl);
+
+                      for (i = 0, k = 0, m = 0; i < px; ++i)
+                        {
+                          const uint8_t* src = tmp + (size_t) i * bpp;
+                          uint8_t* dst = line + (size_t) (off[k] + m) * bpp;
+                          for (b = 0; b < bpp; ++b)
+                            dst[b] = src[b];
+                          if (++k == segs) {
+                            k = 0;
+                            ++m;
+                          }
+                        }
+                    }
+                  free (tmp);
+                }
+              else
+                {
+                  /* Without the regrouping the page would be written out
+                     visibly combed, so fail the scan rather than hand the
+                     frontend a corrupt image. This leaves the read loop. */
+                  DBG (1, "reader_process: no memory to de-interleave columns\n");
+                  exit_status = SANE_STATUS_NO_MEM;
+                  break;
+                }
+            }
+        }
 
       /* maybe mirroring in ADF mode */
       if (s->source_mode_dim == AV_ADF_DIM && dev->inquiry_adf_need_mirror)
@@ -8797,6 +8991,8 @@ sane_open (SANE_String_Const devicename, SANE_Handle *handle)
       return status;
     }
     DBG (1, "sane_open: got %d scsi_max_request_size\n", dev->scsi_buffer_size);
+
+    avision_set_endpoints (&s->av_con, dev->hw);
   }
 
   /* first: re-awake the device with an inquiry, some devices are flunk while initializing
@@ -9066,6 +9262,21 @@ sane_control_option (SANE_Handle handle, SANE_Int option,
         case OPT_OPTION_LIGHTBOX:
           *(SANE_Bool*) val = s->val[option].b;
           return SANE_STATUS_GOOD;
+
+	case OPT_SCAN_SW:
+	case OPT_CANCEL_SW:
+	  {
+	    /* Poll for a press and report it exactly once. get_button_status()
+	       latches into button_state[] however the press is observed, so
+	       these sensors and the message option cannot swallow each other's
+	       events. Both are inactive unless the device has AV_INT_BUTTON,
+	       so this always takes the interrupt path. */
+	    int b = (option == OPT_CANCEL_SW) ? 1 : 0;
+	    get_button_status (s);
+	    *(SANE_Word*) val = s->button_state[b];
+	    s->button_state[b] = SANE_FALSE;
+	  }
+	  return SANE_STATUS_GOOD;
 
 	} /* end switch option */
     } /* end if GET_ACTION_GET_VALUE */

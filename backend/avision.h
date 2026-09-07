@@ -294,6 +294,38 @@ typedef struct Avision_HWEntry {
   /* Brother PDS: reports SUPPORTS_ACCESSORIES_DETECT but the command fails */
   #define AV_NO_DETECT_ACCESSORIES ((uint64_t)1<<44)
 
+  /* Device exposes two bulk endpoint pairs and the command channel is the
+     SECOND one. sanei_usb keeps the first pair it finds and ignores the rest,
+     which leaves us talking to an endpoint the device never answers on, so
+     the addresses have to be set explicitly after opening.
+     (HP ScanJet Pro 3000 s2: bulk 0x07/0x87 are silent, 0x02/0x82 work.) */
+  #define AV_USE_2ND_BULK_EP ((uint64_t)1<<45)
+
+  /* Device transfers 32 lines per side per stripe, but its ASIC id falls in
+     the range avision maps to a 16-line stripe. With the wrong stripe size the
+     duplex deinterlacer splits every physical stripe down the middle and mixes
+     both sides into both output pages. (HP ScanJet Pro 3000 s2, ASIC 8.) */
+  #define AV_READ_STRIPE_32 ((uint64_t)1<<46)
+
+  /* Device returns a horizontally mirrored image from the ADF but does not
+     set the corresponding inquiry bit, so scans come out as mirror writing.
+     (HP ScanJet Pro 3000 s2.) */
+  #define AV_ADF_MIRRORS_IMAGE ((uint64_t)1<<47)
+
+  /* Below its native optical resolution this device returns the pixels of
+     each line round-robin from three sensor segments, so reading straight
+     through interleaves three parts of the page and shows up as a fine comb
+     through the lettering. Regroup them. Native-resolution scans are not
+     affected. (HP ScanJet Pro 3000 s2.) */
+  #define AV_COLUMN_INTERLEAVED_3 ((uint64_t)1<<48)
+
+  /* Device reports button presses exactly as documented: a packet without
+     the press flag means nothing was pressed. The AV 210 / 610 and AV 220
+     fixups in get_button_status(), which turn such a packet into a press of
+     the last button, must not be applied to it - they would invent presses
+     out of ordinary idle reports. (HP ScanJet Pro 3000 s2.) */
+  #define AV_NO_BUTTON_SYNTH ((uint64_t)1<<49)
+
     /* maybe more ...*/
   uint64_t feature_type;
 
@@ -401,6 +433,10 @@ enum Avision_Option
   OPT_OPTIONS_GROUP,
   OPT_OPTION_ADF,       // ADF installed/detected?
   OPT_OPTION_LIGHTBOX,   // LightBox installed/detected?
+
+  OPT_SENSORS_GROUP,     /* read-only front panel buttons, for scanbd et al. */
+  OPT_SCAN_SW,           /* scan / start button */
+  OPT_CANCEL_SW,         /* cancel / stop button */
 
   NUM_OPTIONS            /* must come last */
 };
@@ -542,6 +578,9 @@ typedef struct Avision_Device
 } Avision_Device;
 
 /* all the state relevant for the SANE interface */
+/* number of front-panel buttons we can surface as sensor options */
+#define AVISION_BUTTONS 2
+
 typedef struct Avision_Scanner
 {
   struct Avision_Scanner* next;
@@ -583,6 +622,11 @@ typedef struct Avision_Scanner
   SANE_Pid reader_pid;	/* process id of reader */
   int read_fds;		/* pipe reading end */
   int write_fds;	/* pipe writing end */
+
+  /* Latched front-panel button state. The device reports presses as one-shot
+     events on the interrupt endpoint, so a press is remembered here until a
+     frontend reads the corresponding sensor option, then cleared. */
+  SANE_Bool button_state [AVISION_BUTTONS];
 
 } Avision_Scanner;
 
