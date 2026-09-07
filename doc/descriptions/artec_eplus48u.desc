@@ -8,7 +8,7 @@
 ;:url "http://www.angelfire.com/linux/crapsite/"
 :devicetype :scanner
 
-:mfg "Artec/Ultima"
+:mfg "Artec"
 :url "http://www.artecusa.com/"
 
 :model "E+ 48U"
@@ -25,7 +25,7 @@
 
 
 :mfg "Medion/Lifetec/Tevion/Cytron"
-:url "http://www.medion.com"
+:url "http://www.medion.com/"
 :comment "Sold by Aldi and Tchibo."
 
 :model "MD9693"
@@ -48,7 +48,7 @@
 
 
 :mfg "Trust"
-:url "http://www.trust-site.com"
+:url "http://www.trust.com/"
 
 :model "Easy Webscan 19200"
 :status :good
@@ -87,9 +87,9 @@
 :url "http://www.umax.com/"
 :url "http://www.umax.com.tw/"
 :url "http://www.umax.de/en"
-:url "http://www.umax-europe.com"
-:url "http://www.umaxjapan.co.jp"
-:url "http://www.umax.com.cn"
+:url "http://www.umax-europe.com/"
+:url "http://www.umaxjapan.co.jp/"
+:url "http://www.umax.com.cn/"
 
 :model "AstraSlim SE"
 :status :good

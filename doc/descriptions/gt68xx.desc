@@ -7,7 +7,7 @@
 
 ; -----------------------------------------------------------------------------
 
-:mfg "Artec/Ultima"
+:mfg "Artec"
 :url "http://www.artecusa.com/"
 
 :model "Ultima 2000"
@@ -137,7 +137,7 @@
 ; -----------------------------------------------------------------------------
 
 :mfg "Medion/Lifetec/Tevion/Cytron"
-:url "http://www.medion.com"
+:url "http://www.medion.com/"
 :comment "Sold by Aldi and Tchibo."
 
 :model "MD 4394"
@@ -457,7 +457,7 @@
 ; -----------------------------------------------------------------------------
 
 :mfg "Trust"
-:url "http://www.trust-site.com"
+:url "http://www.trust.com/"
 
 :model "240TH Easy Webscan Gold"
 :interface "USB"

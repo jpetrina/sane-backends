@@ -1523,7 +1523,7 @@ static Avision_HWEntry Avision_Device_List [] =
 
     { "B+H", "2000F",
       0, 0,
-      "Bell+Howell", "2000F",
+      "Bell and Howell", "2000F",
       0,
       { 0, {0, 0}, {{0, 0}, {0, 0}} }
     },

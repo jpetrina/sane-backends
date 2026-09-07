@@ -64,7 +64,7 @@
 
 ;********************************************************************************************
 
-:mfg "Artec/Ultima"
+:mfg "Artec"
 :url "http://www.artecusa.com/"
 
 :model "1236 USB"
@@ -129,8 +129,8 @@
 
 ;********************************************************************************************
 
-:mfg "Benq (Acer)"
-:url "http://www.benq.com"
+:mfg "BenQ"
+:url "http://www.benq.com/"
 :comment "Formerly Acer Peripherals"
 
 :model "310P"
@@ -487,16 +487,15 @@
 ;********************************************************************************************
 
 :mfg "Corex"
-:url "http://www.cardscan.com/"
 
-:model "Cardscan 500"
+:model "CardScan 500"
 :url "unsupported/corex-cardscan-500.html"
 :interface "USB"
 :usbid "0x08f0" "0x0001"
 :status :unsupported
 :comment "Probably not supported. Businesscard reader."
 
-:model "Cardscan 700 C"
+:model "CardScan 700c"
 :url "unsupported/corex-cardscan-700.html"
 :interface "USB"
 :usbid "0x08f0" "0x0004"
@@ -579,7 +578,7 @@
 :model "j-6121"
 :interface "Parport"
 :status :unsupported
-:comment "Probably unsupported. Sold 1998. Same as E-Lux j-6121."
+:comment "Probably unsupported. Sold 1998. Same as Enhans j-6121."
 
 ;********************************************************************************************
 
@@ -699,19 +698,6 @@
 :status :unsupported
 :comment "Probably unsupported. Identical to the Benq Prisa 620P."
 
-
-;********************************************************************************************
-
-:mfg "Hercules"			; name a manufacturer
-
-:model "SCAN@HOME 48 USB"
-:url "unsupported/teco-vm6509.html"
-:interface "USB"
-:usbid "0x080d" "0x0102"
-:status :unsupported
-:comment "Probably unsupported. See link for details."
-
-
 ;********************************************************************************************
 
 :mfg "Hewlett-Packard"			; name a manufacturer
@@ -807,7 +793,7 @@
 ;********************************************************************************************
 
 :mfg "IBM"
-:url "http://www.ibm.com"
+:url "http://www.ibm.com/"
 
 :model "ADF Color Scanner"
 :interface "Proprietary"
@@ -855,7 +841,7 @@
 ;********************************************************************************************
 
 :mfg "Kodak"
-:url "http://www.kodak.com"
+:url "http://www.kodak.com/"
 
 :model "Snapshot Photo Scanner 1"
 :interface "Parport"
@@ -1499,7 +1485,7 @@
 ;********************************************************************************************
 
 :mfg "Olivetti"
-:url "http://www.olivetti.com"
+:url "http://www.olivetti.com/"
 
 :model "Job-Jet M400"
 :url "unsupported/olivetti-job-jet-m400.html"
@@ -1510,7 +1496,7 @@
 ;********************************************************************************************
 
 :mfg "Olympus"
-:url "http://www.olympus.com"
+:url "http://www.olympus.com/"
 
 :model "ES-10P"
 :url "http://alioth-lists.debian.net/pipermail/sane-devel/2008-December/023326.html"
@@ -2287,7 +2273,7 @@
 ;********************************************************************************************
 
 :mfg "Trust"
-:url "http://www.trust-site.com"
+:url "http://www.trust.com/"
 
 :model "CombiScan 19200"
 :url "unsupported/trust-combiscan-19200.html"

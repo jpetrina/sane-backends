@@ -117,7 +117,7 @@ static SANE_Int estudio_default_resolutions[] = {150, 200, 300, 400, 600};
 
 static struct MagicolorCap magicolor_cap[] = {
 
-  /* KONICA MINOLTA magicolor 1690MF, USB ID 0x123b:2089 */
+  /* Konica Minolta magicolor 1690MF, USB ID 0x123b:2089 */
   {
       0x2089, "mc1690mf", "magicolor 1690MF", ".1.3.6.1.4.1.18334.1.1.1.1.1.23.1.1",
       -1, 0x85,
@@ -129,7 +129,7 @@ static struct MagicolorCap magicolor_cap[] = {
       {0, SANE_FIX(0x1390 * MM_PER_INCH / 600), 0}, {0, SANE_FIX(0x20dc * MM_PER_INCH / 600), 0},
   },
 
-  /* KONICA MINOLTA magicolor 4690MF, USB ID 0x132b:2079 */
+  /* Konica Minolta magicolor 4690MF, USB ID 0x132b:2079 */
   {
       0x2079, "mc4690mf", "magicolor 4690MF",
       "FIXME",                                              /* FIXME: fill in the correct OID! */
@@ -2270,7 +2270,7 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
 		int numIds = sanei_magicolor_getNumberOfUSBProductIds();
 
 		if (vendor != SANE_MAGICOLOR_VENDOR_ID && vendor != SANE_EPSON_VENDOR_ID && vendor != SANE_RICOH_VENDOR_ID)
-			return SANE_STATUS_INVAL; /* this is not a KONICA MINOLTA device */
+			return SANE_STATUS_INVAL; /* this is not a Konica Minolta device */
 
 		sanei_magicolor_usb_product_ids[numIds - 1] = product;
 		sanei_usb_attach_matching_devices(line, attach_one_usb);

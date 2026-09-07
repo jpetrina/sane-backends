@@ -173,7 +173,7 @@
 ;===================================
 
 :mfg "Advent"
-:url "http://www.adventcomputers.co.uk"
+:url "http://www.adventcomputers.co.uk/"
 
 :model "AW10"
 :interface "USB"

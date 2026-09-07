@@ -404,7 +404,7 @@ Supports the Mustek BearPaw 1200F USB flatbed scanner. See
 for details.
 .TP
 .B magicolor
-Supports the KONICA MINOLTA magicolor 1690MF multi-function printer/scanner/fax. See
+Supports the Konica Minolta magicolor 1690MF multi-function printer/scanner/fax. See
 .BR sane\-magicolor (5)
 for details.
 .TP

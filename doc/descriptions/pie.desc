@@ -19,7 +19,9 @@
                                   ;               :meta, :api
 
 :mfg "Devcom"
-:url "http://www.blackwidow.co.uk/"
+:comment "Scanners sold branded as <a href=\"#Z-BLACKWIDOW\">BlackWidow</a>."
+
+:mfg "BlackWidow"
 
 :model "9636PRO"
 :interface "SCSI"

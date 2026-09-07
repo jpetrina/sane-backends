@@ -112,7 +112,7 @@
 :comment "300x600 dpi CIS scanner"
 
 :mfg "Trust"
-:url "http://www.trust-site.com/home/"
+:url "http://www.trust.com/"
 
 :model "Easy Connect 9600+"
 :interface "Parport (EPP)"

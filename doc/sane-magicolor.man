@@ -1,11 +1,11 @@
 .\" .IX sane-magicolor
 .TH "sane-magicolor" "5" "10 Jan 2011" "@PACKAGEVERSION@" "SANE Scanner Access Now Easy"
 .SH "NAME"
-sane\-magicolor \- SANE backend for KONICA MINOLTA magicolor and Toshiba TEC e-STUDIO scanners
+sane\-magicolor \- SANE backend for Konica Minolta magicolor and Toshiba TEC e-STUDIO scanners
 .SH "DESCRIPTION"
 The
 .B sane\-magicolor
-backend supports KONICA MINOLTA magicolor and Toshiba TEC e-STUDIO scanners connected via USB or LAN.
+backend supports Konica Minolta magicolor and Toshiba TEC e-STUDIO scanners connected via USB or LAN.
 .SH "SUPPORTED DEVICES"
 The following scanner should work with this backend:
 
@@ -13,7 +13,7 @@ Device Details
 .br
 \-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-
 .br
-Vendor: KONICA MINOLTA
+Vendor: Konica Minolta
 .br
 Model: magicolor 1690MF
 .br

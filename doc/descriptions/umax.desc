@@ -22,9 +22,9 @@
 :url "http://www.umax.com/"
 :url "http://www.umax.com.tw/"
 :url "http://www.umax.de/en"
-:url "http://www.umax-europe.com"
-:url "http://www.umaxjapan.co.jp"
-:url "http://www.umax.com.cn"
+:url "http://www.umax-europe.com/"
+:url "http://www.umaxjapan.co.jp/"
+:url "http://www.umax.com.cn/"
 
 :model "Vista S6"
 :interface "SCSI"
@@ -371,12 +371,11 @@
 :comment "OK"
 
 :mfg "TriGem"                      ; another manufacturer...
-:url "http://www.nikon.com/"
 
 :model "PowerScanII"
 :interface "SCSI"
 :status :good
-:comment "OK"
+:comment "OK, Rebadged UMAX Supervista S-12"
 
 ; :comment and :url specifiers are optional after :mfg, :model, :desc,
 ;  and at the top-level.

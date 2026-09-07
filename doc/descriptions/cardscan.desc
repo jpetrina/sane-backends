@@ -18,24 +18,29 @@
                                  ; other types:  :stillcam, :vidcam,
                                  ;               :meta, :api
 
-:mfg "Corex/Dymo"                   ; name a manufacturer
+:mfg "Corex"
 :url "http://www.cardscan.com/"
+:comment "Company was acquired by <a href=\"#Z-DYMO\">Dymo</a>."
 
-:model "800c"
+:model "CardScan 800c"
 :interface "USB"
 :usbid "0x08f0" "0x0005"
 :status :good
 :comment "4 inch wide 8bit Gray or 24bit Color simplex card/receipt scanner"
 
-:model "600c"
+:model "CardScan 600c"
 :interface "USB"
 :usbid "0x08f0" "0x0002"
 :status :basic
 :comment "4 inch wide 8bit Gray or 24bit Color simplex card/receipt scanner"
 
+:mfg "Dymo"                      ; name a manufacturer
+:url "http://www.dymo.com/"
+:comment "Company acquired scanner business of <a href=\"#Z-COREX\">Corex</a>."
+
 :mfg "Sanford"                   ; name a manufacturer
 
-:model "800c"
+:model "CardScan 800c"
 :interface "USB"
 :usbid "0x0451" "0x6250"
 :status :good

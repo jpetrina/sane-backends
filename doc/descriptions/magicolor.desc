@@ -12,7 +12,7 @@
 
 :devicetype :scanner
 
-:mfg "KONICA MINOLTA"
+:mfg "Konica Minolta"
 :url "http://www.konicaminolta.com/"
 
 :model      "magicolor 1690MF"

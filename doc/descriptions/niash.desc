@@ -16,7 +16,7 @@
 :devicetype :scanner
 
 :mfg "Hewlett-Packard"
-:url "http://www.hp.com"
+:url "http://www.hp.com/"
 
 :model "ScanJet 3300c"
 :interface "USB"
@@ -42,7 +42,7 @@
 :status :complete
 
 :mfg "Agfa"
-:url "http://www.agfa.com"
+:url "http://www.agfa.com/"
 
 :model "Snapscan Touch"
 :interface "USB"
@@ -50,7 +50,7 @@
 :status :complete
 
 :mfg "Trust"
-:url "http://www.trust.com"
+:url "http://www.trust.com/"
 
 :model "Office Scan USB 19200"
 :interface "USB"

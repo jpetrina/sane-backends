@@ -19,7 +19,7 @@
 				;               :meta, :api
 
 :mfg "Hewlett-Packard"		; name a manufacturer
-:url "http://www.hp.com"
+:url "http://www.hp.com/"
 
 :model "ScanJet 3500C"		; name models for above-specified mfg.
 :interface "USB"		; interface type of the device:

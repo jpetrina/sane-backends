@@ -18,7 +18,7 @@
                                   ; other types:  :stillcam, :vidcam,
                                   ;               :meta, :api
 
-:mfg "Artec/Ultima"               ; name a manufacturer
+:mfg "Artec"                      ; name a manufacturer
 :url "http://www.artecusa.com/"
 ;; name models for above-specified mfg.
 
@@ -51,6 +51,9 @@
 :interface "SCSI"
 :status :complete
 :comment "all modes working"
+
+:mfg "Ultima Electronics"
+:comment "Scanners marketed under <a href=\"#Z-ARTEC\">Artec</a> brand."
 
 :mfg "BlackWidow"
 :url "http://www.blackwidow.co.uk/"

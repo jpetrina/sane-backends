@@ -27,7 +27,7 @@
 :devicetype :scanner
 
 :mfg "Avision"
-:url "http://www.avision.com"
+:url "http://www.avision.com/"
 
 :model "AD345F"
 :interface "USB"
@@ -407,7 +407,7 @@
 
 
 :mfg "Hewlett-Packard"
-:url "http://www.hp.com"
+:url "http://www.hp.com/"
 
 :model "ScanJet 5300C"
 :interface "USB"
@@ -483,7 +483,7 @@
 
 
 :mfg "Minolta"
-:url "http://www.minolta.com"
+:url "http://www.minolta.com/"
 
 :model "Dimage Scan Dual I"
 :interface "SCSI"
@@ -551,7 +551,7 @@
 
 
 :mfg "Fujitsu"
-:url "http://www.fujitsu.com"
+:url "http://www.fujitsu.com/"
 
 :model "ScanPartner"
 :interface "SCSI"
@@ -601,7 +601,7 @@
 
 
 :mfg "Kodak"
-:url "http://www.kodak.com"
+:url "http://www.kodak.com/"
 
 :model "i30"
 :interface "USB"
@@ -875,7 +875,7 @@
 :status :good
 
 
-:mfg "Bell+Howell"
+:mfg "Bell and Howell"
 
 :model "2000F"
 :interface "SCSI"
