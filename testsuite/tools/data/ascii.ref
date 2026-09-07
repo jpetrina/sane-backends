@@ -2502,7 +2502,7 @@ backend `epson'
     usb-product-id *none*
     status unsupported
     url `http://www.vjet.demon.co.uk/scanner/'
-    comment `A better backend for the FilmScan 200 can be found at <A HREF= "http://www.vjet.demon.co.uk/scanner/ ">http://www.vjet.demon.co.uk/scanner/</A>'
+    comment `A better backend for the FilmScan 200 can be found at <A HREF="http://www.vjet.demon.co.uk/scanner/">http://www.vjet.demon.co.uk/scanner/</A>'
    model `CX-3200'
     interface `USB'
     usb-vendor-id `0x04b8'
@@ -8537,7 +8537,7 @@ backend `mustek_pp'
     comment `600x1200 dpi CIS scanner'
   mfg `Medion/Lifetec/Tevion/Cytron'
    url `http://www.medion.de/'
-   comment `Those scanners are also known as  "Aldi Scanner " or  "Tchibo Scanners "'
+   comment `Those scanners are also known as "Aldi Scanner" or "Tchibo Scanners"'
    model `MD 9848'
     interface `Parport (EPP)'
     usb-vendor-id *none*
@@ -10867,11 +10867,11 @@ backend `SnapScan'
     comment *none*
   mfg `Acer Peripherals'
    url *none*
-   comment `Company was renamed to <a href= "#BENQ ">Benq</a>.'
+   comment `Company was renamed to <a href="#BENQ">Benq</a>.'
    model *none*
   mfg `Vuego'
    url *none*
-   comment `Company was renamed to <a href= "#BENQ ">Benq</a>.'
+   comment `Company was renamed to <a href="#BENQ">Benq</a>.'
    model *none*
   mfg `Benq (Acer)'
    url `http://www.benq.com'
