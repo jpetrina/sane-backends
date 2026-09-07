@@ -35,6 +35,7 @@ dnl ******************************************************************
 dnl  Set up the compiler and linker
 dnl ******************************************************************
 AC_PROG_CC
+AX_PROG_CC_FOR_BUILD
 AC_PROG_CXX
 AM_PROG_CC_C_O
 AM_PATH_PYTHON(2.7)
@@ -70,8 +71,6 @@ AC_PATH_PROG(SANE_CONFIG_PATH, sane-config, no)
 
 dnl Call explicitly before using PKG_*
 PKG_PROG_PKG_CONFIG
-
-AM_CONDITIONAL(CROSS_COMPILING, test x$cross_compiling = xyes)
 
 dnl ***********************************************************************
 dnl set compiler/linker flags

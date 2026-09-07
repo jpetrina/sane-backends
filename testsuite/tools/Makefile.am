@@ -7,7 +7,7 @@
 all:
 	@echo "run 'make check' to run tests"
 
-SANEDESC  = ../../tools/sane-desc$(EXEEXT)
+SANEDESC  = ../../tools/sane-desc$(BUILD_EXEEXT)
 TESTFILE  = $(srcdir)/data/testfile.desc
 OUTFILES  = *.res
 DEVICE    = test
@@ -38,9 +38,9 @@ check.local:
 	       $$mode.res >$$mode.flt 2>/dev/null ;\
 	  if diff $$mode.ref.flt $$mode.flt ; \
 	  then \
-		echo "PASS: sane-desc -m $$mode -s $(srcdir)/data"; \
+		echo "PASS: sane-desc$(BUILD_EXEEXT) -m $$mode -s $(srcdir)/data"; \
 	  else \
-		echo "FAIL: sane-desc -m $$mode -s $(srcdir)/data"; \
+		echo "FAIL: sane-desc$(BUILD_EXEEXT) -m $$mode -s $(srcdir)/data"; \
 		pass=false ; \
 	  fi; \
 	done ;\

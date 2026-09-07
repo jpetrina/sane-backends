@@ -76,7 +76,8 @@ should normally *not* be needed for source archives downloaded from
 the project's website at http://www.sane-project.org/.
 
         - autoconf (>= 2.69) as well as the autoconf-archive (for the
-          AX_CXX_COMPILE_STDCXX and AX_CXX_COMPILE_STDCXX_11 macros)
+          AX_CXX_COMPILE_STDCXX, AX_CXX_COMPILE_STDCXX_11, and
+          AX_PROG_CC_FOR_BUILD macros)
 
         - automake (>=1.15)
 

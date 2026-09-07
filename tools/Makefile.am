@@ -7,27 +7,24 @@
 AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include \
  -I$(top_srcdir)/include $(USB_CFLAGS)
 
+CPPFLAGS_FOR_BUILD += -I. -I$(srcdir) -I$(top_builddir)/include \
+ -I$(top_srcdir)/include $(USB_CFLAGS)
+
 bin_PROGRAMS = sane-find-scanner gamma4scanimage
-noinst_PROGRAMS = sane-desc
 if INSTALL_UMAX_PP_TOOLS
 bin_PROGRAMS += umax_pp
 endif
 
-if CROSS_COMPILING
-HOTPLUG =
-HOTPLUG_DIRS =
-HOTPLUG_DIR =
-else
 HOTPLUG = hal/libsane.fdi hotplug/libsane.usermap hotplug-ng/libsane.db \
 	  udev/libsane.rules
 HOTPLUG_DIRS = hal hotplug hotplug-ng udev
 HOTPLUG_DIR = dirs
-endif
 
 bin_SCRIPTS = sane-config
 noinst_SCRIPTS = $(HOTPLUG)
 BUILT_SOURCES = $(HOTPLUG_DIR)
-CLEANFILES = $(bin_SCRIPTS) $(dist_noinst_SCRIPTS)
+CLEANFILES = $(bin_SCRIPTS) $(dist_noinst_SCRIPTS) $(HOTPLUG) \
+	     sane-desc$(BUILD_EXEEXT)
 
 EXTRA_DIST = check-po.awk libtool-get-dll-ext mustek600iin-off.c \
 	     RenSaneDlls.cmd README xerox
@@ -52,9 +49,13 @@ umax_pp_SOURCES  = umax_pp.c
 umax_pp_SOURCES += ../backend/umax_pp_low.c
 umax_pp_LDADD = ../sanei/libsanei.la ../lib/liblib.la $(MATH_LIB)
 
-sane_desc_SOURCES = sane-desc.c
-sane_desc_LDADD = ../sanei/libsanei.la ../lib/liblib.la
+sane-desc$(BUILD_EXEEXT): sane-desc.c ../sanei/sanei_config.c ../sanei/sanei_init_debug.c ../sanei/sanei_constrain_value.c
+	@rm -f sane-desc$(BUILD_EXEEXT)
+	$(AM_V_CC)$(CC_FOR_BUILD) $(CPPFLAGS_FOR_BUILD) $(CFLAGS_FOR_BUILD) $(LDFLAGS_FOR_BUILD) -o $@ $^
 
+all-local: sane-desc$(BUILD_EXEEXT)
+
+EXTRA_DIST += sane-desc.c
 EXTRA_DIST += hotplug/README hotplug/libusbscanner
 EXTRA_DIST += hotplug-ng/README hotplug-ng/libsane.hotplug
 EXTRA_DIST += openbsd/attach openbsd/detach
@@ -72,21 +73,18 @@ dirs:
 
 descriptions = ${top_srcdir}/doc/descriptions/*.desc ${top_srcdir}/doc/descriptions-external/*.desc
 
-hotplug/libsane.usermap: sane-desc $(descriptions)
-	@./sane-desc -m usermap -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
+hotplug/libsane.usermap: sane-desc$(BUILD_EXEEXT) $(descriptions)
+	@./sane-desc$(BUILD_EXEEXT) -m usermap -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
 	   -d 1 > $@
 
-hotplug-ng/libsane.db: sane-desc $(descriptions)
-	@./sane-desc -m db -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
+hotplug-ng/libsane.db: sane-desc$(BUILD_EXEEXT) $(descriptions)
+	@./sane-desc$(BUILD_EXEEXT) -m db -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
 	   -d 0 > $@
 
-udev/libsane.rules: sane-desc $(descriptions)
-	@./sane-desc -m udev -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
+udev/libsane.rules: sane-desc$(BUILD_EXEEXT) $(descriptions)
+	@./sane-desc$(BUILD_EXEEXT) -m udev -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
 	   -d 0 > $@
 
-hal/libsane.fdi: sane-desc $(descriptions)
-	@./sane-desc -m hal -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
+hal/libsane.fdi: sane-desc$(BUILD_EXEEXT) $(descriptions)
+	@./sane-desc$(BUILD_EXEEXT) -m hal -s ${top_srcdir}/doc/descriptions:${top_srcdir}/doc/descriptions-external \
 	   -d 0 > $@
-
-clean-local:
-	rm -f $(HOTPLUG)
