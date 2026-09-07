@@ -339,6 +339,11 @@
 :usbid      "0x04b8" "0x1143"
 :status     :complete
 
+:model      "ET-2800 Series"
+:interface  "USB"
+:usbid      "0x04b8" "0x1187"
+:status     :complete
+
 :model      "ET-2810 Series"
 :interface  "USB"
 :usbid      "0x04b8" "0x118a"
