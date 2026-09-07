@@ -29,18 +29,18 @@ if test -r "$ac_dir/ax_create_stdint_h.m4"; then
 	cp "$ac_dir/ax_create_stdint_h.m4" "$srcdir/$m4_dir"
 	if test "$serial" -lt 20; then
 	    echo "patching file $target to #serial 20"
-	    patch --quiet $target \
+	    patch -N --quiet $target \
 		  "$patchdir/ax_create_stdint_h.19-20.m4.patch"
 	fi
 	echo "patching file $target to #serial 21"
-	patch --quiet "$target" \
+	patch -N --quiet "$target" \
 	      "$patchdir/ax_create_stdint_h.20-21.m4.patch"
     fi
 fi
 
 autoreconf --force --install --verbose --warnings=all "$srcdir"
-patch "$srcdir/ltmain.sh" "$patchdir/ltmain.sh.patch"
-patch "$srcdir/po/Rules-quot" "$patchdir/Rules-quot.patch"
+patch -N "$srcdir/ltmain.sh" "$patchdir/ltmain.sh.patch"
+patch -N "$srcdir/po/Rules-quot" "$patchdir/Rules-quot.patch"
 autoreconf "$srcdir"
 
 # Taken from https://gitlab.com/utsushi/utsushi/blob/master/bootstrap
