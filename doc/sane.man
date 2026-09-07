@@ -246,6 +246,10 @@ and
 .BR sane\-coolscan3 (5)
 for details.
 .TP
+.B dell1600n_net
+Supports Dell 1600n laser printer over ethernet. USB interfacing is not
+supported.
+.TP
 .B epjitsu
 Supports Epson-based Fujitsu USB scanners. See
 .BR sane\-epjitsu (5)
@@ -264,6 +268,11 @@ scanners (try this before
 .BR epson
 which is outdated). See
 .BR sane\-epson2 (5)
+for details.
+.TP
+.B epsonds
+Supports Epson ESC/I-2 scanners. See
+.BR sane\-epsonds (5)
 for details.
 .TP
 .B escl
@@ -326,6 +335,11 @@ Supports the Hewlett-Packard ScanJet 54XXC series. See
 .BR sane\-hp5400 (5)
 for details.
 .TP
+.B hp5590
+Supports the Hewlett-Packard ScanJet 45XX, 55XX, and 7650 scanners. See
+.BR sane\-hp5900 (5)
+for details.
+.TP
 .B hpljm1005
 Supports the Hewlett-Packard LaserJet M1005 scanner. See
 .BR sane\-hpljm1005 (5)
@@ -354,6 +368,18 @@ for details.
 .B kvs1025
 Supports Panasonic KV-S102xC scanners. See
 .BR sane\-kvs1025 (5)
+for details.
+.TP
+.B kvs20xx
+Supports Panasonic KV-S20xxC scanners (other than those supported by
+.B matsushita
+) See
+.BR sane\-kvs20xx (5)
+for details.
+.TP
+.B kvs40xx
+Supports Panasonic KV-S40xxC scanners. See
+.BR sane\-kvs40xx (5)
 for details.
 .TP
 .B leo
@@ -442,6 +468,11 @@ SCSI flatbed scanners. See
 .BR sane\-pie (5)
 for details.
 .TP
+.B pieusb
+Supports USB-connected PIE and Reflecta slide scanners. See
+.BR sane\-pieusb (5)
+for details.
+.TP
 .B pixma
 Supports Canon PIXMA MP series (multi-function devices),
 Canon imageCLASS series (laser devices), Canon MAXIFY series and some Canon
@@ -472,6 +503,11 @@ for details.
 .B ricoh2
 Supports the Ricoh flatbed scanners: SG-3100SNw, SP-100SU, and SP-111SU. See
 .BR sane\-ricoh2 (5)
+for details.
+.TP
+.B rts8891
+Supports Realtek RTS8891 based scanners. See
+.BR sane\-rts8891 (5)
 for details.
 .TP
 .B s9036
