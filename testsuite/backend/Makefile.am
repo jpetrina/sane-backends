@@ -16,6 +16,7 @@ TESTS = $(check_PROGRAMS)
 
 escl_test_SOURCES = escl_test.c
 escl_test_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir) -I$(top_srcdir)/include \
+	-I$(top_builddir)/include \
 	$(JPEG_CFLAGS) $(PNG_CFLAGS) $(TIFF_CFLAGS) $(POPPLER_GLIB_CFLAGS) \
 	$(XML_CFLAGS) $(libcurl_CFLAGS) $(AVAHI_CFLAGS) -DBACKEND_NAME=escl
 escl_test_LDADD = ../../backend/libescl.la \

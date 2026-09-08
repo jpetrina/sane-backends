@@ -101,10 +101,10 @@ print_xml_job_status(xmlNode *node,
                         *job = SANE_STATUS_GOOD;
                         DBG(10, "jobId Completed SANE_STATUS_GOOD\n");
                     }
-                    else if (strcmp((const char *)node->name, "ImagesToTransfer") == 0) {
-	                const char *state = (const char *)xmlNodeGetContent(node);
-	                *image = atoi(state);
-	            }
+                }
+                else if (strcmp((const char *)node->name, "ImagesToTransfer") == 0) {
+                    const char *value = (const char *)xmlNodeGetContent(node);
+                    *image = atoi(value);
                 }
             }
         }

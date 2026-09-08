@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -413,6 +414,350 @@ test_crop_full_surface(void)
     free(result);
 }
 
+struct escl_response {
+    int status;
+    const char *body;
+};
+
+/* Wrap inner status XML in the ScannerStatus envelope. */
+#define status_body(content) \
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" \
+    "<scan:ScannerStatus " \
+    "xmlns:pwg=\"http://www.pwg.org/schemas/2010/12/sm\" " \
+    "xmlns:scan=\"http://schemas.hp.com/imaging/escl/2011/05/03\">" \
+    content \
+    "</scan:ScannerStatus>"
+
+/* Serve `n` responses on a forked loopback server, then run escl_status. */
+static SANE_Status
+run_escl_status(struct escl_response *responses, int n,
+           int source, const char *jobId, SANE_Status *job)
+{
+    ESCL_Device device = { 0 };
+    struct sockaddr_in address = { 0 };
+    char address_text[] = "127.0.0.1";
+    int server_fd, client_fd;
+    socklen_t address_size = sizeof(address);
+    struct timeval accept_timeout = { .tv_sec = 3, .tv_usec = 0 };
+    pid_t child;
+    SANE_Status status;
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        fprintf(stderr, "could not create status test socket\n");
+        failures++;
+        return SANE_STATUS_IO_ERROR;
+    }
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0 ||
+        listen(server_fd, n) < 0 ||
+        getsockname(server_fd, (struct sockaddr *)&address, &address_size) < 0) {
+        fprintf(stderr, "could not configure status test socket\n");
+        close(server_fd);
+        failures++;
+        return SANE_STATUS_IO_ERROR;
+    }
+
+    setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO,
+               &accept_timeout, sizeof(accept_timeout));
+    child = fork();
+    if (child == 0) {
+        for (int i = 0; i < n; i++) {
+            client_fd = accept(server_fd, NULL, NULL);
+            if (client_fd < 0)
+                break;
+
+            char request[1024];
+            (void)recv(client_fd, request, sizeof(request), 0);
+            send_http_response(client_fd, responses[i].status,
+                               responses[i].body);
+            close(client_fd);
+        }
+        close(server_fd);
+        _exit(EXIT_SUCCESS);
+    }
+    if (child < 0) {
+        fprintf(stderr, "could not fork status test server\n");
+        close(server_fd);
+        failures++;
+        return SANE_STATUS_IO_ERROR;
+    }
+    close(server_fd);
+
+    device.ip_address = address_text;
+    device.port_nb = ntohs(address.sin_port);
+    status = escl_status(&device, source, jobId, job);
+    waitpid(child, NULL, 0);
+    return status;
+}
+
+static void
+test_status_null_device(void)
+{
+    expect_status("status null device",
+                  escl_status(NULL, PLATEN, NULL, NULL),
+                  SANE_STATUS_NO_MEM);
+}
+
+static void
+test_status_http_busy(void)
+{
+    struct escl_response resp = { 503, "busy" };
+    expect_status("status http 503",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_DEVICE_BUSY);
+}
+
+static void
+test_status_http_not_found(void)
+{
+    struct escl_response resp = { 404, "" };
+    expect_status("status http 404",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_NO_DOCS);
+}
+
+static void
+test_status_invalid_xml(void)
+{
+    struct escl_response resp = { 200, "<not xml" };
+    expect_status("status invalid xml",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_NO_MEM);
+}
+
+static void
+test_status_empty_body(void)
+{
+    struct escl_response resp = { 200, "" };
+    expect_status("status empty body",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_NO_MEM);
+}
+
+static void
+test_status_platen_idle(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>") };
+    expect_status("status platen idle",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_GOOD);
+}
+
+static void
+test_status_platen_processing(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Processing</pwg:State>") };
+    expect_status("status platen processing",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_DEVICE_BUSY);
+}
+
+static void
+test_status_platen_unknown_state(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Feeding</pwg:State>") };
+    expect_status("status platen unknown state",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_UNSUPPORTED);
+}
+
+static void
+test_status_platen_missing_state(void)
+{
+    /* No <State> element: platen stays at its init value DEVICE_BUSY. */
+    struct escl_response resp = { 200, status_body(
+        "<pwg:MakeAndModel>x</pwg:MakeAndModel>") };
+    expect_status("status platen missing state",
+                  run_escl_status(&resp, 1, PLATEN, NULL, NULL),
+                  SANE_STATUS_DEVICE_BUSY);
+}
+
+static void
+test_status_adf_loaded(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<scan:AdfState>ScannerAdfLoaded</scan:AdfState>") };
+    expect_status("status adf loaded",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_GOOD);
+}
+
+static void
+test_status_adf_jam(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<scan:AdfState>ScannerAdfJam</scan:AdfState>") };
+    expect_status("status adf jam",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_JAMMED);
+}
+
+static void
+test_status_adf_door_open(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<scan:AdfState>ScannerAdfDoorOpen</scan:AdfState>") };
+    expect_status("status adf door open",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_COVER_OPEN);
+}
+
+static void
+test_status_adf_empty(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<scan:AdfState>ScannerAdfEmpty</scan:AdfState>") };
+    expect_status("status adf empty",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_NO_DOCS);
+}
+
+static void
+test_status_adf_processing(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<scan:AdfState>ScannerAdfProcessing</scan:AdfState>") };
+    expect_status("status adf processing",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_NO_DOCS);
+}
+
+static void
+test_status_adf_unknown(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<scan:AdfState>ScannerAdfFoo</scan:AdfState>") };
+    expect_status("status adf unknown",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_UNSUPPORTED);
+}
+
+static void
+test_status_adf_missing(void)
+{
+    /* No <AdfState>: adf stays at its init value DEVICE_BUSY. */
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>") };
+    expect_status("status adf missing",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_DEVICE_BUSY);
+}
+
+static void
+test_status_busy_platen_overrides_adf(void)
+{
+    /* No <State> -> platen = DEVICE_BUSY.  Even though adf reports a jam,
+     * a busy platen short-circuits before adf is consulted. */
+    struct escl_response resp = { 200, status_body(
+        "<scan:AdfState>ScannerAdfJam</scan:AdfState>") };
+    expect_status("status busy platen overrides adf",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_DEVICE_BUSY);
+}
+
+static void
+test_status_unsupported_platen_falls_through_to_adf(void)
+{
+    /* Unknown platen state -> UNSUPPORTED, which lets adf decide. */
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Feeding</pwg:State>"
+        "<scan:AdfState>ScannerAdfJam</scan:AdfState>") };
+    expect_status("status unsupported platen falls through to adf",
+                  run_escl_status(&resp, 1, ADFSIMPLEX, NULL, NULL),
+                  SANE_STATUS_JAMMED);
+}
+
+static void
+test_status_job_completed(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<pwg:JobInfo>"
+        "<pwg:JobUri>http://127.0.0.1/eSCL/ScanJobs/abc</pwg:JobUri>"
+        "<pwg:JobState>Completed</pwg:JobState>"
+        "</pwg:JobInfo>") };
+    SANE_Status job = SANE_STATUS_INVAL;
+    run_escl_status(&resp, 1, PLATEN, "abc", &job);
+    if (job != SANE_STATUS_GOOD) {
+        fprintf(stderr, "status job completed: got %d, expected %d\n",
+                job, SANE_STATUS_GOOD);
+        failures++;
+    }
+}
+
+static void
+test_status_job_processing(void)
+{
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<pwg:JobInfo>"
+        "<pwg:JobUri>http://127.0.0.1/eSCL/ScanJobs/abc</pwg:JobUri>"
+        "<pwg:JobState>Processing</pwg:JobState>"
+        "</pwg:JobInfo>") };
+    SANE_Status job = SANE_STATUS_INVAL;
+    run_escl_status(&resp, 1, PLATEN, "abc", &job);
+    if (job != SANE_STATUS_DEVICE_BUSY) {
+        fprintf(stderr, "status job processing: got %d, expected %d\n",
+                job, SANE_STATUS_DEVICE_BUSY);
+        failures++;
+    }
+}
+
+static void
+test_status_job_uri_mismatch(void)
+{
+    /* jobId does not appear in JobUri, so print_xml_job_status is never
+     * entered and *job is left at the caller's sentinel value. */
+    struct escl_response resp = { 200, status_body(
+        "<pwg:State>Idle</pwg:State>"
+        "<pwg:JobInfo>"
+        "<pwg:JobUri>http://127.0.0.1/eSCL/ScanJobs/abc</pwg:JobUri>"
+        "<pwg:JobState>Completed</pwg:JobState>"
+        "</pwg:JobInfo>") };
+    SANE_Status job = SANE_STATUS_INVAL;  /* sentinel */
+    run_escl_status(&resp, 1, PLATEN, "zzz", &job);
+    if (job != SANE_STATUS_INVAL) {
+        fprintf(stderr, "status job uri mismatch: *job was modified\n");
+        failures++;
+    }
+}
+
+static void
+test_status_reload_when_no_images(void)
+{
+    /* source != PLATEN and ImagesToTransfer == 0: escl_status should
+     * reload once, so the second response decides the status. */
+    struct escl_response resp[2] = {
+        { 200, status_body(
+              "<pwg:State>Idle</pwg:State>"
+              "<scan:AdfState>ScannerAdfLoaded</scan:AdfState>"
+              "<pwg:JobInfo>"
+              "<pwg:JobUri>http://127.0.0.1/eSCL/ScanJobs/abc</pwg:JobUri>"
+              "<pwg:ImagesToTransfer>0</pwg:ImagesToTransfer>"
+              "</pwg:JobInfo>") },
+        { 200, status_body(
+              "<pwg:State>Idle</pwg:State>"
+              "<scan:AdfState>ScannerAdfEmpty</scan:AdfState>") },
+    };
+    SANE_Status job;
+    expect_status("status reload when no images",
+                  run_escl_status(resp, sizeof(resp) / sizeof(resp[0]),
+                                  ADFSIMPLEX, "abc", &job),
+                  SANE_STATUS_NO_DOCS);
+}
+
 int
 main(void)
 {
@@ -425,5 +770,27 @@ main(void)
     test_scan_file_reset();
     test_crop_passthrough();
     test_crop_full_surface();
+    test_status_null_device();
+    test_status_http_busy();
+    test_status_http_not_found();
+    test_status_invalid_xml();
+    test_status_empty_body();
+    test_status_platen_idle();
+    test_status_platen_processing();
+    test_status_platen_unknown_state();
+    test_status_platen_missing_state();
+    test_status_adf_loaded();
+    test_status_adf_jam();
+    test_status_adf_door_open();
+    test_status_adf_empty();
+    test_status_adf_processing();
+    test_status_adf_unknown();
+    test_status_adf_missing();
+    test_status_busy_platen_overrides_adf();
+    test_status_unsupported_platen_falls_through_to_adf();
+    test_status_job_completed();
+    test_status_job_processing();
+    test_status_job_uri_mismatch();
+    test_status_reload_when_no_images();
     return failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
