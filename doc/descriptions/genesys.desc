@@ -77,6 +77,12 @@
 :status :unsupported
 :comment "GL128 based"
 
+:model "OpticBook 4800"
+:interface "USB"
+:usbid "0x07b3" "0x1301"
+:status :good
+:comment "Gray and color, 75/100/150/200/300/600/1200 dpi, full A4 with shading calibration. AFE gains fixed per resolution group; optional per-unit white reference file."
+
 ; -----------------------------------------------------------------------------
 
 :mfg "Medion/Lifetec/Tevion/Cytron"

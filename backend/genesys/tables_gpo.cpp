@@ -461,6 +461,15 @@ void genesys_init_gpo_tables()
 
 
     gpo = Genesys_Gpo();
+    gpo.id = GpioId::PLUSTEK_OPTICBOOK_4800;
+    gpo.regs = {
+        { 0x6b, 0x30 }, { 0x6c, 0x2d }, { 0x6d, 0x80 }, { 0x6e, 0x2d }, { 0x6f, 0x80 },
+        { 0xa6, 0x1c }, { 0xa7, 0x8f }, { 0xa8, 0x08 }, { 0xa9, 0x04 },
+    };
+    s_gpo->push_back(gpo);
+
+
+    gpo = Genesys_Gpo();
     gpo.id = GpioId::CANON_LIDE_80;
     gpo.regs = {
         { 0x6c, 0x28 },

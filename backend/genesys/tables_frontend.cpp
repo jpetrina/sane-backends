@@ -699,6 +699,33 @@ void genesys_init_frontend_tables()
     * reg6: gain
     * reg0 , reg3, reg6 */
     fe = Genesys_Frontend();
+    fe.id = AdcId::PLUSTEK_OPTICBOOK_4800;
+    fe.layout = wolfson_layout;
+    fe.layout.type = FrontendType::WOLFSON_GL846;
+    fe.regs = {
+        { 0x00, 0x78 },
+        { 0x01, 0xf0 },
+        { 0x02, 0x00 },
+        { 0x03, 0x00 },
+        { 0x20, 0x00 },
+        { 0x21, 0x00 },
+        { 0x22, 0x00 },
+        { 0x24, 0x00 },
+        { 0x25, 0x00 },
+        { 0x26, 0x00 },
+        { 0x28, 0x00 },
+        { 0x29, 0x00 },
+        { 0x2a, 0x00 },
+    };
+    fe.reg2 = {0x00, 0x00, 0x00};
+    s_frontends->push_back(fe);
+
+
+    /* reg0: control 74 data, 70 no data
+    * reg3: offset
+    * reg6: gain
+    * reg0 , reg3, reg6 */
+    fe = Genesys_Frontend();
     fe.id = AdcId::CANON_LIDE_80;
     fe.layout = wolfson_layout;
     fe.layout.type = FrontendType::CANON_LIDE_80;

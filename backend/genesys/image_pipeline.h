@@ -481,6 +481,53 @@ private:
     std::vector<std::uint8_t> cached_line_;
 };
 
+// A pipeline node that reduces the number of lines by an arbitrary ratio,
+// averaging the source lines that fall into each output line
+class ImagePipelineNodeResampleLines : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeResampleLines(ImagePipelineNode& source, std::size_t height);
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return height_; }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    ImagePipelineNode& source_;
+    std::size_t height_ = 0;
+    std::size_t source_height_ = 0;
+    std::size_t out_row_ = 0;
+    std::size_t consumed_ = 0;
+
+    std::vector<std::uint8_t> cached_line_;
+    std::vector<std::uint32_t> accum_;
+};
+
+// A pipeline node that keeps only the first `width` pixels of every row
+// (used together with ScaleRows to correct a slightly wrong pixel pitch)
+class ImagePipelineNodeCropColumns : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeCropColumns(ImagePipelineNode& source, std::size_t width);
+
+    std::size_t get_width() const override { return width_; }
+    std::size_t get_height() const override { return source_.get_height(); }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    ImagePipelineNode& source_;
+    std::size_t width_ = 0;
+    std::vector<std::uint8_t> cached_line_;
+};
+
 // A pipeline node that mimics the calibration behavior on Genesys chips
 class ImagePipelineNodeCalibrate : public ImagePipelineNode
 {

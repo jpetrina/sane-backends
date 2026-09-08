@@ -321,6 +321,12 @@ bool sanei_genesys_is_buffer_empty(Genesys_Device* dev)
 
 void wait_until_buffer_non_empty(Genesys_Device* dev, bool check_status_twice)
 {
+    // OpticBook 4800 (GL845): BUFEMPTY does not clear even when data is
+    // available; reading works regardless, so do not wait on it
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        return;
+    }
+
     // FIXME: reduce MAX_RETRIES once tests are updated
     const unsigned MAX_RETRIES = 100000;
     for (unsigned i = 0; i < MAX_RETRIES; ++i) {
@@ -900,7 +906,14 @@ void compute_session(const Genesys_Device* dev, ScanSession& s, const Genesys_Se
 {
     DBG_HELPER(dbg);
 
-    (void) dev;
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        // The line period of this scanner is tied to the CCD clocking group and
+        // its motor profile (3500 / 5500 / 11000). Every session — scan, shading
+        // and the internal calibrations — must use the period of the sensor
+        // profile it is computed for; the --scan-exposure-time option (set once
+        // at open for the start-up resolution) is ignored for this model.
+        s.params.exposure_lperiod = sensor.exposure_lperiod;
+    }
     s.params.assert_valid();
 
     if (s.params.depth != 8 && s.params.depth != 16) {
@@ -958,9 +971,18 @@ void compute_session(const Genesys_Device* dev, ScanSession& s, const Genesys_Se
         s.color_shift_lines_b = (s.color_shift_lines_b * 3800) / dev->motor.base_ydpi;
     }
 
-    s.color_shift_lines_r = (s.color_shift_lines_r * s.params.yres) / dev->motor.base_ydpi;
-    s.color_shift_lines_g = (s.color_shift_lines_g * s.params.yres) / dev->motor.base_ydpi;
-    s.color_shift_lines_b = (s.color_shift_lines_b * s.params.yres) / dev->motor.base_ydpi;
+    // OpticBook 4800: below 300 dpi the motor keeps the 300 dpi pitch and the
+    // extra lines are averaged down in the image pipeline
+    unsigned ob4800_line_scale = 1;
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 && s.params.yres < 300) {
+        // 200 dpi is derived from the 600 dpi pitch (3 lines), the rest from 300
+        ob4800_line_scale = (s.params.yres == 200) ? 3 : 300 / s.params.yres;
+    }
+    unsigned motor_yres = s.params.yres * ob4800_line_scale;
+
+    s.color_shift_lines_r = (s.color_shift_lines_r * motor_yres) / dev->motor.base_ydpi;
+    s.color_shift_lines_g = (s.color_shift_lines_g * motor_yres) / dev->motor.base_ydpi;
+    s.color_shift_lines_b = (s.color_shift_lines_b * motor_yres) / dev->motor.base_ydpi;
 
     s.max_color_shift_lines = 0;
     if (s.params.channels > 1 && !has_flag(s.params.flags, ScanFlag::IGNORE_COLOR_OFFSET)) {
@@ -968,7 +990,14 @@ void compute_session(const Genesys_Device* dev, ScanSession& s, const Genesys_Se
                                                                            s.color_shift_lines_b));
     }
 
-    s.output_line_count = s.params.lines + s.max_color_shift_lines + s.num_staggered_lines;
+    unsigned ob4800_lines = s.params.lines * ob4800_line_scale;
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        // the motor step is 0.4% coarser than nominal (same as the CCD pitch):
+        // fetch 1195/1200 of the lines, the pipeline stretches them to the
+        // requested count
+        ob4800_lines = (ob4800_lines * 1195) / 1200;
+    }
+    s.output_line_count = ob4800_lines + s.max_color_shift_lines + s.num_staggered_lines;
     s.optical_line_count = dev->model->is_cis ? s.output_line_count * s.params.channels
                                               : s.output_line_count;
 
@@ -1023,8 +1052,15 @@ void compute_session(const Genesys_Device* dev, ScanSession& s, const Genesys_Se
             }
         }
 
-        if (dev->model->model_id == ModelId::CANON_5600F) {
-            auto output_pixels_raw = (s.optical_pixels_raw * s.output_resolution) / s.optical_resolution;
+        if (dev->model->model_id == ModelId::CANON_5600F ||
+            dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+            // OpticBook 4800: the ASIC always delivers pixels at its fixed
+            // hardware pitch (pixel_count_ratio of optical pixels), the
+            // pipeline scales rows down to the requested resolution
+            auto output_pixels_raw = (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800
+                                      && s.output_resolution <= 300)
+                    ? s.pixel_count_ratio.apply(s.optical_pixels_raw)
+                    : (s.optical_pixels_raw * s.output_resolution) / s.optical_resolution;
             auto output_channel_bytes_raw = multiply_by_depth_ceil(output_pixels_raw, s.params.depth);
             s.output_line_bytes_raw = output_channel_bytes_raw * s.params.channels;
         } else {
@@ -1275,6 +1311,26 @@ ImagePipelineStack build_image_pipeline(const Genesys_Device& dev, const ScanSes
 
     if (pipeline.get_output_width() != session.params.get_requested_pixels()) {
         pipeline.push_node<ImagePipelineNodeScaleRows>(session.params.get_requested_pixels());
+    }
+
+    if (dev.model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 &&
+        get_pixel_format_depth(pipeline.get_output_format()) >= 8)
+    {
+        // the CCD pixel pitch is 0.4% finer than nominal (measured 85.26 mm for
+        // an 85.60 mm card): stretch the row by 1200/1195 and drop the excess
+        // on the right, so that the requested width covers the requested mm
+        unsigned want = session.params.get_requested_pixels();
+        unsigned stretched = (want * 1200 + 1194) / 1195;
+        if (stretched > want) {
+            pipeline.push_node<ImagePipelineNodeScaleRows>(stretched);
+            pipeline.push_node<ImagePipelineNodeCropColumns>(want);
+        }
+    }
+
+    if (dev.model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 &&
+        pipeline.get_output_height() != session.params.lines)
+    {
+        pipeline.push_node<ImagePipelineNodeResampleLines>(session.params.lines);
     }
 
     return pipeline;

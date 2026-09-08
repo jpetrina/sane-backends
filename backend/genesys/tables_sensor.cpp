@@ -3765,6 +3765,91 @@ void genesys_init_sensor_tables()
     }
 
     sensor = Genesys_Sensor();
+    sensor.sensor_id = SensorId::CCD_PLUSTEK_OPTICBOOK_4800; // gl845
+    sensor.resolutions = { 75, 100, 150, 200, 300, 600, 1200 };
+    sensor.exposure_lperiod = 3500;
+    sensor.full_resolution = 1200;
+    sensor.black_pixels = 20;
+    sensor.dummy_pixel = 20;
+    sensor.fau_gain_white_ref = 210;
+    sensor.gain_white_ref = 200;
+    sensor.exposure = { 0, 0, 0 };
+    sensor.custom_regs = {
+        { 0x16, 0x23 }, { 0x17, 0x0c }, { 0x18, 0x13 }, { 0x19, 0x2a },
+        { 0x1a, 0x00 }, { 0x1b, 0x00 }, { 0x1c, 0x00 }, { 0x1d, 0x84 },
+        { 0x52, 0x06 }, { 0x53, 0x08 }, { 0x54, 0x0a }, { 0x55, 0x00 },
+        { 0x56, 0x02 }, { 0x57, 0x04 }, { 0x58, 0x19 }, { 0x59, 0x49 }, { 0x5a, 0x40 },
+        { 0x70, 0x03 }, { 0x71, 0x04 }, { 0x72, 0x04 }, { 0x73, 0x05 },
+        { 0x74, 0x00 }, { 0x75, 0x00 }, { 0x76, 0x3f },
+        { 0x77, 0x00 }, { 0x78, 0x00 }, { 0x79, 0x00 },
+        { 0x7a, 0x00 }, { 0x7b, 0x00 }, { 0x7c, 0x00 }, { 0x7d, 0x00 },
+        { 0x87, 0x00 },
+    };
+    sensor.gamma = { 1.7f, 1.7f, 1.7f };
+    {
+        struct CustomSensorSettings
+        {
+            ValueFilterAny<unsigned> resolutions;
+            unsigned register_dpihw;
+            Ratio pixel_count_ratio;
+            unsigned shading_factor;
+            unsigned exposure_lperiod;
+            int output_pixel_offset; // frame start shift, output pixels
+            GenesysRegisterSettingSet custom_regs;
+        };
+
+        CustomSensorSettings custom_settings[] = {
+            // each CCD clocking starts the frame at a slightly different place:
+            // 600 dpi ~0.95 mm right of 300 dpi, 1200 dpi another ~0.47 mm right.
+            // model.x_offset is set for the 1200 dpi group; the others get the
+            // difference back via output_pixel_offset (output pixels)
+            { { 75 }, 1200, Ratio{1, 4}, 4, 3500, 4, {} },
+            { { 100 }, 1200, Ratio{1, 4}, 4, 3500, 6, {} },
+            { { 150 }, 1200, Ratio{1, 4}, 4, 3500, 8, {} },
+            { { 300 }, 1200, Ratio{1, 4}, 4, 3500, 17, {} },
+            { { 200 }, 1200, Ratio{1, 2}, 2, 5500, 4, {   // 200 dpi: 600 dpi pitch, 3 lines averaged
+                // CCD clocking for the 600 dpi pixel pitch (from native driver)
+                { 0x18, 0x01 }, { 0x1a, 0x30 },
+                { 0x58, 0x01 }, { 0x59, 0x31 },
+                { 0x70, 0x00 }, { 0x71, 0x01 }, { 0x72, 0x01 }, { 0x73, 0x02 },
+            } },
+            { { 600 }, 1200, Ratio{1, 2}, 2, 5500, 11, {
+                // CCD clocking for the 600 dpi pixel pitch (from native driver)
+                { 0x18, 0x01 }, { 0x1a, 0x30 },
+                { 0x58, 0x01 }, { 0x59, 0x31 },
+                { 0x70, 0x00 }, { 0x71, 0x01 }, { 0x72, 0x01 }, { 0x73, 0x02 },
+            } },
+            { { 1200 }, 1200, Ratio{1, 1}, 1, 11000, 0, {
+                // CCD clocking for the 1200 dpi pixel pitch (from native driver)
+                { 0x18, 0x01 }, { 0x1a, 0x30 }, { 0x1c, 0x20 },
+                { 0x52, 0x08 }, { 0x53, 0x0a }, { 0x54, 0x00 },
+                { 0x55, 0x02 }, { 0x56, 0x04 }, { 0x57, 0x06 },
+                { 0x58, 0x21 }, { 0x59, 0x51 }, { 0x5a, 0xc0 },
+                { 0x70, 0x06 }, { 0x71, 0x07 }, { 0x72, 0x08 }, { 0x73, 0x09 },
+                { 0x76, 0x00 },
+            } },
+        };
+
+        for (const CustomSensorSettings& setting : custom_settings) {
+            sensor.resolutions = setting.resolutions;
+            sensor.register_dpihw = setting.register_dpihw;
+            sensor.register_dpiset = 1200;
+            // calibrate with the group's own CCD clocking and exposure: the
+            // shading scan runs at the pixel pitch the chip delivers for this
+            // group (300/600/1200), one coefficient per delivered pixel
+            sensor.shading_resolution = 1200 / setting.shading_factor;
+            sensor.pixel_count_ratio = setting.pixel_count_ratio;
+            sensor.shading_factor = 1;
+            sensor.exposure_lperiod = setting.exposure_lperiod;
+            sensor.output_pixel_offset = setting.output_pixel_offset;
+            for (const auto& r : setting.custom_regs) {
+                sensor.custom_regs.set_value(r.address, r.value);
+            }
+            s_sensors->push_back(sensor);
+        }
+    }
+
+    sensor = Genesys_Sensor();
     sensor.sensor_id = SensorId::CIS_CANON_LIDE_80; // gl841
     sensor.full_resolution = 1200; // real hardware limit is 2400
     sensor.register_dpihw = 1200;

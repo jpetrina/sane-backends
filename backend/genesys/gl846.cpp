@@ -31,6 +31,8 @@
 #include "test_settings.h"
 
 #include <vector>
+#include <cstdlib>
+#include <cstring>
 
 namespace genesys {
 namespace gl846 {
@@ -60,7 +62,8 @@ gl846_init_registers (Genesys_Device * dev)
 
     dev->reg.init_reg(0x01, 0x60);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->reg.init_reg(0x01, 0x22);
     }
@@ -74,19 +77,22 @@ gl846_init_registers (Genesys_Device * dev)
     dev->reg.init_reg(0x04, 0x22);
     dev->reg.init_reg(0x05, 0x60);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->reg.init_reg(0x05, 0x48);
     }
     dev->reg.init_reg(0x06, 0x10);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->reg.init_reg(0x06, 0xf0);
     }
     dev->reg.init_reg(0x08, 0x60);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->reg.init_reg(0x08, 0x00);
     }
@@ -95,6 +101,9 @@ gl846_init_registers (Genesys_Device * dev)
     dev->reg.init_reg(0x0b, 0x8b);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
         dev->reg.init_reg(0x0b, 0x2a);
+    }
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        dev->reg.init_reg(0x0b, 0x4a);   // 40 MHz clock, as the native driver
     }
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
         dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
@@ -121,7 +130,8 @@ gl846_init_registers (Genesys_Device * dev)
 
      // SCANFED
     dev->reg.init_reg(0x1f, 0x01);
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0x1f, 0x00);
     }
 
@@ -150,7 +160,8 @@ gl846_init_registers (Genesys_Device * dev)
     // DUMMY: the number of CCD dummy pixels
     dev->reg.init_reg(0x34, 0x1f);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->reg.init_reg(0x34, 0x14);
     }
@@ -208,7 +219,8 @@ gl846_init_registers (Genesys_Device * dev)
     dev->reg.init_reg(0x7d, 0x20); // SENSOR_DEF
     dev->reg.init_reg(0x7f, 0x05);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->reg.init_reg(0x7f, 0x00);
     }
@@ -217,10 +229,12 @@ gl846_init_registers (Genesys_Device * dev)
 
     // MTRPLS: pulse width of ADF motor trigger signal
     dev->reg.init_reg(0x94, 0x00);
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0x94, 0xff);
     }
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0x98, 0x20); // ONDUR
         dev->reg.init_reg(0x99, 0x00); // ONDUR
         dev->reg.init_reg(0x9a, 0x90); // OFFDUR
@@ -228,18 +242,21 @@ gl846_init_registers (Genesys_Device * dev)
     }
 
     dev->reg.init_reg(0x9d, 0x00); // contains STEPTIM
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0x9d, 0x04);
     }
     dev->reg.init_reg(0x9e, 0x00);
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0xa1, 0xe0);
     }
 
     // RFHSET (SDRAM refresh time)
     dev->reg.init_reg(0xa2, 0x1f);
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->reg.init_reg(0xa2, 0x0f);
     }
@@ -253,14 +270,17 @@ gl846_init_registers (Genesys_Device * dev)
     {
         dev->reg.init_reg(0xab, 0x01);
     }
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0xbb, 0x00); // FIXME: default is the same
     }
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0xbc, 0x0f);
         dev->reg.init_reg(0xdb, 0xff);
     }
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0xbe, 0x07);
     }
 
@@ -270,7 +290,8 @@ gl846_init_registers (Genesys_Device * dev)
     // [0xe0..0xf7] - image buffer addresses. Set during memory layout setup
     dev->reg.init_reg(0xf8, 0x05); // MAXSEL, MINSEL
 
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         dev->reg.init_reg(0xfe, 0x08); // MOTTGST, AUTO_O
         dev->reg.init_reg(0xff, 0x02); // AUTO_S
     }
@@ -284,7 +305,18 @@ gl846_init_registers (Genesys_Device * dev)
 /**
  * Set register values of Analog Device type frontend
  * */
-static void gl846_set_adi_fe(Genesys_Device* dev, std::uint8_t set)
+// OpticBook 4800: the shading pass runs in the scan's own window and read-out
+// mode, with a lamp-off dark pass; this used to be limited to the full CCD
+// clock, OB4800_CALIB_LEGACY=1 restores that limit for A/B comparison.
+static bool ob4800_scan_window_calibration(const Genesys_Sensor& sensor, unsigned resolution)
+{
+    if (std::getenv("OB4800_CALIB_LEGACY") != nullptr) {
+        return resolution == sensor.full_resolution;
+    }
+    return true;
+}
+
+static void gl846_set_adi_fe(Genesys_Device* dev, const Genesys_Sensor& sensor, std::uint8_t set)
 {
     DBG_HELPER(dbg);
   int i;
@@ -295,6 +327,49 @@ static void gl846_set_adi_fe(Genesys_Device* dev, std::uint8_t set)
         dev->interface->sleep_ms(10);
         status = scanner_read_status(*dev);
     };
+
+    // OpticBook 4800: AFE registers 2-4 are offsets and 5-7 are gains
+    // (reverse of the generic order); values are those computed by the
+    // native driver's calibration for this unit
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        // AFE configuration register: 0xf8 for the 1200 dpi pixel pitch
+        // the CCD clocking group of the session being set up: 300/600/1200.
+        // (dev->session is not yet updated at this point, so it must not be used)
+        unsigned pitch = sensor.shading_resolution;
+        dev->interface->write_fe_register(0x00, pitch >= 1200 ? 0xf8 : 0x70);
+        dev->interface->write_fe_register(0x01, 0x80);
+        // AFE registers 2-4 are the gains (5-7 turned out to be offsets).
+        // Values are from the native driver's 300 dpi dump; the 600 and 1200
+        // dpi CCD clockings deliver ~30% more signal and saturate on white
+        // paper, so they run 24 codes lower (measured on a white sheet)
+        unsigned ofs[3] = { 0x3e, 0x34, 0x39 };
+        if (pitch >= 600) {
+            ofs[0] = 0x26; ofs[1] = 0x1c; ofs[2] = 0x21;
+        }
+        if (const char* e = std::getenv("OB4800_AFE_OFS_DELTA")) {
+            int d = std::atoi(e);
+            for (unsigned k = 0; k < 3; k++) {
+                int v = static_cast<int>(ofs[k]) + d;
+                ofs[k] = static_cast<unsigned>(v < 0 ? 0 : (v > 255 ? 255 : v));
+            }
+        }
+        dev->interface->write_fe_register(0x02, ofs[0]);
+        dev->interface->write_fe_register(0x03, ofs[1]);
+        dev->interface->write_fe_register(0x04, ofs[2]);
+        unsigned gain[3] = { 0x114, 0x10c, 0x10d };
+        if (const char* e = std::getenv("OB4800_AFE_GAIN_DELTA")) {
+            int d = std::atoi(e);
+            for (unsigned k = 0; k < 3; k++) {
+                int v = static_cast<int>(gain[k] & 0xff) + d;
+                v = v < 0 ? 0 : (v > 255 ? 255 : v);
+                gain[k] = (gain[k] & 0x100) | static_cast<unsigned>(v);
+            }
+        }
+        dev->interface->write_fe_register(0x05, gain[0]);
+        dev->interface->write_fe_register(0x06, gain[1]);
+        dev->interface->write_fe_register(0x07, gain[2]);
+        return;
+    }
 
     if (set == AFE_INIT) {
         dev->frontend = dev->frontend_initial;
@@ -326,7 +401,7 @@ void CommandSetGl846::set_fe(Genesys_Device* dev, const Genesys_Sensor& sensor,
     std::uint8_t frontend_type = dev->reg.find_reg(0x04).value & REG_0x04_FESET;
     switch (frontend_type) {
       case 0x02: /* ADI FE */
-        gl846_set_adi_fe(dev, set);
+        gl846_set_adi_fe(dev, sensor, set);
         break;
       default:
             throw SaneException("unsupported frontend type %d", frontend_type);
@@ -614,6 +689,33 @@ static void gl846_init_optical_regs_scan(Genesys_Device* dev, const Genesys_Sens
     reg->set24(REG_MAXWD, (session.output_line_bytes_raw * session.params.channels >> 2));
     reg->set16(REG_LPERIOD, exposure_time);
     reg->set8(0x34, sensor.dummy_pixel);
+
+    // OpticBook 4800: capture only works with SCANMOD=0 (native driver
+    // sets 0x06 from 0xf0 to 0x10 right before scanning)
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        reg->find_reg(REG_0x06).value &= ~REG_0x06_SCANMOD;
+    }
+
+    // OpticBook 4800: memory layout depends on channel count (native driver
+    // uses two large segments repeated 3x for gray, six segments for color)
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        static const std::uint8_t gray[] = {
+            0x00,0x68, 0x08,0x33, 0x08,0x34, 0x0f,0xff,
+            0x00,0x68, 0x08,0x33, 0x08,0x34, 0x0f,0xff,
+            0x00,0x68, 0x08,0x33, 0x08,0x34, 0x0f,0xff, 0x23 };
+        static const std::uint8_t color[] = {
+            0x00,0x68, 0x03,0x00, 0x03,0x01, 0x05,0x99,
+            0x05,0x9a, 0x08,0x32, 0x08,0x33, 0x0a,0xcb,
+            0x0a,0xcc, 0x0d,0x64, 0x0d,0x65, 0x0f,0xfd, 0x05 };
+        const std::uint8_t* lay = (session.params.channels == 1) ? gray : color;
+        // GPIO 0x6d: the native driver clears it for the 1200 dpi mode
+        dev->interface->write_register(0x6d, session.params.xres >= 1200 ? 0x00 : 0x80);
+        for (unsigned i = 0; i < 24; i++) {
+            dev->interface->write_register(0xe0 + i, lay[i]);
+        }
+        reg->set8(0xf8, lay[24]);   // 0xf8 is part of the register set and
+                                    // would be overwritten by the bulk write
+    }
 }
 
 void CommandSetGl846::init_regs_for_scan_session(Genesys_Device* dev, const Genesys_Sensor& sensor,
@@ -640,6 +742,12 @@ void CommandSetGl846::init_regs_for_scan_session(Genesys_Device* dev, const Gene
     }
 
   slope_dpi = slope_dpi * (1 + dummy);
+
+    // OpticBook 4800: the motor never runs slower than the 300 dpi pitch,
+    // lower resolutions are produced by averaging lines in the pipeline
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 && slope_dpi < 300) {
+        slope_dpi = (slope_dpi == 200) ? 600 : 300;
+    }
 
     exposure_time = session.params.exposure_lperiod;
     const auto& motor_profile = get_motor_profile(dev->motor.profiles, exposure_time, session);
@@ -756,7 +864,6 @@ void CommandSetGl846::begin_scan(Genesys_Device* dev, const Genesys_Sensor& sens
     }
 
     scanner_clear_scan_and_feed_counts(*dev);
-
     std::uint8_t val = dev->interface->read_register(REG_0x01);
     val |= REG_0x01_SCAN;
     dev->interface->write_register(REG_0x01, val);
@@ -808,7 +915,23 @@ void CommandSetGl846::init_regs_for_shading(Genesys_Device* dev, const Genesys_S
     }
 
     unsigned channels = 3;
+    // OB4800: calibrate in the same channel mode as the scan. The CCD read-out
+    // differs between 1- and 3-channel sessions and narrow response defects
+    // (dust close to the sensor) sit at different pixels in each mode, so a
+    // 3-channel reference cannot correct a gray scan at 1200 dpi. The single
+    // channel is spread to R,G,B later (the chip always consumes 3-channel
+    // shading records). OB4800_CALIB_3CH=1 restores the old behaviour.
     unsigned resolution = sensor.shading_resolution;
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 &&
+        std::getenv("OB4800_CALIB_3CH") == nullptr &&
+        dev->settings.get_channels() == 1 &&
+        ob4800_scan_window_calibration(sensor, resolution)) {
+        // single-channel calibration is only needed at the full CCD clock
+        // (1200 dpi), where it removes the vertical stripes. At the half/quarter
+        // clock (200/600 and 75-300) it wrecks the left edge and those groups
+        // have no stripes, so they keep the 3-channel calibration.
+        channels = 1;
+    }
 
     const auto& calib_sensor = sanei_genesys_find_sensor(dev, resolution, channels,
                                                          dev->settings.scan_method);
@@ -827,6 +950,28 @@ void CommandSetGl846::init_regs_for_shading(Genesys_Device* dev, const Genesys_S
         flags |= ScanFlag::USE_XPA;
     } else {
         move = static_cast<int>(dev->model->y_offset_calib_white);
+        if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+            // white reference capture: calibrate on a sheet lying on the glass
+            if (const char* e = std::getenv("OB4800_CALIB_Y_MM")) {
+                float y = static_cast<float>(std::atof(e));
+                if (y >= 18.0f && y <= 60.0f) {
+                    move = y;
+                }
+            }
+        }
+        // the carriage cannot move backwards: the calibration area must end
+        // before the scan starts, otherwise the head is driven into the stop
+        float scan_start = dev->model->y_offset + dev->settings.tl_y;
+        if (move + calib_size_mm > scan_start) {
+            DBG(DBG_error0, "OpticBook 4800: refusing to calibrate at %.1f-%.1f mm because the scan "
+                           "starts at %.1f mm and the carriage cannot move backwards. Start the "
+                           "scan further down (-t) or move the calibration area up.\n",
+                move, move + calib_size_mm, scan_start);
+            throw SaneException(SANE_STATUS_INVAL,
+                                "calibration area %.1f-%.1f mm must end before the scan start "
+                                "at %.1f mm (carriage cannot move backwards)",
+                                move, move + calib_size_mm, scan_start);
+        }
     }
 
     move = static_cast<float>((move * move_dpi) / MM_PER_INCH);
@@ -839,8 +984,31 @@ void CommandSetGl846::init_regs_for_shading(Genesys_Device* dev, const Genesys_S
     session.params.startx = 0;
     session.params.starty = static_cast<unsigned>(move);
     session.params.pixels = dev->model->x_size_calib_mm * resolution / MM_PER_INCH;
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 &&
+        ob4800_scan_window_calibration(sensor, resolution)) {
+        // Single-channel shading pass: use the scan's own window. The chip does
+        // not deliver a single-channel read-out that starts at sensor pixel 0 at
+        // the full 1200 dpi clock, and a window equal to the scan's lines the
+        // reference up with the frame pixel for pixel.
+        unsigned full = session.params.pixels;
+        unsigned sx = static_cast<unsigned>((dev->model->x_offset + dev->settings.tl_x) *
+                                            resolution / MM_PER_INCH);
+        unsigned px = static_cast<unsigned>(static_cast<unsigned long long>(dev->settings.pixels) *
+                                            resolution / dev->settings.xres);
+        if (sx < full && px > 0) {
+            if (sx + px > full) {
+                px = full - sx;
+            }
+            session.params.startx = sx;
+            session.params.pixels = px;
+        }
+        DBG(DBG_info, "%s: OB4800 shading window startx=%u pixels=%u (channels %u)\n",
+            __func__, session.params.startx, session.params.pixels, channels);
+    }
     session.params.lines = calib_lines;
-    session.params.depth = 16;
+    // OpticBook 4800: the chip delivers 8 bit data only; the calibration
+    // reader widens it to 16 bit
+    session.params.depth = (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) ? 8 : 16;
     session.params.channels = channels;
     session.params.scan_method = dev->settings.scan_method;
     session.params.scan_mode = ScanColorMode::COLOR_SINGLE_PASS;
@@ -891,6 +1059,69 @@ void CommandSetGl846::send_shading_data(Genesys_Device* dev, const Genesys_Senso
 
   /* base addr of data has been written in reg D0-D4 in 4K word, so AHB address
    * is 8192*reg value */
+
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        // OpticBook 4800: all three shading banks (0xd0-0xd2) point to the
+        // same memory, and the ASIC expects one block with the three channels
+        // interleaved per pixel: dark_R gain_R dark_G gain_G dark_B gain_B.
+        // Source coefficients are at calibration pitch; take every
+        // shading_factor-th one for the output pitch.
+        // the shading table is paged: 512 bytes per page, 42 records of 12 bytes
+        // (dark/gain for R, G, B) per page, the last 8 bytes of a page unused.
+        // data already holds one 12-byte record per calibration pixel; the chip
+        // indexes the table from the first pixel of the scan window
+        const unsigned REC = 12, PAGE = 512, PER_PAGE = PAGE / REC;
+        unsigned count = static_cast<unsigned>(size) / REC;
+        // the chip counts the table from params.startx, i.e. without the
+        // sensor's output_pixel_offset (verified by aligning a dust speck)
+        // The averaged lines are stored with the start offset that genesys uses
+        // for them, startx * full_resolution / xres (see
+        // genesys_shading_calibration_impl); the table must be read from the
+        // same index, otherwise the correction is displaced by
+        // startx * (full_resolution / xres - 1) pixels at the lower clockings.
+        unsigned src_px = static_cast<unsigned>(
+            static_cast<unsigned long long>(dev->session.params.startx) * sensor.full_resolution
+            / dev->session.params.xres);
+        if (const char* e = std::getenv("OB4800_SHADING_SHIFT")) {
+            int sh = std::atoi(e);
+            src_px = (sh < 0 && static_cast<unsigned>(-sh) > src_px) ? 0 : src_px + sh;
+        }
+        if (src_px < count) {
+            count -= src_px;
+        } else {
+            count = 0;
+        }
+        unsigned pages = (count + PER_PAGE - 1) / PER_PAGE;
+        std::vector<std::uint8_t> mixed(pages * PAGE, 0);
+        for (unsigned n = 0; n < count; n++) {
+            std::uint8_t* ptr = mixed.data() + (n / PER_PAGE) * PAGE + (n % PER_PAGE) * REC;
+            std::memcpy(ptr, data + (src_px + n) * REC, REC);
+        }
+        (void) pixels;
+        (void) length;
+        if (std::getenv("OB4800_SHADING_TEST")) {
+            // synthetic table: unity gain everywhere, test stripes:
+            // 500-519 x2, 560-579 x4, 620-639 x6, 680-699 x0.5, 740-759 x1.5
+            for (unsigned n = 0; n < count; n++) {
+                std::uint8_t* ptr = mixed.data() + (n / PER_PAGE) * PAGE + (n % PER_PAGE) * REC;
+                unsigned g = 0x2000;
+                if (n >= 500 && n < 520) g = 0x4000;
+                if (n >= 560 && n < 580) g = 0x8000;
+                if (n >= 620 && n < 640) g = 0xC000;
+                if (n >= 680 && n < 700) g = 0x1000;
+                if (n >= 740 && n < 760) g = 0x3000;
+                for (i = 0; i < 3; i++) {
+                    ptr[0] = 0; ptr[1] = 0;
+                    ptr[2] = g & 0xff; ptr[3] = g >> 8;
+                    ptr += 4;
+                }
+            }
+        }
+        std::uint8_t val = dev->interface->read_register(0xd0);
+        addr = val * 8192 + 0x10000000;
+        dev->interface->write_ahb(addr, pages * PAGE, mixed.data());
+        return;
+    }
 
   /* write actual color channel data */
   for(i=0;i<3;i++)
@@ -970,7 +1201,15 @@ void CommandSetGl846::asic_boot(Genesys_Device* dev, bool cold) const
         dev->interface->write_register(0x0e, 0x00);
     }
 
-    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800) {
+    // OpticBook 4800 (GL845): register 0x0e must stay at 1 after reset,
+    // otherwise BUFEMPTY never clears and valid word count reads as 0
+    // even though scanned data is present in memory
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        dev->interface->write_register(0x0e, 0x01);
+    }
+
+    if (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_3800 ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
         if (dev->usb_mode == 1) {
             val = 0x14;
         } else {
@@ -1000,7 +1239,8 @@ void CommandSetGl846::asic_boot(Genesys_Device* dev, bool cold) const
 
     // set up clocks
     if (dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_7400 ||
-        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I)
+        dev->model->model_id == ModelId::PLUSTEK_OPTICFILM_8200I ||
+        dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800)
     {
         dev->interface->write_0x8c(0x10, 0x0c);
         dev->interface->write_0x8c(0x13, 0x0c);
