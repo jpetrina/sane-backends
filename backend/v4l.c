@@ -365,6 +365,19 @@ attach (const char *devname)
 }
 
 static void
+attach_video_devices (void)
+{
+  char devname[PATH_MAX];
+  int index;
+
+  for (index = 0; index < 64; index++)
+    {
+      snprintf (devname, sizeof (devname), "/dev/video%d", index);
+      attach (devname);
+    }
+}
+
+static void
 set_default_format (V4L_Scanner *s)
 {
   memset (&s->format, 0, sizeof (s->format));
@@ -888,9 +901,10 @@ sane_init (SANE_Int *version_code, SANE_Auth_Callback authorize)
   DBG (3, "sane_init\n");
   if (version_code)
     *version_code = SANE_VERSION_CODE (SANE_CURRENT_MAJOR, SANE_CURRENT_MINOR, BUILD);
+  attach_video_devices ();
   fp = sanei_config_open (V4L_CONFIG_FILE);
   if (!fp)
-    return attach ("/dev/video0");
+    return SANE_STATUS_GOOD;
   while (sanei_config_read (line, sizeof (line), fp))
     {
       if (line[0] == '#')
