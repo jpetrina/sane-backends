@@ -23,6 +23,7 @@
 #include <sys/mman.h>
 #include <poll.h>
 #include <stdint.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <linux/videodev2.h>
@@ -102,15 +103,81 @@ wait_for_frame (int fd, int timeout_ms)
   int result;
 
   poll_fd.fd = fd;
-  poll_fd.events = POLLIN | POLLPRI;
+  poll_fd.events = POLLIN;
   poll_fd.revents = 0;
   do
     result = poll (&poll_fd, 1, timeout_ms);
   while (result == -1 && errno == EINTR);
   if (result <= 0
+      || !(poll_fd.revents & POLLIN)
       || (poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
     return SANE_STATUS_IO_ERROR;
   return SANE_STATUS_GOOD;
+}
+
+static SANE_Status
+dequeue_frame (int fd, struct v4l2_buffer *buf, int timeout_ms)
+{
+  struct timespec start;
+  struct timespec now;
+
+  if (clock_gettime (CLOCK_MONOTONIC, &start) == -1)
+    return SANE_STATUS_IO_ERROR;
+
+  while (1)
+    {
+      int elapsed;
+      int wait_ms;
+
+      if (clock_gettime (CLOCK_MONOTONIC, &now) == -1)
+        return SANE_STATUS_IO_ERROR;
+      elapsed = (int) ((now.tv_sec - start.tv_sec) * 1000
+                       + (now.tv_nsec - start.tv_nsec) / 1000000);
+      if (elapsed >= timeout_ms)
+        break;
+      wait_ms = MIN (250, timeout_ms - elapsed);
+
+      if (wait_for_frame (fd, wait_ms) == SANE_STATUS_GOOD)
+        {
+          if (xioctl (fd, VIDIOC_DQBUF, buf) == 0)
+            return SANE_STATUS_GOOD;
+
+          if (errno != EAGAIN)
+            return SANE_STATUS_IO_ERROR;
+
+          DBG (4, "mmap capture: VIDIOC_DQBUF returned EAGAIN, retrying\n");
+        }
+    }
+
+  DBG (3, "mmap capture: timed out waiting for a dequeued frame\n");
+  return SANE_STATUS_IO_ERROR;
+}
+
+static ssize_t
+read_frame (int fd, void *buffer, size_t size, int timeout_ms)
+{
+  int elapsed = 0;
+
+  while (elapsed < timeout_ms)
+    {
+      if (wait_for_frame (fd, 250) == SANE_STATUS_GOOD)
+        {
+          ssize_t result = v4l2_read (fd, buffer, size);
+          if (result > 0)
+            return result;
+
+          if (result == -1 && errno != EAGAIN)
+            return -1;
+
+          DBG (4, "capture read path: v4l2_read returned EAGAIN, retrying\n");
+        }
+
+      elapsed += 250;
+    }
+
+  DBG (3, "capture read path: timed out waiting for a readable frame\n");
+  errno = ETIMEDOUT;
+  return -1;
 }
 
 static SANE_Status
@@ -161,6 +228,7 @@ probe_capture (int fd)
   size_t size;
   ssize_t result;
   SANE_Bool streaming = SANE_FALSE;
+  SANE_Bool mmap_capture = SANE_FALSE;
   SANE_Bool success = SANE_FALSE;
   __u32 capabilities;
 
@@ -174,6 +242,30 @@ probe_capture (int fd)
   if (xioctl (fd, VIDIOC_G_FMT, &format) == -1)
     return SANE_FALSE;
   debug_format (4, "probe format", &format.fmt.pix);
+
+  if (capabilities & V4L2_CAP_READWRITE)
+    {
+      DBG (4, "probe: trying read capture\n");
+      size = format.fmt.pix.sizeimage;
+      if (!size)
+        size = (size_t) format.fmt.pix.width * format.fmt.pix.height * 4;
+      mapping = malloc (size);
+      if (mapping == NULL)
+        return SANE_FALSE;
+      if (wait_for_frame (fd, V4L_PROBE_TIMEOUT_MS) == SANE_STATUS_GOOD)
+        {
+          result = v4l2_read (fd, mapping, size);
+          success = result > 0;
+          DBG (4, "probe: read returned %zd bytes\n", result);
+        }
+      else
+        DBG (3, "probe: read frame timed out: %s\n",
+             strerror (errno));
+      if (success)
+        goto cleanup;
+      free (mapping);
+      mapping = MAP_FAILED;
+    }
 
   if (capabilities & V4L2_CAP_STREAMING)
     {
@@ -194,6 +286,7 @@ probe_capture (int fd)
                            MAP_SHARED, fd, buffer.m.offset);
       if (mapping == MAP_FAILED)
         return SANE_FALSE;
+      mmap_capture = SANE_TRUE;
       if (xioctl (fd, VIDIOC_QBUF, &buffer) == -1
           || xioctl (fd, VIDIOC_STREAMON, &type) == -1)
         goto cleanup;
@@ -204,26 +297,6 @@ probe_capture (int fd)
       else
         DBG (3, "probe: first mmap frame timed out or dequeue failed: %s\n",
              strerror (errno));
-      goto cleanup;
-    }
-
-  if (capabilities & V4L2_CAP_READWRITE)
-    {
-      DBG (4, "probe: trying read capture\n");
-      size = format.fmt.pix.sizeimage;
-      if (!size)
-        size = (size_t) format.fmt.pix.width * format.fmt.pix.height * 4;
-      mapping = malloc (size);
-      if (mapping == NULL)
-        return SANE_FALSE;
-      if (wait_for_frame (fd, V4L_PROBE_TIMEOUT_MS) == SANE_STATUS_GOOD)
-        {
-          result = v4l2_read (fd, mapping, size);
-          success = result > 0;
-          DBG (4, "probe: read returned %zd bytes\n", result);
-        }
-      else
-        DBG (3, "probe: read frame timed out: %s\n", strerror (errno));
     }
 
 cleanup:
@@ -231,7 +304,7 @@ cleanup:
     xioctl (fd, VIDIOC_STREAMOFF, &type);
   if (mapping != MAP_FAILED)
     {
-      if (capabilities & V4L2_CAP_STREAMING)
+      if (mmap_capture)
         v4l2_munmap (mapping, buffer.length);
       else
         free (mapping);
@@ -289,6 +362,19 @@ attach (const char *devname)
   first_dev = dev;
   num_devices++;
   return SANE_STATUS_GOOD;
+}
+
+static void
+attach_video_devices (void)
+{
+  char devname[PATH_MAX];
+  int index;
+
+  for (index = 0; index < 64; index++)
+    {
+      snprintf (devname, sizeof (devname), "/dev/video%d", index);
+      attach (devname);
+    }
 }
 
 static void
@@ -720,10 +806,7 @@ start_capture (V4L_Scanner *s)
      the capture active before calling it so cleanup_capture() releases that
      queue when the next scan starts or the handle is cancelled. */
   s->streaming = SANE_TRUE;
-  if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) == SANE_STATUS_GOOD)
-    result = v4l2_read (s->fd, s->buffer, size);
-  else
-    result = -1;
+  result = read_frame (s->fd, s->buffer, size, V4L_CAPTURE_TIMEOUT_MS);
   DBG (4, "capture read path: result=%zd, buffer_size=%zu\n", result, size);
   if (result > 0)
     {
@@ -747,6 +830,12 @@ start_capture (V4L_Scanner *s)
 
   /* Some libv4l2/device combinations expose streaming but do not provide
      the read emulation.  Keep a direct mmap fallback for those devices. */
+  if (s->format_converted)
+    {
+      DBG (3, "capture read path unavailable; negotiated format requires "
+           "libv4l2 conversion, mmap fallback is not safe\n");
+      return SANE_STATUS_UNSUPPORTED;
+    }
   memset (&req, 0, sizeof (req));
   req.count = 1;
   req.type = type;
@@ -777,8 +866,8 @@ start_capture (V4L_Scanner *s)
       return SANE_STATUS_IO_ERROR;
     }
   s->streaming = SANE_TRUE;
-  if (wait_for_frame (s->fd, V4L_CAPTURE_TIMEOUT_MS) != SANE_STATUS_GOOD
-      || xioctl (s->fd, VIDIOC_DQBUF, &buf) == -1)
+  if (dequeue_frame (s->fd, &buf, V4L_CAPTURE_TIMEOUT_MS)
+      != SANE_STATUS_GOOD)
     {
       cleanup_capture (s);
       return SANE_STATUS_IO_ERROR;
@@ -812,9 +901,10 @@ sane_init (SANE_Int *version_code, SANE_Auth_Callback authorize)
   DBG (3, "sane_init\n");
   if (version_code)
     *version_code = SANE_VERSION_CODE (SANE_CURRENT_MAJOR, SANE_CURRENT_MINOR, BUILD);
+  attach_video_devices ();
   fp = sanei_config_open (V4L_CONFIG_FILE);
   if (!fp)
-    return attach ("/dev/video0");
+    return SANE_STATUS_GOOD;
   while (sanei_config_read (line, sizeof (line), fp))
     {
       if (line[0] == '#')
@@ -1101,6 +1191,7 @@ sane_start (SANE_Handle handle)
   struct v4l2_capability capability;
   __u32 pixel_format;
   int fd;
+  SANE_Status status;
   if (!s)
     return SANE_STATUS_INVAL;
   cleanup_capture (s);
@@ -1114,8 +1205,9 @@ sane_start (SANE_Handle handle)
     return SANE_STATUS_IO_ERROR;
   s->fd = fd;
   memset (&capability, 0, sizeof (capability));
-  if (query_capability (s->fd, &capability) != SANE_STATUS_GOOD)
-    return SANE_STATUS_IO_ERROR;
+  status = query_capability (s->fd, &capability);
+  if (status != SANE_STATUS_GOOD)
+    goto fail;
   s->capability = capability;
   set_default_format (s);
   s->gray_mode = !(s->val[OPT_MODE].s
@@ -1129,14 +1221,34 @@ sane_start (SANE_Handle handle)
   format.fmt.pix.pixelformat = pixel_format;
   format.fmt.pix.field = V4L2_FIELD_ANY;
   if (xioctl (s->fd, VIDIOC_S_FMT, &format) == -1)
-    return SANE_STATUS_INVAL;
-  if (format.fmt.pix.pixelformat != pixel_format)
-    return SANE_STATUS_UNSUPPORTED;
+    {
+      status = SANE_STATUS_INVAL;
+      goto fail;
+    }
+  s->format_converted = format.fmt.pix.pixelformat != pixel_format;
+  if (s->format_converted)
+    DBG (3, "negotiated native format differs from requested RGB24; "
+         "using libv4l2 conversion\n");
+  /* Keep the format requested from libv4l2 as the logical SANE frame format.
+     A direct mmap fallback is disabled above when conversion is required. */
+  format.fmt.pix.pixelformat = pixel_format;
   s->format = format;
   debug_format (3, "negotiated format", &s->format.fmt.pix);
-  if (update_parameters (s) != SANE_STATUS_GOOD)
-    return SANE_STATUS_INVAL;
-  return start_capture (s);
+  status = update_parameters (s);
+  if (status != SANE_STATUS_GOOD)
+    goto fail;
+  status = start_capture (s);
+  if (status == SANE_STATUS_GOOD)
+    return status;
+
+fail:
+  cleanup_capture (s);
+  if (s->fd >= 0)
+    {
+      v4l2_close (s->fd);
+      s->fd = -1;
+    }
+  return status;
 }
 
 SANE_Status

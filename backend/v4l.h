@@ -94,6 +94,7 @@ typedef struct V4L_Scanner
   SANE_Bool gray_mode;
   SANE_Bool is_mmap;
   SANE_Bool streaming;
+  SANE_Bool format_converted;
   void *buffer;
   size_t buffer_size;
   size_t frame_size;
