@@ -40,8 +40,11 @@
 #include "../include/sane/sanei.h"
 
 static AvahiSimplePoll *simple_poll = NULL;
-static int count_finish = 0;
-static int count_finish_target = 2;
+
+#define ESCL_DISCOVERY_PASSES 3
+#define ESCL_RESOLVER_RETRIES 3
+
+static unsigned int resolver_retries = 0;
 
 /**
  * \fn static void resolve_callback(AvahiServiceResolver *r, AVAHI_GCC_UNUSED
@@ -55,26 +58,45 @@ static int count_finish_target = 2;
  *  protocol or not.
  */
 static void
-resolve_callback(AvahiServiceResolver *r, AVAHI_GCC_UNUSED AvahiIfIndex interface,
+resolve_callback(AvahiServiceResolver *r, AvahiIfIndex interface,
                             AvahiProtocol protocol,
                             AvahiResolverEvent event,
                             const char *name,
-                            const char __sane_unused__ *type,
-                            const char __sane_unused__ *domain,
-                            const char __sane_unused__ *host_name,
+                            const char *type,
+                            const char *domain,
+                            const char *host_name,
                             const AvahiAddress *address,
                             uint16_t port,
                             AvahiStringList *txt,
-                            AvahiLookupResultFlags __sane_unused__ flags,
-                            void __sane_unused__ *userdata)
+                            AvahiLookupResultFlags flags,
+                            void *userdata)
 {
     char *t = NULL;
     const char *is;
     const char *uuid;
     AvahiStringList   *s;
+    AvahiClient *client = userdata;
+    (void)host_name;
+    (void)flags;
     assert(r);
     switch (event) {
         case AVAHI_RESOLVER_FAILURE:
+            if (client && resolver_retries < ESCL_RESOLVER_RETRIES)
+            {
+                resolver_retries++;
+                DBG (10, "eSCL resolver failed for %s; retrying (%u/%u).\n",
+                     name, resolver_retries, ESCL_RESOLVER_RETRIES);
+                if (avahi_service_resolver_new(client, interface, protocol,
+                                               name, type, domain,
+                                               AVAHI_PROTO_INET, 0,
+                                               resolve_callback, client))
+                {
+                    avahi_service_resolver_free(r);
+                    return;
+                }
+            }
+            DBG (10, "eSCL resolver failed for %s: %s\n", name,
+                 avahi_strerror(avahi_client_errno(client)));
            break;
         case AVAHI_RESOLVER_FOUND:
         {
@@ -152,12 +174,6 @@ browse_callback(AvahiServiceBrowser *b, AvahiIfIndex interface,
         break;
     case AVAHI_BROWSER_ALL_FOR_NOW:
     case AVAHI_BROWSER_CACHE_EXHAUSTED:
-        if (event != AVAHI_BROWSER_CACHE_EXHAUSTED)
-           {
-		count_finish++;
-		if (count_finish == count_finish_target)
-            		avahi_simple_poll_quit(simple_poll);
-	   }
         break;
     }
 }
@@ -194,10 +210,8 @@ escl_devices(SANE_Status *status, SANE_Bool disable_https)
     AvahiServiceBrowser *sb_https = NULL;
     int error;
 
-    count_finish = 0;
-    count_finish_target = disable_https ? 1 : 2;
-
     *status = SANE_STATUS_GOOD;
+    resolver_retries = 0;
     if (!(simple_poll = avahi_simple_poll_new())) {
         DBG( 10, "Failed to create simple poll object.\n");
         *status = SANE_STATUS_INVAL;
@@ -210,6 +224,7 @@ escl_devices(SANE_Status *status, SANE_Bool disable_https)
         *status = SANE_STATUS_INVAL;
         goto fail;
     }
+    for (int pass = 0; pass < ESCL_DISCOVERY_PASSES; pass++) {
     if (!(sb_http = avahi_service_browser_new(client, AVAHI_IF_UNSPEC,
                                                                    AVAHI_PROTO_UNSPEC, "_uscan._tcp",
                                                                    NULL, 0, browse_callback, client))) {
@@ -231,7 +246,21 @@ escl_devices(SANE_Status *status, SANE_Bool disable_https)
     } else {
         DBG(10, "HTTPS device discovery disabled by configuration.\n");
     }
-    avahi_simple_poll_loop(simple_poll);
+    for (int iteration = 0; iteration < 10; iteration++) {
+        if (avahi_simple_poll_iterate(simple_poll, 100) != 0) {
+            *status = SANE_STATUS_INVAL;
+            goto fail;
+        }
+    }
+    if (sb_https) {
+        avahi_service_browser_free(sb_https);
+        sb_https = NULL;
+    }
+    if (sb_http) {
+        avahi_service_browser_free(sb_http);
+        sb_http = NULL;
+    }
+    }
 fail:
     if (sb_https)
         avahi_service_browser_free(sb_https);

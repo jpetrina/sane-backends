@@ -365,12 +365,27 @@ escl_device_add(int port_nb,
     ESCL_Device *current = NULL;
     DBG (10, "escl_device_add\n");
     snprintf(url_port, sizeof(url_port), "https://%s:%d", ip_address, port_nb);
-    tls_version = escl_is_tls(url_port, type);
+    /* The service type already identifies HTTPS; do not block the Avahi
+     * callback with a network probe. */
+    tls_version = !strcmp(type, "_uscans._tcp") ? 1 : escl_is_tls(url_port, type);
 
     for (current = list_devices_primary; current; current = current->next) {
 	if ((strcmp(current->ip_address, ip_address) == 0) ||
             (uuid && current->uuid && !strcmp(current->uuid, uuid)))
            {
+	       if (current->port_nb == port_nb &&
+           strcmp(current->type, type) != 0 &&
+           (!strcmp(type, "_uscans._tcp") || !strcmp(type, "https")))
+                {
+                  char *secure_type = strdup(type);
+                  if (!secure_type)
+                     return SANE_STATUS_NO_MEM;
+                  free (current->type);
+                  current->type = secure_type;
+                  current->https = SANE_TRUE;
+                  current->tls = tls_version;
+                  return SANE_STATUS_GOOD;
+                }
 	       if (strcmp(current->ip_address, ip_address) != 0 ||
            current->port_nb != port_nb || strcmp(current->type, type) != 0) {
           SANE_Bool address_https = !strcmp(type, "_uscans._tcp") ||
@@ -383,24 +398,7 @@ escl_device_add(int port_nb,
              return address_status;
           return SANE_STATUS_GOOD;
        }
-	      if (strcmp(current->type, type))
-                {
-                  if(!strcmp(type, "_uscans._tcp") ||
-                     !strcmp(type, "https"))
-                    {
-                       free (current->type);
-                       current->type = strdup(type);
-                       if (strcmp(current->ip_address, ip_address)) {
-                           free (current->ip_address);
-                           current->ip_address = strdup(ip_address);
-                       }
-                       current->port_nb = port_nb;
-                       current->https = SANE_TRUE;
-                       current->tls = tls_version;
-                    }
-	          return (SANE_STATUS_GOOD);
-                }
-              else if (current->port_nb == port_nb)
+	      else if (current->port_nb == port_nb)
 	        return (SANE_STATUS_GOOD);
            }
     }
