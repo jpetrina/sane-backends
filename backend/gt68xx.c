@@ -946,11 +946,11 @@ download_firmware_file (GT68xx_Device * dev)
     {
       /* probably filename only */
       snprintf (filename, sizeof(filename), "%s%s%s%s%s%s%s",
-                STRINGIFY (PATH_SANE_DATA_DIR),
+                PATH_SANE_DATA_DIR,
                 PATH_SEP, "sane", PATH_SEP, "gt68xx", PATH_SEP,
                 dev->model->firmware_name);
       snprintf (dirname, sizeof(dirname), "%s%s%s%s%s",
-                STRINGIFY (PATH_SANE_DATA_DIR),
+                PATH_SANE_DATA_DIR,
                 PATH_SEP, "sane", PATH_SEP, "gt68xx");
       strncpy (basename, dev->model->firmware_name, sizeof(basename) - 1);
       basename[sizeof(basename) - 1] = '\0';

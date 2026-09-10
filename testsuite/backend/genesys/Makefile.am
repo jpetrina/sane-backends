@@ -17,7 +17,7 @@ check_PROGRAMS = genesys_unit_tests genesys_session_config_tests
 TESTS = genesys_unit_tests
 
 AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include -I$(top_srcdir)/include $(USB_CFLAGS) \
-    -DBACKEND_NAME=genesys -DTESTSUITE_BACKEND_GENESYS_SRCDIR=$(srcdir)
+    -DBACKEND_NAME=genesys -DTESTSUITE_BACKEND_GENESYS_SRCDIR="\"$(srcdir)\""
 
 genesys_unit_tests_SOURCES = tests.cpp tests.h \
     minigtest.cpp minigtest.h tests_printers.h \

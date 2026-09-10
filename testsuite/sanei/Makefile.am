@@ -23,7 +23,7 @@ sanei_constrain_test_SOURCES = sanei_constrain_test.c
 sanei_constrain_test_LDADD = $(TEST_LDADD)
 
 sanei_config_test_SOURCES = sanei_config_test.c
-sanei_config_test_CPPFLAGS = $(AM_CPPFLAGS) -DTESTSUITE_SANEI_SRCDIR=$(srcdir)
+sanei_config_test_CPPFLAGS = $(AM_CPPFLAGS) -DTESTSUITE_SANEI_SRCDIR="\"$(srcdir)\""
 sanei_config_test_LDADD = $(TEST_LDADD)
 
 sanei_check_test_SOURCES = sanei_check_test.c

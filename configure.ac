@@ -648,10 +648,14 @@ dnl enable/disable backends and features based on previous tests and user's
 dnl choice
 dnl ***********************************************************************
 
-AM_CPPFLAGS="${AM_CPPFLAGS} -DPATH_SANE_CONFIG_DIR=\$(configdir) \
-	  -DPATH_SANE_DATA_DIR=\$(datadir) \
-	  -DPATH_SANE_LOCK_DIR=\$(locksanedir) \
+PATH_FLAGS="-DPATH_SANE_CONFIG_DIR=\\\"\$(configdir)\\\" \
+	  -DPATH_SANE_DATA_DIR=\\\"\$(datadir)\\\" \
+	  -DPATH_SANE_LOCK_DIR=\\\"\$(locksanedir)\\\""
+
+AM_CPPFLAGS="${AM_CPPFLAGS} ${PATH_FLAGS} \
 	  -DV_MAJOR=${V_MAJOR} -DV_MINOR=${V_MINOR}"
+
+CPPFLAGS_FOR_BUILD="${CPPFLAGS_FOR_BUILD} ${PATH_FLAGS}"
 
 if test "${ac_cv_header_sys_socket_h}" = "no"; then
   echo "*** disabling saned (sys/socket.h not found)"

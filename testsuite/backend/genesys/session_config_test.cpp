@@ -37,9 +37,7 @@
 #include <string>
 #include <unordered_set>
 
-#define XSTR(s) STR(s)
-#define STR(s) #s
-#define CURR_SRCDIR XSTR(TESTSUITE_BACKEND_GENESYS_SRCDIR)
+#define CURR_SRCDIR TESTSUITE_BACKEND_GENESYS_SRCDIR
 
 struct TestConfig
 {
