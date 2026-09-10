@@ -519,6 +519,17 @@ query_control (const V4L_Scanner *s, unsigned id, SANE_Word *value)
   return 0;
 }
 
+static void
+query_control_option (V4L_Scanner *s, int option, unsigned id)
+{
+  if (query_control (s, id, &s->val[option].w) != 0)
+    {
+      s->opt[option].cap |= SANE_CAP_INACTIVE;
+      DBG (4, "control option %s is unavailable (V4L2 id=0x%x)\n",
+           s->opt[option].name, id);
+    }
+}
+
 static SANE_Status
 set_control (const V4L_Scanner *s, unsigned id, SANE_Word value)
 {
@@ -652,11 +663,11 @@ init_options (V4L_Scanner *s)
   s->opt[OPT_WHITE_LEVEL].name = SANE_NAME_WHITE_LEVEL;
   s->opt[OPT_WHITE_LEVEL].title = SANE_TITLE_WHITE_LEVEL;
   s->opt[OPT_WHITE_LEVEL].desc = SANE_DESC_WHITE_LEVEL;
-  query_control (s, V4L2_CID_BRIGHTNESS, &s->val[OPT_BRIGHTNESS].w);
-  query_control (s, V4L2_CID_HUE, &s->val[OPT_HUE].w);
-  query_control (s, V4L2_CID_SATURATION, &s->val[OPT_COLOR].w);
-  query_control (s, V4L2_CID_CONTRAST, &s->val[OPT_CONTRAST].w);
-  query_control (s, V4L2_CID_WHITENESS, &s->val[OPT_WHITE_LEVEL].w);
+  query_control_option (s, OPT_BRIGHTNESS, V4L2_CID_BRIGHTNESS);
+  query_control_option (s, OPT_HUE, V4L2_CID_HUE);
+  query_control_option (s, OPT_COLOR, V4L2_CID_SATURATION);
+  query_control_option (s, OPT_CONTRAST, V4L2_CID_CONTRAST);
+  query_control_option (s, OPT_WHITE_LEVEL, V4L2_CID_WHITENESS);
   return SANE_STATUS_GOOD;
 }
 
