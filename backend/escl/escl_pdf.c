@@ -25,12 +25,12 @@
 
 #include "escl.h"
 
-#include <cairo.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #if HAVE_POPPLER_GLIB
+#include <cairo.h>
 #include <poppler/glib/poppler.h>
 
 struct pdf_stream
