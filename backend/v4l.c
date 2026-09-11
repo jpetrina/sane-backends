@@ -1133,6 +1133,11 @@ sane_control_option (SANE_Handle handle, SANE_Int option, SANE_Action action,
           for (i = 0; i < MAX_CHANNELS && s->channel[i]; i++)
             if (strcmp (s->channel[i], copy) == 0)
               {
+                if (s->val[option].s && strcmp (s->val[option].s, copy) == 0)
+                  {
+                    free (copy);
+                    return SANE_STATUS_GOOD;
+                  }
                 memset (&input, 0, sizeof (input));
                 input.index = i;
                 if (xioctl (s->fd, VIDIOC_S_INPUT, &input) == -1)
@@ -1279,6 +1284,8 @@ sane_read (SANE_Handle handle, SANE_Byte *buf, SANE_Int max_len, SANE_Int *lenp)
   memcpy (buf, (unsigned char *) s->buffer + s->offset, count);
   s->offset += count;
   *lenp = (SANE_Int) count;
+  if (s->offset >= s->frame_size)
+    cleanup_capture (s);
   return SANE_STATUS_GOOD;
 }
 
