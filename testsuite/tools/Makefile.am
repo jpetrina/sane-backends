@@ -7,7 +7,7 @@
 all:
 	@echo "run 'make check' to run tests"
 
-SANEDESC  = ../../tools/sane-desc$(EXEEXT)
+SANEDESC  = ../../tools/sane-desc$(BUILD_EXEEXT)
 TESTFILE  = $(srcdir)/data/testfile.desc
 OUTFILES  = *.res
 DEVICE    = test
@@ -17,7 +17,7 @@ EXTRA_DIST = data/testfile.desc data/ascii.ref data/db.ref data/hal-new.ref \
 	     data/hwdb.ref data/plist.ref data/statistics.ref \
 	     data/udev+acl.ref data/udev+hwdb.ref data/udev.ref \
 	     data/usermap.ref data/xml.ref
-CLEANFILES = $(OUTFILES)
+CLEANFILES = $(OUTFILES) *.flt
 
 all: help
 
@@ -32,12 +32,15 @@ check.local:
 	for mode in ascii html-backends-split html-mfgs xml statistics usermap db udev udev+acl udev+hwdb hwdb plist hal hal-new; \
 	do \
 	  $(SANEDESC) -m $$mode -s $(srcdir)/data >$$mode.res ;\
-          if diff -I "sane-backends 1\.[0-9]\.[0-9]\+\([-.0-9a-fgdirty]\+\)\?$$" \
-	       $(srcdir)/data/$$mode.ref $$mode.res ; \
+	  grep -v "sane-backends 1\.[0-9]\.[0-9]\+\([-.0-9a-fgdirty]\+\)\?$$" \
+	       $(srcdir)/data/$$mode.ref >$$mode.ref.flt 2>/dev/null ;\
+	  grep -v "sane-backends 1\.[0-9]\.[0-9]\+\([-.0-9a-fgdirty]\+\)\?$$" \
+	       $$mode.res >$$mode.flt 2>/dev/null ;\
+	  if diff $$mode.ref.flt $$mode.flt ; \
 	  then \
-		echo "PASS: sane-desc -m $$mode -s $(srcdir)/data"; \
+		echo "PASS: sane-desc$(BUILD_EXEEXT) -m $$mode -s $(srcdir)/data"; \
 	  else \
-		echo "FAIL: sane-desc -m $$mode -s $(srcdir)/data"; \
+		echo "FAIL: sane-desc$(BUILD_EXEEXT) -m $$mode -s $(srcdir)/data"; \
 		pass=false ; \
 	  fi; \
 	done ;\

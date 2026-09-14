@@ -14,9 +14,7 @@
 #include "../include/sane/sanei.h"
 #include "../include/sane/sanei_config.h"
 
-#define XSTR(s) STR(s)
-#define STR(s) #s
-#define CONFIG_PATH XSTR(TESTSUITE_SANEI_SRCDIR)
+#define CONFIG_PATH TESTSUITE_SANEI_SRCDIR
 
 /*
  * variables and functions used by the tests below

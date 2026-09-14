@@ -2934,7 +2934,7 @@
     <usbproductid>*none*</usbproductid>
     <status>unsupported</status>
     <url>http://www.vjet.demon.co.uk/scanner/</url>
-    <comment>A better backend for the FilmScan 200 can be found at &lt;A HREF= "http://www.vjet.demon.co.uk/scanner/ "&gt;http://www.vjet.demon.co.uk/scanner/&lt;/A&gt;</comment>
+    <comment>A better backend for the FilmScan 200 can be found at &lt;A HREF="http://www.vjet.demon.co.uk/scanner/"&gt;http://www.vjet.demon.co.uk/scanner/&lt;/A&gt;</comment>
    </model>
    <model name="CX-3200">
     <interface>USB</interface>
@@ -9931,7 +9931,7 @@
  </mfg>
  <mfg name="Medion/Lifetec/Tevion/Cytron">
   <url>`http://www.medion.de/'</url>
-  <comment>Those scanners are also known as  "Aldi Scanner " or  "Tchibo Scanners "</comment>
+  <comment>Those scanners are also known as "Aldi Scanner" or "Tchibo Scanners"</comment>
    <model name="MD 9848">
     <interface>Parport (EPP)</interface>
     <usbvendorid>*none*</usbvendorid>
@@ -12664,12 +12664,12 @@
  </mfg>
  <mfg name="Acer Peripherals">
   <url>*none*</url>
-  <comment>Company was renamed to &lt;a href= "#BENQ "&gt;Benq&lt;/a&gt;.</comment>
+  <comment>Company was renamed to &lt;a href="#BENQ"&gt;Benq&lt;/a&gt;.</comment>
    <model name="*none*" />
  </mfg>
  <mfg name="Vuego">
   <url>*none*</url>
-  <comment>Company was renamed to &lt;a href= "#BENQ "&gt;Benq&lt;/a&gt;.</comment>
+  <comment>Company was renamed to &lt;a href="#BENQ"&gt;Benq&lt;/a&gt;.</comment>
    <model name="*none*" />
  </mfg>
  <mfg name="Benq (Acer)">

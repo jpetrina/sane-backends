@@ -240,7 +240,7 @@ abaton<br>(unmaintained)
 </table>
 <h3><a name="Z-ACER-PERIPHERALS">Manufacturer: Acer Peripherals</a></h3>
 <p>
-<b>Comment:</b> Company was renamed to <a href= "#BENQ ">Benq</a>.<br>
+<b>Comment:</b> Company was renamed to <a href="#BENQ">Benq</a>.<br>
 </p>
 <h3><a name="Z-ACROSS-TECHNOLOGIES">Manufacturer: Across Technologies</a></h3>
 <p>
@@ -23134,7 +23134,7 @@ artec_eplus48u<br>(unmaintained)
 </table>
 <h3><a name="Z-VUEGO">Manufacturer: Vuego</a></h3>
 <p>
-<b>Comment:</b> Company was renamed to <a href= "#BENQ ">Benq</a>.<br>
+<b>Comment:</b> Company was renamed to <a href="#BENQ">Benq</a>.<br>
 </p>
 <h3><a name="Z-XEROX">Manufacturer: Xerox</a></h3>
 <p>
@@ -23910,6 +23910,6 @@ qcam<br>(unmaintained)
 >Contact</a>
 </address>
 <font size=-1>
-This page was created by sane-desc 3.6 from sane-backends 1.0.29-241-g1f9590ab
+This page was created by sane-desc 3.7 from sane-backends 1.4.0.254-1d47d-dirty
 </font>
 </body> </html>

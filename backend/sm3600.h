@@ -77,11 +77,12 @@ Start: 2.4.2001
 
 /* ====================================================================== */
 
-#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ <= 201710L
 typedef enum { false, true } TBool;
 #else
+#include <stdbool.h>
 typedef bool TBool;
-#endif /* GCC < 15 */
+#endif /* Needed due to C2X */
 
 typedef SANE_Status TState;
 

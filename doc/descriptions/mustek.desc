@@ -134,7 +134,7 @@
 :comment "Resolutions above 300 dpi may cause trouble."
 
 :mfg "Trust"			; name a manufacturer
-:url "http://www.trust-site.com"
+:url "http://www.trust.com/"
 :comment "Carefully check the model names. Trust uses similar names for completely different hardware."
 
 :model "Imagery 1200"

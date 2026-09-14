@@ -43,6 +43,7 @@
 #include "../include/sane/config.h"
 
 #include <errno.h>
+#include <setjmp.h>
 #include <string.h>
 #include <stdlib.h>
 #ifdef USE_PTHREAD
@@ -129,6 +130,8 @@ typedef struct pixma_sane_t
   djpeg_dest_ptr jdst;
   struct jpeg_decompress_struct jpeg_cinfo;
   struct jpeg_error_mgr jpeg_err;
+  jmp_buf jpeg_jmpbuf;
+  SANE_Bool jpeg_initialized;
   SANE_Bool jpeg_header_seen;
 } pixma_sane_t;
 
@@ -152,6 +155,9 @@ static pixma_sane_t *first_scanner = NULL;
 static const SANE_Device **dev_list = NULL;
 static const char* conf_devices[MAX_CONF_DEVICES];
 
+SANE_Status pixma_add_custom_mp150_device (const char *, const char *, const char *, const char *, const char *);
+SANE_Status pixma_add_custom_iclass_device (const char *, const char *, const char *, const char *, const char *, const char *, const char *, const char *);
+
 static void mark_all_button_options_cached ( struct pixma_sane_t * ss )
 {
   int i;
@@ -159,19 +165,194 @@ static void mark_all_button_options_cached ( struct pixma_sane_t * ss )
       ss -> button_option_is_cached[i] = 1;
 }
 
+static SANE_Status config_attach_pixma_generic (const char *line)
+{
+    int i;
+    for (i=0; i < (MAX_CONF_DEVICES -1); i++) {
+      if (conf_devices[i] == NULL) {
+        conf_devices[i] = strdup(line);
+        if (conf_devices[i] == NULL)
+          return SANE_STATUS_NO_MEM;
+        return SANE_STATUS_GOOD;
+      }
+    }
+    return SANE_STATUS_INVAL;
+}
+
 static SANE_Status config_attach_pixma(SANEI_Config __sane_unused__ * config,
-				       const char *devname,
+				       const char *line,
 				       void __sane_unused__ *data)
 {
-  int i;
-  for (i=0; i < (MAX_CONF_DEVICES -1); i++)
-    {
-      if(conf_devices[i] == NULL)
-        {
-          conf_devices[i] = strdup(devname);
-          return SANE_STATUS_GOOD;
-        }
+  SANE_Status status;
+
+  if (*line == '#') return SANE_STATUS_GOOD;
+  if (strncasecmp(line, "device", 6) == 0) {
+    char *type_str = NULL;
+
+    line = sanei_config_get_string(line + 6, &type_str);
+    if (!type_str || !*type_str) {
+        PDBG (pixma_dbg (3, "Canon Type device missing.\n"));
+        free (type_str);
+        return SANE_STATUS_INVAL;
     }
+    PDBG (pixma_dbg (3, "Canon Type device is [%s].\n", type_str));
+    if (strcasecmp(type_str, "MP150") == 0) {
+        char *name_str = NULL;
+        char *model_str = NULL;
+        char *pid_str = NULL;
+        char *dpi_str = NULL;
+        char *capacity_str = NULL;
+        // # DEVICE NAME MODEL PID DPI CAPACITE
+        PDBG (pixma_dbg (3, "New define pixma description (%s)\n", line));
+        line = sanei_config_get_string(line , &name_str);
+        if (!name_str || !*name_str) {
+           PDBG (pixma_dbg (3, "Pixma name missing.\n"));
+           status = SANE_STATUS_INVAL;
+           goto cleanup_mp150;
+        }
+        PDBG (pixma_dbg (3, "Pixma name is [%s].\n", name_str));
+        line = sanei_config_get_string(line, &model_str);
+        if (!model_str || !*model_str) {
+            PDBG (pixma_dbg (3, "Pixma model missing.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_mp150;
+        }
+        PDBG (pixma_dbg (3, "Pixma model is [%s].\n", model_str));
+        line = sanei_config_get_string(line, &pid_str);
+        if (!pid_str || !*pid_str) {
+            PDBG (pixma_dbg (3, "Pixma usbid missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_mp150;
+        }
+        PDBG (pixma_dbg (3, "Pixma pid is [%s].\n", pid_str));
+        line = sanei_config_get_string(line, &dpi_str);
+        if (!dpi_str || !*dpi_str) {
+            PDBG (pixma_dbg (3, "Pixma dpi missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_mp150;
+        }
+        PDBG (pixma_dbg (3, "Pixma dpi is [%s].\n", dpi_str));
+        line = sanei_config_get_string(line, &capacity_str);
+        if (!capacity_str || !*capacity_str) {
+            PDBG (pixma_dbg (3, "Pixma capacity missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_mp150;
+        }
+        PDBG (pixma_dbg (3, "Pixma capacity is [%s].\n", capacity_str));
+        status = pixma_add_custom_mp150_device (name_str, model_str, pid_str,
+                                                dpi_str, capacity_str);
+        if (status != SANE_STATUS_GOOD)
+          goto cleanup_mp150;
+        free (type_str);
+        return status;
+
+cleanup_mp150:
+        free (type_str);
+        free (name_str);
+        free (model_str);
+        free (pid_str);
+        free (dpi_str);
+        free (capacity_str);
+        return status;
+
+    }
+    else if (strcasecmp(type_str, "ICLASS") == 0) {
+        char *name_str = NULL;
+        char *model_str = NULL;
+        char *pid_str = NULL;
+        char *dpi_str = NULL;
+        char *adpi_str = NULL;
+        char *w_str = NULL;
+        char *h_str = NULL;
+        char *capacity_str = NULL;
+        // # DEVICE NAME MODEL PID DPI ADF_DPI WIDTH HEIGHT CAPACITE
+        PDBG (pixma_dbg (3, "New define iclass description (%s)\n", line));
+        line = sanei_config_get_string(line , &name_str);
+        if (!name_str || !*name_str) {
+           PDBG (pixma_dbg (3, "Iclass name missing.\n"));
+           status = SANE_STATUS_INVAL;
+           goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Iclass name is [%s].\n", name_str));
+        line = sanei_config_get_string(line, &model_str);
+        if (!model_str || !*model_str) {
+            PDBG (pixma_dbg (3, "Iclass model missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Iclass model is [%s].\n", model_str));
+        line = sanei_config_get_string(line, &pid_str);
+        if (!pid_str || !*pid_str) {
+            PDBG (pixma_dbg (3, "Iclass pid missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Iclass pid is [%s].\n", pid_str));
+        line = sanei_config_get_string(line, &dpi_str);
+        if (!dpi_str || !*dpi_str) {
+            PDBG (pixma_dbg (3, "Pixma dpi missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Pixma dpi is [%s].\n", dpi_str));;
+        line = sanei_config_get_string(line, &adpi_str);
+        if (!adpi_str || !*adpi_str) {
+            PDBG (pixma_dbg (3, "Pixma adf-dpi missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Pixma adf-dpi is [%s].\n", adpi_str));
+        line = sanei_config_get_string(line, &w_str);
+        if (!w_str || !*w_str) {
+            PDBG (pixma_dbg (3, "Pixma width missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Pixma width is [%s].\n", w_str));
+        line = sanei_config_get_string(line, &h_str);
+        if (!h_str || !*h_str) {
+            PDBG (pixma_dbg (3, "Pixma height missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Pixma height is [%s].\n", h_str));
+        line = sanei_config_get_string(line, &capacity_str);
+        if (!capacity_str || !*capacity_str) {
+            PDBG (pixma_dbg (3, "Pixma capacity missig.\n"));
+            status = SANE_STATUS_INVAL;
+            goto cleanup_iclass;
+        }
+        PDBG (pixma_dbg (3, "Pixma capacity is [%s].\n", capacity_str));
+        status = pixma_add_custom_iclass_device (name_str, model_str, pid_str,
+                                                 dpi_str, adpi_str, w_str, h_str,
+                                                 capacity_str);
+        if (status != SANE_STATUS_GOOD)
+          goto cleanup_iclass;
+        free (type_str);
+        return status;
+
+cleanup_iclass:
+        free (type_str);
+        free (name_str);
+        free (model_str);
+        free (pid_str);
+        free (dpi_str);
+        free (adpi_str);
+        free (w_str);
+        free (h_str);
+        free (capacity_str);
+        return status;
+    }
+    else {
+         status = config_attach_pixma_generic (line);
+         free (type_str);
+         return status;
+    }
+  }
+  else {
+
+    return config_attach_pixma_generic (line);
+  }
   return SANE_STATUS_INVAL;
 }
 
@@ -281,6 +462,7 @@ find_scanners (SANE_Bool local_only)
 
 nomem:
   PDBG (pixma_dbg (1, "WARNING:not enough memory for device list\n"));
+  cleanup_device_list ();
   return;
 }
 
@@ -1346,6 +1528,14 @@ jpeg_term_source(j_decompress_ptr __sane_unused__ cinfo)
   /* No-op */
 }
 
+static void
+pixma_jpeg_error_exit(j_common_ptr cinfo)
+{
+  pixma_sane_t *s = (pixma_sane_t *) cinfo->client_data;
+
+  longjmp (s->jpeg_jmpbuf, 1);
+}
+
 static boolean
 jpeg_fill_input_buffer(j_decompress_ptr cinfo)
 {
@@ -1386,7 +1576,8 @@ jpeg_skip_input_data(j_decompress_ptr cinfo, long num_bytes)
       while (num_bytes > (long)mgr->jpeg.bytes_in_buffer)
         {
            num_bytes -= (long)mgr->jpeg.bytes_in_buffer;
-           jpeg_fill_input_buffer(cinfo);
+           if (!jpeg_fill_input_buffer(cinfo))
+             ERREXIT(cinfo, JERR_INPUT_EOF);
         }
 
       /* Update jpeg info structure with leftover */
@@ -1401,9 +1592,20 @@ pixma_jpeg_start(pixma_sane_t *s)
 {
   pixma_jpeg_src_mgr *mgr;
 
+  if (setjmp (s->jpeg_jmpbuf))
+    {
+      if (s->jpeg_initialized)
+        jpeg_destroy_decompress (&s->jpeg_cinfo);
+      s->jpeg_initialized = SANE_FALSE;
+      return SANE_STATUS_IO_ERROR;
+    }
+
   s->jpeg_cinfo.err = jpeg_std_error(&s->jpeg_err);
+  s->jpeg_err.error_exit = pixma_jpeg_error_exit;
+  s->jpeg_cinfo.client_data = s;
 
   jpeg_create_decompress(&s->jpeg_cinfo);
+  s->jpeg_initialized = SANE_TRUE;
 
   s->jpeg_cinfo.src = (struct jpeg_source_mgr *)(*s->jpeg_cinfo.mem->alloc_small)((j_common_ptr)&s->jpeg_cinfo,
                               JPOOL_PERMANENT, sizeof(pixma_jpeg_src_mgr));
@@ -1434,6 +1636,12 @@ static SANE_Status
 pixma_jpeg_read_header(pixma_sane_t *s)
 {
   pixma_jpeg_src_mgr *src = (pixma_jpeg_src_mgr *)s->jpeg_cinfo.src;
+
+  if (setjmp (s->jpeg_jmpbuf))
+    {
+      s->jpeg_header_seen = SANE_FALSE;
+      return SANE_STATUS_IO_ERROR;
+    }
 
   if (jpeg_read_header(&s->jpeg_cinfo, TRUE))
     {
@@ -1476,10 +1684,14 @@ pixma_jpeg_read_header(pixma_sane_t *s)
 static void
 pixma_jpeg_finish(pixma_sane_t *ss)
 {
-  jpeg_destroy_decompress(&ss->jpeg_cinfo);
+  if (ss->jpeg_initialized)
+    {
+      jpeg_destroy_decompress(&ss->jpeg_cinfo);
+      ss->jpeg_initialized = SANE_FALSE;
+    }
 }
 
-static void
+static SANE_Status
 pixma_jpeg_read(pixma_sane_t *ss, SANE_Byte *data,
            SANE_Int max_length, SANE_Int *length)
 {
@@ -1487,6 +1699,12 @@ pixma_jpeg_read(pixma_sane_t *ss, SANE_Byte *data,
   pixma_jpeg_src_mgr *src = (pixma_jpeg_src_mgr *)cinfo->src;
 
   int l;
+
+  if (setjmp (ss->jpeg_jmpbuf))
+    {
+      *length = 0;
+      return SANE_STATUS_IO_ERROR;
+    }
 
   *length = 0;
 
@@ -1501,13 +1719,13 @@ pixma_jpeg_read(pixma_sane_t *ss, SANE_Byte *data,
       memcpy(data, src->linebuffer + src->linebuffer_index, *length);
              src->linebuffer_index += *length;
 
-      return;
+      return SANE_STATUS_GOOD;
     }
 
   if (cinfo->output_scanline >= cinfo->output_height)
     {
       *length = 0;
-      return;
+      return SANE_STATUS_GOOD;
     }
 
   /* scanlines of decompressed data will be in ss->jdst->buffer
@@ -1516,7 +1734,7 @@ pixma_jpeg_read(pixma_sane_t *ss, SANE_Byte *data,
 
   l = jpeg_read_scanlines(cinfo, ss->jdst->buffer, 1);
   if (l == 0)
-    return;
+    return SANE_STATUS_GOOD;
 
   /* from ss->jdst->buffer to linebuffer
    * linebuffer holds width * bytesperpixel
@@ -1568,6 +1786,7 @@ pixma_jpeg_read(pixma_sane_t *ss, SANE_Byte *data,
 
   memcpy(data, src->linebuffer + src->linebuffer_index, *length);
         src->linebuffer_index += *length;
+  return SANE_STATUS_GOOD;
 }
 
 
@@ -1612,7 +1831,15 @@ read_image (pixma_sane_t * ss, void *buf, unsigned size, int *readlen)
       if (ss->sp.mode_jpeg)
         {
           count = -1;
-          pixma_jpeg_read(ss, buf, size, &count);
+          status = pixma_jpeg_read(ss, buf, size, &count);
+          if (status != SANE_STATUS_GOOD)
+            {
+              close (ss->rpipe);
+              ss->rpipe = -1;
+              pixma_jpeg_finish (ss);
+              terminate_reader_task (ss, NULL);
+              return status;
+            }
         }
       else
         count = read (ss->rpipe, buf, size);
@@ -1969,6 +2196,8 @@ sane_start (SANE_Handle h)
   /* TODO: Check paper here in sane_start(). A function like
      pixma_get_status() is needed. */
   error = start_reader_task (ss);
+  if (error < 0 && ss->sp.mode_jpeg)
+    pixma_jpeg_finish (ss);
   if (error >= 0)
     {
       ss->output_line_size = (ss->sp.w * ss->sp.channels * ss->sp.depth) / 8;

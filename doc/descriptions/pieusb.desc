@@ -19,7 +19,7 @@
                                   ;               :meta, :api
 
 :mfg "PIE"
-:url "http://www.scanace.com"
+:url "http://www.scanace.com/"
 
 :model "PowerSlide 3600"
 :interface "USB"
@@ -46,7 +46,7 @@
 :comment "Identical to Reflecta DigitDia 6000"
 
 :mfg "Reflecta"
-:url "https://reflecta.de"
+:url "https://reflecta.de/"
 
 :model "Reflecta ProScan 10T"
 :interface "USB"

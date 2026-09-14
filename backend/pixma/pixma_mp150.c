@@ -375,6 +375,29 @@
 #define TS8800_PID 0x1159
 #define XK130_PID 0x115A
 
+/* 2025 new device (untested) */
+#define GX6100_PID 0x115e
+#define GX7100_PID 0x115f
+#define TC21M_PID 0x1172
+
+#define TC5210M_PID 0x1174
+
+#define GX4000i_PID 0x1115
+#define GX7100i_PID 0x117c
+#define TS5630_PID 0x1181
+#define TR7100_PID 0x116e
+#define TS7500i_PID 0x117d
+#define TS5500_PID 0x116f
+#define TS6500_PID 0x117e
+#define TS6500i_PID 0x117f
+#define TS4300_PID 0x1170
+#define TS4100i_PID 0x1180
+#define TS8930_PID 0x1177
+#define XK510_PID 0x1178
+#define XK140_PID 0x1179
+#define TS7630_PID 0x117a
+#define TS4000_PID 0x119a
+
 /* Generation 4 XML messages that encapsulates the Pixma protocol messages */
 #define XML_START_1   \
 "<?xml version=\"1.0\" encoding=\"utf-8\" ?>\
@@ -501,6 +524,9 @@ typedef struct mp150_t
    u32be      ILEN image data size
    u8[ILEN]   image data
  */
+
+pixma_config_t *pixma_custom_mp150_devices = NULL;
+int pixma_custom_mp150_devices_count = 0;
 
 static void mp150_finish_scan (pixma_t * s);
 
@@ -1065,6 +1091,15 @@ handle_interrupt (pixma_t * s, int timeout)
       s->events = PIXMA_EV_BUTTON1 | (buf[0x13] & 0x0f);
     }
   }
+  else if (s->cfg->pid == MG3200_PID)
+  /* MG3200 series: SCAN is the only button reported; flag in buf[4]. */
+  {
+    if (buf[4] & 1)
+    {
+      /* start scan */
+      s->events = PIXMA_EV_BUTTON1;
+    }
+  }
   else
   /* button no. in buf[0]
    * original in buf[0]
@@ -1249,9 +1284,10 @@ post_process_image_data (pixma_t * s, pixma_imagebuf_t * ib)
                            sptr, dptr, mp->linebuf));*/
 
           /* special image format for *most* devices at high dpi.
-           * MP220, MX360 and generation 5 scanners are exceptions */
+           * MP220, MP280, MX360 and generation 5 scanners are exceptions */
           if (n > 1
               && s->cfg->pid != MP220_PID
+              && s->cfg->pid != MP280_PID
               && s->cfg->pid != MX360_PID
               && (mp->generation < 5
                   /* generation 5 scanners *with* special image format */
@@ -1623,10 +1659,11 @@ mp150_fill_buffer (pixma_t * s, pixma_imagebuf_t * ib)
 
       line_size = get_cis_line_size (s);
       proc_buf_size = 2 * line_size;
-      mp->cb.buf = realloc (mp->cb.buf,
-             CMDBUF_SIZE + IMAGE_BLOCK_SIZE + proc_buf_size);
-      if (!mp->cb.buf)
+      uint8_t *buf = realloc (mp->cb.buf,
+                              CMDBUF_SIZE + IMAGE_BLOCK_SIZE + proc_buf_size);
+      if (!buf)
         return PIXMA_ENOMEM;
+      mp->cb.buf = buf;
       mp->linebuf = mp->cb.buf + CMDBUF_SIZE;
       mp->imgbuf = mp->data_left_ofs = mp->linebuf + line_size;
       mp->data_left_len = 0;
@@ -1845,7 +1882,7 @@ const pixma_config_t pixma_mp150_devices[] = {
   DEVICE ("Canon PIXMA MP270", "MP270", MP270_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
 
   /* Latest devices (2010) Generation 4 CIS */
-  DEVICE ("Canon PIXMA MP280",  "MP280",  MP280_PID, 0, 600, 0, 0, 638, 877, PIXMA_CAP_CIS), /* TODO: 1200dpi doesn't work yet */
+  DEVICE ("Canon PIXMA MP280",  "MP280",  MP280_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
   DEVICE ("Canon PIXMA MP495",  "MP495",  MP495_PID, 0, 600, 0, 0, 638, 877, PIXMA_CAP_CIS), /* ToDo: max. scan resolution = 1200x600dpi */
   DEVICE ("Canon PIXMA MG5100", "MG5100", MG5100_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
   DEVICE ("Canon PIXMA MG5200", "MG5200", MG5200_PID, 0, 2400, 0, 0, 638, 877, PIXMA_CAP_CIS),
@@ -2056,6 +2093,75 @@ const pixma_config_t pixma_mp150_devices[] = {
   DEVICE ("Canon PIXMA TS8800 series", "TS8800", TS8800_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
   DEVICE ("Canon PIXMA XK130 series", "XK130", XK130_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
 
+  DEVICE ("Canon PIXMA GX6100 series", "GX6100", GX6100_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS | PIXMA_CAP_ADF),
+  DEVICE ("Canon PIXMA GX7100 series", "GX7100", GX7100_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS | PIXMA_CAP_ADF),
+  DEVICE ("Canon PIXMA TC-21M", "TC-21M", TC21M_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+
+  DEVICE ("Canon PIXMA TC-5210M", "TC-5210M", TC5210M_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+
+  DEVICE ("Canon PIXMA GX4000i series", "GX4000i", GX4000i_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA GX7100i series", "GX7100i", GX7100i_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS | PIXMA_CAP_ADF),
+  DEVICE ("Canon PIXMA TS5630 series", "TS5630", TS5630_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TR7100 series", "TR7100", TR7100_PID, 0, 600, 0, 0, 638, 877, PIXMA_CAP_CIS | PIXMA_CAP_ADF | PIXMA_CAP_ADF_JPEG),
+  DEVICE ("Canon PIXMA TS7500i series", "TS7500i", TS7500i_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS5500 series", "TS5500", TS5500_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS6500 series", "TS6500", TS6500_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS6500i series", "TS6500i", TS6500i_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS4300 series", "TS4300", TS4300_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS4100i series", "TS4100i", TS4100i_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS8930 series", "TS8930", TS8930_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXUS XK510 series", "XK510", XK510_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXUS XK140 series", "XK140", XK140_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS7630 series", "TS7630", TS7630_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
+  DEVICE ("Canon PIXMA TS4000 series", "TS4000", TS4000_PID, 0, 1200, 0, 0, 638, 877, PIXMA_CAP_CIS),
 
   END_OF_DEVICE_LIST
 };
+
+SANE_Status
+pixma_add_custom_mp150_device (const char *name,
+                               const char *model,
+                               const char *pid,
+                               const char *dpi,
+                               const char *capacity)
+{
+   int ddpi = 0;
+   uint16_t ppid = 0;
+   unsigned caps = 0;
+   int lcaps = 0;
+
+   if (pixma_custom_mp150_devices_count == 0) {
+      pixma_custom_mp150_devices = (pixma_config_t *)calloc (2, sizeof(pixma_config_t));
+      if (!pixma_custom_mp150_devices) {
+         PDBG (pixma_dbg (1,
+               "WARNING: unable to allocate custom MP150 device list\n"));
+         return SANE_STATUS_NO_MEM;
+      }
+   } else {
+      pixma_config_t *devices = realloc
+        (pixma_custom_mp150_devices,
+         sizeof(pixma_config_t) * (pixma_custom_mp150_devices_count + 2));
+      if (!devices) {
+        PDBG (pixma_dbg (1,
+              "WARNING: unable to grow custom MP150 device list\n"));
+        return SANE_STATUS_NO_MEM;
+      }
+      pixma_custom_mp150_devices = devices;
+   }
+
+   while (ccaps[lcaps] != NULL) {
+       if(strstr(capacity, ccaps[lcaps]) != NULL) {
+	  caps = caps | ucaps[lcaps];
+       }
+       lcaps++;
+   }
+
+   ddpi = atoi(dpi);
+   ppid = (uint16_t)strtoll(pid, NULL, 16);
+   pixma_config_t elem = DEVICE (name, model, ppid, 0, ddpi, 0, 0, 638, 877, caps);
+   pixma_custom_mp150_devices[pixma_custom_mp150_devices_count] = elem;
+   pixma_config_t noelem = END_OF_DEVICE_LIST;
+   pixma_custom_mp150_devices[(pixma_custom_mp150_devices_count + 1)] = noelem;
+   pixma_custom_mp150_devices_count++;
+   return SANE_STATUS_GOOD;
+}

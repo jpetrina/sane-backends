@@ -35,6 +35,7 @@ dnl ******************************************************************
 dnl  Set up the compiler and linker
 dnl ******************************************************************
 AC_PROG_CC
+AX_PROG_CC_FOR_BUILD
 AC_PROG_CXX
 AM_PROG_CC_C_O
 AM_PATH_PYTHON(2.7)
@@ -70,8 +71,6 @@ AC_PATH_PROG(SANE_CONFIG_PATH, sane-config, no)
 
 dnl Call explicitly before using PKG_*
 PKG_PROG_PKG_CONFIG
-
-AM_CONDITIONAL(CROSS_COMPILING, test x$cross_compiling = xyes)
 
 dnl ***********************************************************************
 dnl set compiler/linker flags
@@ -278,8 +277,8 @@ dnl ***********************************************************************
 dnl Functions for which we provide an implementation if missing
 AC_CONFIG_LIBOBJ_DIR([lib])
 AC_FUNC_ALLOCA
-AC_REPLACE_FUNCS([getenv inet_ntop inet_pton sigprocmask \
-    sleep snprintf strcasestr strdup strndup strsep syslog usleep \
+AC_REPLACE_FUNCS([inet_ntop inet_pton sigprocmask \
+    sleep strcasestr strdup strndup strsep syslog usleep \
     vsyslog])
 AS_IF([test x != x$ALLOCA],
       [LTALLOCA=`echo "$ALLOCA" | sed 's/\.o$//; s/\.obj$//'`.lo])
@@ -649,10 +648,14 @@ dnl enable/disable backends and features based on previous tests and user's
 dnl choice
 dnl ***********************************************************************
 
-AM_CPPFLAGS="${AM_CPPFLAGS} -DPATH_SANE_CONFIG_DIR=\$(configdir) \
-	  -DPATH_SANE_DATA_DIR=\$(datadir) \
-	  -DPATH_SANE_LOCK_DIR=\$(locksanedir) \
+PATH_FLAGS="-DPATH_SANE_CONFIG_DIR=\\\"\$(configdir)\\\" \
+	  -DPATH_SANE_DATA_DIR=\\\"\$(datadir)\\\" \
+	  -DPATH_SANE_LOCK_DIR=\\\"\$(locksanedir)\\\""
+
+AM_CPPFLAGS="${AM_CPPFLAGS} ${PATH_FLAGS} \
 	  -DV_MAJOR=${V_MAJOR} -DV_MINOR=${V_MINOR}"
+
+CPPFLAGS_FOR_BUILD="${CPPFLAGS_FOR_BUILD} ${PATH_FLAGS}"
 
 if test "${ac_cv_header_sys_socket_h}" = "no"; then
   echo "*** disabling saned (sys/socket.h not found)"

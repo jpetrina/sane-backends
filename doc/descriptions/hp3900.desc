@@ -18,7 +18,7 @@
 
 ; -----------------------------------------------------
 :mfg "Hewlett-Packard"
-:url "http://www.hp.com"
+:url "http://www.hp.com/"
 
 :model "ScanJet 3800"
 :interface "USB"
@@ -62,7 +62,7 @@
 
 ; -----------------------------------------------------
 :mfg "UMAX"
-:url "http://www.umax.com"
+:url "http://www.umax.com/"
 
 :model "Astra 4900"
 :interface "USB"

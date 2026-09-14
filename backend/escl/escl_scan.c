@@ -29,9 +29,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-#include "../include/sane/sanei.h"
-
+#define MAX_RETRIES 20
 /**
  * \fn static size_t write_callback(void *str, size_t size, size_t nmemb, void *userp)
  * \brief Callback function that writes the image scanned into the temporary file.
@@ -45,6 +45,24 @@ write_callback(void *str, size_t size, size_t nmemb, void *userp)
     size_t to_write = fwrite(str, size, nmemb, scanner->tmp);
     scanner->real_read += to_write;
     return (to_write);
+}
+
+SANE_Status
+escl_reset_scan_file(capabilities_t *scanner)
+{
+    if (!scanner)
+        return SANE_STATUS_INVAL;
+
+    if (scanner->tmp) {
+        fclose(scanner->tmp);
+        scanner->tmp = NULL;
+    }
+    scanner->real_read = 0;
+    scanner->tmp = tmpfile();
+    if (!scanner->tmp)
+        return SANE_STATUS_NO_MEM;
+
+    return SANE_STATUS_GOOD;
 }
 
 /**
@@ -66,43 +84,50 @@ escl_scan(capabilities_t *scanner, const ESCL_Device *device, char *scanJob, cha
     SANE_Status status = SANE_STATUS_GOOD;
 
     if (device == NULL)
-        return (SANE_STATUS_NO_MEM);
-    scanner->real_read = 0;
-    curl_handle = curl_easy_init();
-    if (curl_handle != NULL) {
-        snprintf(scan_cmd, sizeof(scan_cmd), "%s%s%s%s",
-                 scan_jobs, scanJob, result, scanner_start);
-        escl_curl_url(curl_handle, device, scan_cmd);
-        curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
-        if (scanner->tmp)
-            fclose(scanner->tmp);
-        scanner->tmp = tmpfile();
-        if (scanner->tmp != NULL) {
-            curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, scanner);
-            CURLcode res = curl_easy_perform(curl_handle);
-            if (res != CURLE_OK) {
-                DBG( 10, "Unable to scan: %s\n", curl_easy_strerror(res));
-                scanner->real_read = 0;
-                fclose(scanner->tmp);
-                scanner->tmp = NULL;
-                status = SANE_STATUS_INVAL;
-		goto cleanup;
-            }
-            fseek(scanner->tmp, 0, SEEK_SET);
+        return SANE_STATUS_NO_MEM;
+
+    if (scanner->tmp) {
+        fclose(scanner->tmp);
+        scanner->tmp = NULL;
+    }
+
+    snprintf(scan_cmd, sizeof(scan_cmd), "%s%s%s%s",
+             scan_jobs, scanJob, result, scanner_start);
+    curl_handle = escl_curl_init(device, scan_cmd);
+    if (!curl_handle) {
+        status = SANE_STATUS_NO_MEM;
+        goto cleanup;
+    }
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, scanner);
+
+    for (int i = 0; i < MAX_RETRIES; i++) {
+        status = escl_reset_scan_file(scanner);
+        if (status != SANE_STATUS_GOOD)
+            goto cleanup;
+        CURLcode res = curl_easy_perform(curl_handle);
+        status = escl_curl_status(curl_handle, res);
+        if (escl_curl_retry(status, i, MAX_RETRIES)) {
+            DBG(10, "Scanner busy: reattempting scan (%d/%d)\n",
+                i + 1, MAX_RETRIES);
+        } else if (status != SANE_STATUS_GOOD) {
+            goto cleanup;
+        } else {
+            status = scanner->real_read > 0 ? SANE_STATUS_GOOD : SANE_STATUS_NO_DOCS;
         }
-        else
-            status = SANE_STATUS_NO_MEM;
+
+        if (scanner->real_read)
+            fseek(scanner->tmp, 0, SEEK_SET);
+
+        if (status != SANE_STATUS_DEVICE_BUSY)
+            break;
+    }
 cleanup:
-        curl_easy_cleanup(curl_handle);
-    }
+    curl_easy_cleanup(curl_handle);
     DBG(10, "eSCL scan : [%s]\treal read (%ld)\n", sane_strstatus(status), scanner->real_read);
-    if (scanner->real_read == 0)
-    {
-       fclose(scanner->tmp);
-       scanner->tmp = NULL;
-       return SANE_STATUS_NO_DOCS;
+    if (status != SANE_STATUS_GOOD && scanner->tmp) {
+        fclose(scanner->tmp);
+        scanner->tmp = NULL;
     }
-    return (status);
+    return status;
 }

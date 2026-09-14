@@ -15,7 +15,7 @@
 :devicetype :scanner
 
 :mfg "Hewlett-Packard"
-:url "http://www.hp.com"
+:url "http://www.hp.com/"
 
 :model "LaserJet M1005 MFP"
 :interface "USB"

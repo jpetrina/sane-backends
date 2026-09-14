@@ -101,10 +101,10 @@ print_xml_job_status(xmlNode *node,
                         *job = SANE_STATUS_GOOD;
                         DBG(10, "jobId Completed SANE_STATUS_GOOD\n");
                     }
-                    else if (strcmp((const char *)node->name, "ImagesToTransfer") == 0) {
-	                const char *state = (const char *)xmlNodeGetContent(node);
-	                *image = atoi(state);
-	            }
+                }
+                else if (strcmp((const char *)node->name, "ImagesToTransfer") == 0) {
+                    const char *value = (const char *)xmlNodeGetContent(node);
+                    *image = atoi(value);
                 }
             }
         }
@@ -215,18 +215,23 @@ reload:
     if (var == NULL)
         return (SANE_STATUS_NO_MEM);
     var->memory = malloc(1);
+    if (!var->memory) {
+        free(var);
+        return SANE_STATUS_NO_MEM;
+    }
     var->size = 0;
-    curl_handle = curl_easy_init();
+    curl_handle = escl_curl_init(device, scanner_status);
+    if (!curl_handle) {
+        free(var->memory);
+        free(var);
+        return SANE_STATUS_NO_MEM;
+    }
 
-    escl_curl_url(curl_handle, device, scanner_status);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, memory_callback_s);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)var);
-    curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
     CURLcode res = curl_easy_perform(curl_handle);
-    if (res != CURLE_OK) {
-        DBG( 10, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
-        status = SANE_STATUS_INVAL;
+    status = escl_curl_status(curl_handle, res);
+    if (status != SANE_STATUS_GOOD) {
         goto clean_data;
     }
     DBG( 10, "eSCL : Status : %s.\n", var->memory);
@@ -365,18 +370,23 @@ escl_reset_all_jobs(ESCL_Device *device)
         return (SANE_STATUS_NO_MEM);
     DBG(10, "2 - escl_reset_all_jobs\n");
     var->memory = malloc(1);
+    if (!var->memory) {
+        free(var);
+        return SANE_STATUS_NO_MEM;
+    }
     var->size = 0;
-    curl_handle = curl_easy_init();
+    curl_handle = escl_curl_init(device, scanner_status);
+    if (!curl_handle) {
+        free(var->memory);
+        free(var);
+        return SANE_STATUS_NO_MEM;
+    }
 
-    escl_curl_url(curl_handle, device, scanner_status);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, memory_callback_s);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)var);
-    curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
     CURLcode res = curl_easy_perform(curl_handle);
-    if (res != CURLE_OK) {
-        DBG( 10, "The scanner didn't respond: %s\n", curl_easy_strerror(res));
-        status = SANE_STATUS_INVAL;
+    status = escl_curl_status(curl_handle, res);
+    if (status != SANE_STATUS_GOOD) {
         goto clean_data1;
     }
     DBG(10, "3 - escl_reset_all_jobs\n");

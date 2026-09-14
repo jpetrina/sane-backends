@@ -43,7 +43,7 @@
 #include "../include/sane/sanei.h"
 #include "../include/sane/sanei_config.h"
 
-#define SANE_DESC_VERSION "3.6"
+#define SANE_DESC_VERSION "3.7"
 
 #define MAN_PAGE_LINK "man/%s.5.html"
 #define COLOR_MINIMAL      "\"#B00000\""
@@ -579,6 +579,7 @@ static const char *
 get_token (const char *str, char **string_const)
 {
   const char *start;
+  char *pos;
   size_t len;
 
   str = sanei_config_skip_whitespace (str);
@@ -590,9 +591,22 @@ get_token (const char *str, char **string_const)
 	++str;
       len = str - start;
       if (*str == '"')
-	++str;
+	{
+	  ++str;
+	  *string_const = strndup (start, len);
+
+	  /* remove escaped quotations */
+	  while ((pos = strstr (*string_const, "\\\"")) != 0)
+	    {
+	      memmove (pos, pos + 1, len - (pos - *string_const));
+	      --len;
+	    }
+	}
       else
-	start = 0;		/* final double quote is missing */
+	{
+	  DBG_ERR ("get_token: missing quotation mark: %s\n", start - 1);
+	  *string_const = NULL;
+	}
     }
   else
     {
@@ -600,11 +614,8 @@ get_token (const char *str, char **string_const)
       while (*str && !isspace (*str))
 	++str;
       len = str - start;
+      *string_const = strndup (start, len);
     }
-  if (start)
-    *string_const = strndup (start, len);
-  else
-    *string_const = NULL;
   return str;
 }
 
@@ -621,10 +632,7 @@ read_keyword (SANE_String line, SANE_String keyword_token,
   cp = get_token (line, &word);
 
   if (!word)
-    {
-      DBG_ERR ("read_keyword: missing quotation mark: %s\n", line);
-      return SANE_STATUS_INVAL;
-    }
+    return SANE_STATUS_INVAL;
 
   if (strcmp (word, keyword_token) != 0)
     {
@@ -641,16 +649,9 @@ read_keyword (SANE_String line, SANE_String keyword_token,
       return SANE_STATUS_GOOD;
     case param_string:
       {
-	char *pos;
 	cp = get_token (cp, &word);
 	if (!word)
-	  {
-	    DBG_ERR ("read_keyword: missing quotation mark: %s\n", line);
-	    return SANE_STATUS_INVAL;
-	  }
-	/* remove escaped quotations */
-	while ((pos = strstr (word, "\\\"")) != 0)
-	  *pos = ' ';
+	  return SANE_STATUS_INVAL;
 
 	DBG_DBG ("read_keyword: set entry `%s' to `%s'\n", keyword_token,
 		 word);
@@ -659,19 +660,14 @@ read_keyword (SANE_String line, SANE_String keyword_token,
       }
     case param_two_strings:
       {
-	char *pos;
 	char **strings = malloc (2 * sizeof (SANE_String));
 
 	cp = get_token (cp, &word);
 	if (!word)
 	  {
 	    free(strings);
-	    DBG_ERR ("read_keyword: missing quotation mark: %s\n", line);
 	    return SANE_STATUS_INVAL;
 	  }
-	/* remove escaped quotations */
-	while ((pos = strstr (word, "\\\"")) != 0)
-	  *pos = ' ';
 	DBG_INFO ("read_keyword: set first entry of `%s' to `%s'\n", keyword_token,
 		 word);
 	strings[0] = strdup (word);
@@ -682,12 +678,8 @@ read_keyword (SANE_String line, SANE_String keyword_token,
 	if (!word)
 	  {
 	    free(strings);
-	    DBG_ERR ("read_keyword: missing quotation mark: %s\n", line);
 	    return SANE_STATUS_INVAL;
 	  }
-	/* remove escaped quotations */
-	while ((pos = strstr (word, "\\\"")) != 0)
-	  *pos = ' ';
 	DBG_INFO ("read_keyword: set second entry of `%s' to `%s'\n", keyword_token,
 		 word);
 	strings[1] = strdup (word);
@@ -696,19 +688,14 @@ read_keyword (SANE_String line, SANE_String keyword_token,
       }
     case param_three_strings:
       {
-	char *pos;
 	char **strings = malloc (3 * sizeof (SANE_String));
 
 	cp = get_token (cp, &word);
 	if (!word)
 	  {
 	    free(strings);
-	    DBG_ERR ("read_keyword: missing quotation mark: %s\n", line);
 	    return SANE_STATUS_INVAL;
 	  }
-	/* remove escaped quotations */
-	while ((pos = strstr (word, "\\\"")) != 0)
-	  *pos = ' ';
 	DBG_INFO ("read_keyword: set first entry of `%s' to `%s'\n", keyword_token,
 		 word);
 	strings[0] = strdup (word);
@@ -719,12 +706,8 @@ read_keyword (SANE_String line, SANE_String keyword_token,
 	if (!word)
 	  {
 	    free(strings);
-	    DBG_ERR ("read_keyword: missing quotation mark: %s\n", line);
 	    return SANE_STATUS_INVAL;
 	  }
-	/* remove escaped quotations */
-	while ((pos = strstr (word, "\\\"")) != 0)
-	  *pos = ' ';
 	DBG_INFO ("read_keyword: set second entry of `%s' to `%s'\n", keyword_token,
 		 word);
 	strings[1] = strdup (word);
@@ -735,12 +718,8 @@ read_keyword (SANE_String line, SANE_String keyword_token,
 	if (!word)
 	  {
 	    free(strings);
-	    DBG_ERR ("read_keyword: missing quotation mark: %s\n", line);
 	    return SANE_STATUS_INVAL;
 	  }
-	/* remove escaped quotations */
-	while ((pos = strstr (word, "\\\"")) != 0)
-	  *pos = ' ';
 	DBG_INFO ("read_keyword: set third entry of `%s' to `%s'\n", keyword_token,
 		 word);
 	strings[2] = strdup (word);

@@ -68,7 +68,7 @@
 :status :good
 
 :mfg "Samsung"
-:url "http://www.samsung.com"
+:url "http://www.samsung.com/"
 
 :model "X4300 Series"
 :interface "USB"

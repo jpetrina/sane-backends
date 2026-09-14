@@ -32,7 +32,7 @@
 :comment "For the UB Plus, see gt68xx backend"
 
 :mfg "Trust"
-:url "http://www.trust-site.com"
+:url "http://www.trust.com/"
 
 :model "Compact Scan USB 19200"
 :interface "USB"

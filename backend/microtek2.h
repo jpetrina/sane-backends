@@ -70,7 +70,7 @@
 #endif
 
 #define MAX_LINE_LEN            512   /* max length of entry in password file */
-#define PASSWD_FILE             STRINGIFY(PATH_SANE_CONFIG_DIR) PATH_SEP "auth"
+#define PASSWD_FILE             PATH_SANE_CONFIG_DIR PATH_SEP "auth"
 #define SEPARATOR               ':'   /* separator in that file */
 #define SALT                    "ab"  /* used by crypt() */
 

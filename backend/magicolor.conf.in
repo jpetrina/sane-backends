@@ -30,7 +30,7 @@ net autodiscovery
 ### USB: format is "usb" for automatic (libusb) discovery, based on USB IDs,
 ###      or "usb <vendor ID> <device ID> to force the use of a particular
 ###      device (the backend has some additional checks and will not use
-###      non-KONICA MINOLTA devices, though)
+###      non-Konica Minolta devices, though)
 
 usb
 

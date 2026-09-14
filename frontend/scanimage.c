@@ -119,12 +119,13 @@ static struct option basic_options[] = {
   {0, 0, NULL, 0}
 };
 
-#define OUTPUT_UNKNOWN  0
-#define OUTPUT_PNM      1
-#define OUTPUT_TIFF     2
-#define OUTPUT_PNG      3
-#define OUTPUT_JPEG     4
-#define OUTPUT_PDF      5
+#define OUTPUT_UNKNOWN      0
+#define OUTPUT_PNM          1
+#define OUTPUT_TIFF         2
+#define OUTPUT_PNG          3
+#define OUTPUT_JPEG         4
+#define OUTPUT_PDF          5
+#define OUTPUT_PDF_PER_PAGE 6
 
 #define BASE_OPTSTRING	"d:hi:Lf:o:B:nvVTAbp"
 #define STRIP_HEIGHT	256	/* # lines we increment image height */
@@ -1438,7 +1439,7 @@ scan_it (FILE *ofp, void* pw)
 
       if (first_frame)
 	{
-          image.num_channels = 1;
+	  image.num_channels = 1;
 	  switch (parm.format)
 	    {
 	    case SANE_FRAME_RED:
@@ -1461,6 +1462,7 @@ scan_it (FILE *ofp, void* pw)
 		  offset = 0;
 		}
 	      else
+		{
 		  switch(output_format)
 		  {
 		  case OUTPUT_TIFF:
@@ -1482,13 +1484,20 @@ scan_it (FILE *ofp, void* pw)
 #endif
 #ifdef HAVE_LIBJPEG
 		  case OUTPUT_PDF:
-		    sane_pdf_start_page ( pw, parm.pixels_per_line, parm.lines,
-		               resolution_value, SANE_PDF_IMAGE_COLOR,
-		               SANE_PDF_ROTATE_OFF);
-		    write_jpeg_header (parm.format, parm.pixels_per_line,
-				       parm.lines, resolution_value,
-				       ofp, &cinfo, &jerr);
-		    break;
+		  case OUTPUT_PDF_PER_PAGE:
+		    {
+		      SANE_Int image_type =
+			  (parm.format == SANE_FRAME_GRAY)?
+			      (parm.depth == 1? SANE_PDF_IMAGE_MONO: SANE_PDF_IMAGE_GRAY): SANE_PDF_IMAGE_COLOR;
+
+		      sane_pdf_start_page(pw, parm.pixels_per_line, parm.lines, resolution_value,
+					  image_type, SANE_PDF_ROTATE_OFF);
+
+		      write_jpeg_header (parm.format, parm.pixels_per_line,
+					 parm.lines, resolution_value,
+					 ofp, &cinfo, &jerr);
+		      break;
+		    }
 		  case OUTPUT_JPEG:
 		    write_jpeg_header (parm.format, parm.pixels_per_line,
 				       parm.lines, resolution_value,
@@ -1496,6 +1505,7 @@ scan_it (FILE *ofp, void* pw)
 		    break;
 #endif
 		  }
+		}
 	      break;
 
             default:
@@ -1506,7 +1516,7 @@ scan_it (FILE *ofp, void* pw)
 	    pngbuf = malloc(parm.bytes_per_line);
 #endif
 #ifdef HAVE_LIBJPEG
-	  if(output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF)
+	  if(output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
 	    jpegbuf = malloc(parm.bytes_per_line);
 #endif
 
@@ -1670,7 +1680,7 @@ scan_it (FILE *ofp, void* pw)
 	      else
 #endif
 #ifdef HAVE_LIBJPEG
-	      if (output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF)
+	      if (output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
 	        {
 		  int idx = 0;
 		  int left = len;
@@ -1787,6 +1797,7 @@ scan_it (FILE *ofp, void* pw)
 #endif
 #ifdef HAVE_LIBJPEG
       case OUTPUT_PDF:
+      case OUTPUT_PDF_PER_PAGE:
 	sane_pdf_start_page ( pw, parm.pixels_per_line, parm.lines,
 	           resolution_value, SANE_PDF_IMAGE_COLOR,
 	           SANE_PDF_ROTATE_OFF);
@@ -1824,7 +1835,7 @@ scan_it (FILE *ofp, void* pw)
 	png_write_end(png_ptr, info_ptr);
 #endif
 #ifdef HAVE_LIBJPEG
-    if(output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF)
+    if(output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
 	jpeg_finish_compress(&cinfo);
 #endif
 
@@ -1839,7 +1850,7 @@ cleanup:
   }
 #endif
 #ifdef HAVE_LIBJPEG
-  if(output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF) {
+  if(output_format == OUTPUT_JPEG || output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE) {
     jpeg_destroy_compress(&cinfo);
     free(jpegbuf);
   }
@@ -2225,6 +2236,15 @@ main (int argc, char **argv)
 	      scanimage_exit (1);
 #endif
 	    }
+	  else if (strcmp (optarg, "pdf-per-page") == 0)
+	    {
+#ifdef HAVE_LIBJPEG
+	      output_format = OUTPUT_PDF_PER_PAGE;
+#else
+	      fprintf(stderr, "PDF support not compiled in\n");
+	      scanimage_exit (1);
+#endif
+	    }
           else if (strcmp (optarg, "pnm") == 0)
             {
               output_format = OUTPUT_PNM;
@@ -2267,6 +2287,16 @@ main (int argc, char **argv)
 			    device_list[i]->name, device_list[i]->vendor,
 			    device_list[i]->model, device_list[i]->type);
 		  }
+
+		if (i == 0)
+		  printf ("\nNo scanners were identified. If you were expecting "
+			"something different,\ncheck that the scanner is plugged "
+			"in, turned on and detected by the\nsane-find-scanner tool "
+			"(if appropriate). Please read the documentation\nwhich came "
+			"with this software (README, FAQ, manpages).\n");
+
+		if (defdevname)
+		  printf ("default device is `%s'\n", defdevname);
 	      }
 	    else
 	      {
@@ -2344,15 +2374,6 @@ main (int argc, char **argv)
 		      printf ("%s", start);
 		  }
 	      }
-	    if (i == 0 && ch != 'f')
-	      printf ("\nNo scanners were identified. If you were expecting "
-                "something different,\ncheck that the scanner is plugged "
-		"in, turned on and detected by the\nsane-find-scanner tool "
-		"(if appropriate). Please read the documentation\nwhich came "
-		"with this software (README, FAQ, manpages).\n");
-
-	    if (defdevname)
-	      printf ("default device is `%s'\n", defdevname);
 	    scanimage_exit (0);
 	    break;
 	  }
@@ -2378,7 +2399,7 @@ standard output.\n\
 Parameters are separated by a blank from single-character options (e.g.\n\
 -d epson) and by a \"=\" from multi-character options (e.g. --device-name=epson).\n\
 -d, --device-name=DEVICE   use a given scanner device (e.g. hp:/dev/scanner)\n\
-    --format=pnm|tiff|png|jpeg|pdf  file format of output file\n\
+    --format=pnm|tiff|png|jpeg|pdf|pdf-per-page  file format of output file\n\
 -i, --icc-profile=PROFILE  include this ICC profile into TIFF file\n", prog_name);
       printf ("\
 -L, --list-devices         show available scanner devices\n\
@@ -2429,6 +2450,13 @@ Parameters are separated by a blank from single-character options (e.g.\n\
           scanimage_exit (1);
         }
     }
+
+  if (output_format == OUTPUT_PDF_PER_PAGE && !batch)
+    {
+      fprintf(stderr, "warning: --format=pdf-per-page specified without --batch; demoting to --format=pdf\n");
+      output_format = OUTPUT_PDF;
+    }
+
   if (!devname)
     {
       /* If no device name was specified explicitly, we look at the
@@ -2702,6 +2730,7 @@ List of available devices:", prog_name);
 #endif
 #ifdef HAVE_LIBJPEG
 	  case OUTPUT_PDF:
+	  case OUTPUT_PDF_PER_PAGE:
 	    format = "out%d.pdf";
 	    break;
 	  case OUTPUT_JPEG:
@@ -2725,7 +2754,7 @@ List of available devices:", prog_name);
                 }
             }
 #ifdef HAVE_LIBJPEG
-         if (output_format == OUTPUT_PDF)
+         if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
            {
              sane_pdf_open(&pw, ofp );
              sane_pdf_start_doc( pw );
@@ -2780,7 +2809,7 @@ List of available devices:", prog_name);
 		      if (ofp)
 			{
 #ifdef HAVE_LIBJPEG
-	                  if (output_format == OUTPUT_PDF)
+	                  if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
 			    {
 		              sane_pdf_end_doc( pw );
 			      sane_pdf_close ( pw );
@@ -2811,7 +2840,7 @@ List of available devices:", prog_name);
 	      if (ofp )
 		{
 #ifdef HAVE_LIBJPEG
-	          if (output_format == OUTPUT_PDF)
+	          if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
 		    {
 		       sane_pdf_end_doc( pw );
 		       sane_pdf_close ( pw );
@@ -2834,7 +2863,7 @@ List of available devices:", prog_name);
 	        {
 	          ofp = fopen (part_path, "w");
 #ifdef HAVE_LIBJPEG
-	          if (output_format == OUTPUT_PDF && ofp != NULL)
+	          if ((output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE) && ofp != NULL)
 	             init_pdf = SANE_TRUE;
 #endif
 	        }
@@ -2856,7 +2885,7 @@ List of available devices:", prog_name);
 	  status = scan_it (ofp, pw);
 
 #ifdef HAVE_LIBJPEG
-	  if (output_format == OUTPUT_PDF)
+	  if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
 	    {
 		  sane_pdf_end_page( pw );
 		  fflush( ofp );
@@ -2879,6 +2908,11 @@ List of available devices:", prog_name);
 #ifdef HAVE_LIBJPEG
 	          if (output_format != OUTPUT_PDF)
 		    {
+		      if (output_format == OUTPUT_PDF_PER_PAGE)
+			{
+			  sane_pdf_end_doc( pw );
+			  sane_pdf_close ( pw );
+			}
 #endif
 		      if (!ofp || 0 != fclose(ofp))
 		        {
@@ -2910,7 +2944,7 @@ List of available devices:", prog_name);
               else
                 {
 #ifdef HAVE_LIBJPEG
-	              if (output_format == OUTPUT_PDF)
+	              if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
 		            {
 			          sane_pdf_end_doc( pw );
 			          fflush( ofp );
@@ -2923,8 +2957,16 @@ List of available devices:", prog_name);
                       ofp = NULL;
                     }
                 }
+	      n += batch_increment;
 	      break;
 	    default:
+#ifdef HAVE_LIBJPEG
+              if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
+                {
+                  sane_pdf_end_doc( pw );
+                  sane_pdf_close ( pw );
+                }
+#endif
 	      if (batch)
 		{
 		  if (ofp)
@@ -2936,13 +2978,6 @@ List of available devices:", prog_name);
 		}
               else
                 {
-#ifdef HAVE_LIBJPEG
-                  if (output_format == OUTPUT_PDF)
-                    {
-                       sane_pdf_end_doc( pw );
-                       sane_pdf_close ( pw );
-                    }
-#endif
                   if (output_file && ofp)
                     {
                       fclose(ofp);
@@ -2952,7 +2987,6 @@ List of available devices:", prog_name);
                 }
 	      break;
 	    }			/* switch */
-	  n += batch_increment;
 	}
       while ((batch
 	      && (batch_count == BATCH_COUNT_UNLIMITED || --batch_count))
@@ -2961,9 +2995,9 @@ List of available devices:", prog_name);
       if (batch)
 	{
 #ifdef HAVE_LIBJPEG
-	  if (output_format == OUTPUT_PDF)
+	  if (output_format == OUTPUT_PDF || output_format == OUTPUT_PDF_PER_PAGE)
             {
-	      if (output_file && ofp)
+	      if (ofp)
 	        {
 	          sane_pdf_end_doc( pw );
 	          fflush( ofp );

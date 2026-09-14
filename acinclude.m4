@@ -767,12 +767,6 @@ AH_BOTTOM([
 #define u_long unsigned long
 #endif
 
-/* Prototype for getenv */
-#ifndef HAVE_GETENV
-#define getenv sanei_getenv
-char * getenv(const char *name);
-#endif
-
 /* Prototype for inet_ntop */
 #ifndef HAVE_INET_NTOP
 #define inet_ntop sanei_inet_ntop
@@ -790,13 +784,6 @@ int inet_pton (int af, const char *src, void *dst);
 #ifndef HAVE_SIGPROCMASK
 #define sigprocmask sanei_sigprocmask
 int sigprocmask (int how, int *new, int *old);
-#endif
-
-/* Prototype for snprintf */
-#ifndef HAVE_SNPRINTF
-#define snprintf sanei_snprintf
-#include <sys/types.h>
-int snprintf (char *str,size_t count,const char *fmt,...);
 #endif
 
 /* Prototype for strcasestr */

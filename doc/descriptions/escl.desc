@@ -224,7 +224,7 @@
 :status :good
 :comment "All resolutions supported, Flatbed only supported."
 
-:mfg "HP"
+:mfg "Hewlett-Packard"
 :url "https://support.hp.com/us-en/drivers/printers"
 
 :model "DeskJet 2710"

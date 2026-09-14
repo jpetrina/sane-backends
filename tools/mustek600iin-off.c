@@ -28,7 +28,7 @@
 #include "../include/sane/sanei.h"
 #include "../include/sane/sanei_directio.h"
 
-#define MUSTEK_CONF	STRINGIFY(PATH_SANE_CONFIG_DIR) "/mustek.conf"
+#define MUSTEK_CONF	PATH_SANE_CONFIG_DIR "/mustek.conf"
 #define PORT_DEV	"/dev/port"
 
 #include <stdio.h>

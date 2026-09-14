@@ -15,7 +15,7 @@
 :devicetype :scanner
 
 :mfg "Hewlett-Packard"
-:url "http://www.hp.com"
+:url "http://www.hp.com/"
 
 :model "ScanJet 4500C"
 :interface "USB"

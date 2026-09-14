@@ -2753,7 +2753,7 @@ Kyocera
 <td align=center>SCSI</td>
 <td align=center>&nbsp;</td>
 <td align=center><font color="#F00000">Unsupported</font></td>
-<td>A better backend for the FilmScan 200 can be found at <A HREF= "http://www.vjet.demon.co.uk/scanner/ ">http://www.vjet.demon.co.uk/scanner/</A></td>
+<td>A better backend for the FilmScan 200 can be found at <A HREF="http://www.vjet.demon.co.uk/scanner/">http://www.vjet.demon.co.uk/scanner/</A></td>
 </tr>
 <tr>
 <td align=center>CX-3200</td>
@@ -16496,6 +16496,6 @@ Grandtek Scopecam
 >Contact</a>
 </address>
 <font size=-1>
-This page was created by sane-desc 3.6 from sane-backends 1.0.29-241-g1f9590ab
+This page was created by sane-desc 3.7 from sane-backends 1.4.0.254-1d47d-dirty
 </font>
 </body> </html>

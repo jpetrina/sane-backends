@@ -65,7 +65,7 @@
 # define PATH_SEP	'/'
 #endif
 
-#define DEFAULT_DIRS	"." DIR_SEP STRINGIFY(PATH_SANE_CONFIG_DIR)
+#define DEFAULT_DIRS	"." DIR_SEP PATH_SANE_CONFIG_DIR
 
 #ifdef __BEOS__
 #include <FindDirectory.h>

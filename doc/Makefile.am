@@ -74,12 +74,8 @@ EXTRA_DIST += saned.man
 
 MANPAGES = $(man1_MANS) $(BACKEND_5MANS) $(man7_MANS) $(man8_MANS)
 
-if CROSS_COMPILING
-HTML_PAGES =
-else
 HTML_PAGES = sane-backends.html sane-backends-external.html \
 	     sane-mfgs.html sane-mfgs-external.html
-endif
 doc_DATA = $(HTML_PAGES)
 
 all: bemans html-pages
@@ -227,17 +223,17 @@ html-man: $(MANPAGES)
 	  cat $${page} | $(MAN2HTML) > $${page}.html; \
 	done
 
-../tools/sane-desc:
-	cd ../tools ; $(MAKE) sane-desc
+../tools/sane-desc$(BUILD_EXEEXT):
+	cd ../tools ; $(MAKE) sane-desc$(BUILD_EXEEXT)
 
-sane-backends.html: $(DESC_FILES) ../tools/sane-desc
-	@../tools/sane-desc -m html-backends-split -s ${srcdir}/descriptions \
-	  -i "The following table summarizes the backends/drivers distributed \
-	  with $(PACKAGE)-$(VERSION), and the hardware or software they \
-	  support." -d 0 > sane-backends.html
+sane-backends.html: $(DESC_FILES) ../tools/sane-desc$(BUILD_EXEEXT)
+	@../tools/sane-desc$(BUILD_EXEEXT) -m html-backends-split \
+	  -s ${srcdir}/descriptions -i "The following table summarizes the \
+	  backends/drivers distributed with $(PACKAGE)-$(VERSION), and the \
+	  hardware or software they support." -d 0 > sane-backends.html
 
-sane-backends-external.html: $(DESC_EXT_FILES) ../tools/sane-desc
-	@../tools/sane-desc -m html-backends-split \
+sane-backends-external.html: $(DESC_EXT_FILES) ../tools/sane-desc$(BUILD_EXEEXT)
+	@../tools/sane-desc$(BUILD_EXEEXT) -m html-backends-split \
 	  -s ${srcdir}/descriptions-external \
 	  -i "The following table summarizes the backends/drivers that \
 	  have not yet been included in the SANE distribution, and the \
@@ -245,26 +241,28 @@ sane-backends-external.html: $(DESC_EXT_FILES) ../tools/sane-desc
 	  -t "SANE: External Backends (Drivers)" -d 0 \
 	  > sane-backends-external.html
 
-sane-mfgs.html: $(DESC_FILES) ../tools/sane-desc
-	@../tools/sane-desc -m html-mfgs -s ${srcdir}/descriptions \
+sane-mfgs.html: $(DESC_FILES) ../tools/sane-desc$(BUILD_EXEEXT)
+	@../tools/sane-desc$(BUILD_EXEEXT) -m html-mfgs \
+	  -s ${srcdir}/descriptions \
 	  -i "The following table summarizes the devices supported \
 	  by $(PACKAGE)-$(VERSION)." \
 	  -d 0 > sane-mfgs.html
 
-sane-mfgs-external.html: $(DESC_EXT_FILES) ../tools/sane-desc
-	@../tools/sane-desc -m html-mfgs -s ${srcdir}/descriptions-external \
+sane-mfgs-external.html: $(DESC_EXT_FILES) ../tools/sane-desc$(BUILD_EXEEXT)
+	@../tools/sane-desc$(BUILD_EXEEXT) -m html-mfgs \
+	  -s ${srcdir}/descriptions-external \
 	  -i "The following table summarizes the devices that \
 	  are supported by external backends." \
 	  -t "SANE: Devices Supported by External Backends" -d 0 \
 	  > sane-mfgs-external.html
 
-descriptions.db: $(DESC_FILES) ../tools/sane-desc
-	@../tools/sane-desc -m ascii -s ${srcdir}/descriptions \
+descriptions.db: $(DESC_FILES) ../tools/sane-desc$(BUILD_EXEEXT)
+	@../tools/sane-desc$(BUILD_EXEEXT) -m ascii -s ${srcdir}/descriptions \
 	  > descriptions.db
 
-descriptions-external.db: $(DESC_EXT_FILES) ../tools/sane-desc
-	@../tools/sane-desc -m ascii -s ${srcdir}/descriptions-external \
-	  > descriptions-external.db
+descriptions-external.db: $(DESC_EXT_FILES) ../tools/sane-desc$(BUILD_EXEEXT)
+	@../tools/sane-desc$(BUILD_EXEEXT) -m ascii \
+	  -s ${srcdir}/descriptions-external > descriptions-external.db
 
 html-pages: $(HTML_PAGES)
 html-local: html-pages html-man

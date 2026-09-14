@@ -60,6 +60,92 @@
 static const SANE_Device **devlist = NULL;
 static ESCL_Device *list_devices_primary = NULL;
 static int num_devices = 0;
+static SANE_Bool disable_https = SANE_FALSE;
+
+static void
+escl_free_addresses(ESCL_Address *address)
+{
+    while (address) {
+        ESCL_Address *next = address->next;
+        free(address->ip_address);
+        free(address->type);
+        free(address);
+        address = next;
+    }
+}
+
+static SANE_Status
+escl_add_address(ESCL_Device *device,
+                 const char *ip_address,
+                 int port_nb,
+                 const char *type,
+                 int tls,
+                 SANE_Bool https)
+{
+    ESCL_Address *address;
+    for (address = device->addresses; address; address = address->next) {
+        if (address->port_nb == port_nb &&
+            !strcmp(address->ip_address, ip_address) &&
+            !strcmp(address->type, type))
+            return SANE_STATUS_GOOD;
+    }
+    address = calloc(1, sizeof(*address));
+    if (!address)
+        return SANE_STATUS_NO_MEM;
+    address->ip_address = strdup(ip_address);
+    address->type = strdup(type);
+    if (!address->ip_address || !address->type) {
+        free(address->ip_address);
+        free(address->type);
+        free(address);
+        return SANE_STATUS_NO_MEM;
+    }
+    address->port_nb = port_nb;
+    address->tls = tls;
+    address->https = https;
+    address->next = device->addresses;
+    device->addresses = address;
+    return SANE_STATUS_GOOD;
+}
+
+static SANE_Status
+escl_copy_addresses(ESCL_Device *destination, const ESCL_Device *source)
+{
+    ESCL_Address *address;
+    for (address = source->addresses; address; address = address->next) {
+        SANE_Status status = escl_add_address(destination,
+                                              address->ip_address,
+                                              address->port_nb,
+                                              address->type,
+                                              address->tls,
+                                              address->https);
+        if (status != SANE_STATUS_GOOD)
+            return status;
+    }
+    return SANE_STATUS_GOOD;
+}
+
+static SANE_Bool
+escl_use_next_address(ESCL_Device *device)
+{
+    ESCL_Address *address = device->addresses;
+    char *ip_address;
+    char *type;
+    if (!address)
+        return SANE_FALSE;
+    device->addresses = address->next;
+    ip_address = device->ip_address;
+    type = device->type;
+    device->ip_address = address->ip_address;
+    device->type = address->type;
+    device->port_nb = address->port_nb;
+    device->tls = address->tls;
+    device->https = address->https;
+    free(ip_address);
+    free(type);
+    free(address);
+    return SANE_TRUE;
+}
 
 
 typedef struct Handled {
@@ -78,6 +164,7 @@ typedef struct Handled {
     SANE_Range contrast_range;
     SANE_Range sharpen_range;
     SANE_Range thresold_range;
+    SANE_Range inactive_range;
     SANE_Bool cancel;
     SANE_Bool write_scan_data;
     SANE_Bool decompress_scan_data;
@@ -94,12 +181,22 @@ escl_free_device(ESCL_Device *current)
     free((void*)current->type);
     free((void*)current->is);
     free((void*)current->uuid);
+    free((void*)current->version);
     free((void*)current->unix_socket);
+    escl_free_addresses(current->addresses);
     curl_slist_free_all(current->hack);
     free(current);
     return NULL;
 }
 
+
+static size_t
+escl_null_write_cb(void *ptr, size_t size, size_t nmemb, void *stream)
+{
+    (void)ptr;
+    (void)stream;
+    return size * nmemb;
+}
 
 static int
 escl_tls_protocol_supported(char *url)
@@ -112,8 +209,11 @@ escl_tls_protocol_supported(char *url)
       curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
       curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
       curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+      curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, ESCL_CONNECT_TIMEOUT);
+      curl_easy_setopt(curl, CURLOPT_TIMEOUT, ESCL_REQUEST_TIMEOUT);
       curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
       curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
+      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, escl_null_write_cb);
       /* Perform the request */
       res = curl_easy_perform(curl);
       curl_easy_cleanup(curl);
@@ -124,6 +224,8 @@ escl_tls_protocol_supported(char *url)
 static int
 escl_is_tls(char * url, char *type)
 {
+    if (!url || !type)
+        return 0;
     if(!strcmp(type, "_uscans._tcp") ||
        !strcmp(type, "https"))
       {
@@ -142,8 +244,42 @@ escl_free_handler(escl_sane_t *handler)
     if (handler == NULL)
         return;
 
+    escl_jpeg_stream_finish(handler->scanner);
+    escl_png_stream_finish(handler->scanner);
+    escl_tiff_stream_finish(handler->scanner);
+    escl_pdf_stream_finish(handler->scanner);
+    free(handler->result);
+    escl_free_capabilities(handler->scanner);
     escl_free_device(handler->device);
     free(handler);
+}
+
+static void
+escl_free_device_list(void)
+{
+    while (list_devices_primary) {
+        ESCL_Device *next = list_devices_primary->next;
+        escl_free_device(list_devices_primary);
+        list_devices_primary = next;
+    }
+    num_devices = 0;
+}
+
+static void
+escl_free_sane_device_list(void)
+{
+    if (!devlist)
+        return;
+    for (int i = 0; devlist[i]; i++) {
+        SANE_Device *device = (SANE_Device *)devlist[i];
+        free((void *)device->name);
+        free((void *)device->vendor);
+        free((void *)device->model);
+        free((void *)device->type);
+        free(device);
+    }
+    free(devlist);
+    devlist = NULL;
 }
 
 SANE_Status escl_parse_name(SANE_String_Const name, ESCL_Device *device);
@@ -229,30 +365,40 @@ escl_device_add(int port_nb,
     ESCL_Device *current = NULL;
     DBG (10, "escl_device_add\n");
     snprintf(url_port, sizeof(url_port), "https://%s:%d", ip_address, port_nb);
-    tls_version = escl_is_tls(url_port, type);
+    /* The service type already identifies HTTPS; do not block the Avahi
+     * callback with a network probe. */
+    tls_version = !strcmp(type, "_uscans._tcp") ? 1 : escl_is_tls(url_port, type);
 
     for (current = list_devices_primary; current; current = current->next) {
 	if ((strcmp(current->ip_address, ip_address) == 0) ||
             (uuid && current->uuid && !strcmp(current->uuid, uuid)))
            {
-	      if (strcmp(current->type, type))
+	       if (current->port_nb == port_nb &&
+           strcmp(current->type, type) != 0 &&
+           (!strcmp(type, "_uscans._tcp") || !strcmp(type, "https")))
                 {
-                  if(!strcmp(type, "_uscans._tcp") ||
-                     !strcmp(type, "https"))
-                    {
-                       free (current->type);
-                       current->type = strdup(type);
-                       if (strcmp(current->ip_address, ip_address)) {
-                           free (current->ip_address);
-                           current->ip_address = strdup(ip_address);
-                       }
-                       current->port_nb = port_nb;
-                       current->https = SANE_TRUE;
-                       current->tls = tls_version;
-                    }
-	          return (SANE_STATUS_GOOD);
+                  char *secure_type = strdup(type);
+                  if (!secure_type)
+                     return SANE_STATUS_NO_MEM;
+                  free (current->type);
+                  current->type = secure_type;
+                  current->https = SANE_TRUE;
+                  current->tls = tls_version;
+                  return SANE_STATUS_GOOD;
                 }
-              else if (current->port_nb == port_nb)
+	       if (strcmp(current->ip_address, ip_address) != 0 ||
+           current->port_nb != port_nb || strcmp(current->type, type) != 0) {
+          SANE_Bool address_https = !strcmp(type, "_uscans._tcp") ||
+                                    !strcmp(type, "https");
+          SANE_Status address_status = escl_add_address(current, ip_address,
+                                                         port_nb, type,
+                                                         tls_version,
+                                                         address_https);
+          if (address_status != SANE_STATUS_GOOD)
+             return address_status;
+          return SANE_STATUS_GOOD;
+       }
+	      else if (current->port_nb == port_nb)
 	        return (SANE_STATUS_GOOD);
            }
     }
@@ -446,17 +592,8 @@ void
 sane_exit(void)
 {
     DBG (10, "escl sane_exit\n");
-    ESCL_Device *next = NULL;
-
-    while (list_devices_primary != NULL) {
-	next = list_devices_primary->next;
-	free(list_devices_primary);
-	list_devices_primary = next;
-    }
-    if (devlist)
-	free (devlist);
-    list_devices_primary = NULL;
-    devlist = NULL;
+    escl_free_device_list();
+    escl_free_sane_device_list();
     curl_global_cleanup();
 }
 
@@ -479,6 +616,8 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
     DBG (10, "attach_one_config [%s]\n", line);
     if (*line == '#') return SANE_STATUS_GOOD;
     if (!strncmp(line, "pdfblacklist", 12)) return SANE_STATUS_GOOD;
+    if (escl_parse_disable_https(line, &disable_https))
+        return SANE_STATUS_GOOD;
     if (strncmp(line, "device", 6) == 0) {
         char *name_str = NULL;
         char *opt_model = NULL;
@@ -562,11 +701,20 @@ attach_one_config(SANEI_Config __sane_unused__ *config, const char *line,
 	}
         return SANE_STATUS_GOOD;
     }
+    if (!escl_device || !escl_device->ip_address || !escl_device->type ||
+        escl_device->port_nb < 1 || escl_device->port_nb > 65535) {
+        DBG(10, "Incomplete eSCL device configuration.\n");
+        return SANE_STATUS_INVAL;
+    }
     escl_device->is = strdup("flatbed or ADF scanner");
+    if (!escl_device->is)
+        return SANE_STATUS_NO_MEM;
     escl_device->uuid = NULL;
     char url_port[512] = { 0 };
     snprintf(url_port, sizeof(url_port), "https://%s:%d", escl_device->ip_address, escl_device->port_nb);
     escl_device->tls = escl_is_tls(url_port, escl_device->type);
+    escl_device->https = !strcmp(escl_device->type, "https") ||
+                         !strcmp(escl_device->type, "_uscans._tcp");
     status = escl_check_and_add_device(escl_device);
     if (status == SANE_STATUS_GOOD) {
     	DBG (10, "attach_one_config finish %s://%s:%d", escl_device->type, escl_device->ip_address, escl_device->port_nb);
@@ -590,15 +738,16 @@ sane_get_devices(const SANE_Device ***device_list, SANE_Bool local_only)
 
     DBG (10, "escl sane_get_devices\n");
     ESCL_Device *dev = NULL;
-    static const SANE_Device **devlist = 0;
     SANE_Status status;
     SANE_Status status2;
 
     if (device_list == NULL)
 	return (SANE_STATUS_INVAL);
+    escl_free_device_list();
+    disable_https = SANE_FALSE;
     status2 = sanei_configure_attach(ESCL_CONFIG_FILE, NULL,
 				    attach_one_config, NULL);
-    escl_devices(&status);
+    escl_devices(&status, disable_https);
     if (status != SANE_STATUS_GOOD && status2 != SANE_STATUS_GOOD)
     {
        if (status2 != SANE_STATUS_GOOD)
@@ -606,14 +755,17 @@ sane_get_devices(const SANE_Device ***device_list, SANE_Bool local_only)
        if (status != SANE_STATUS_GOOD)
                return (status);
     }
-    if (devlist)
-	free(devlist);
+    escl_free_sane_device_list();
     devlist = (const SANE_Device **) calloc (num_devices + 1, sizeof (devlist[0]));
     if (devlist == NULL)
 	return (SANE_STATUS_NO_MEM);
     int i = 0;
     for (dev = list_devices_primary; i < num_devices; dev = dev->next) {
 	SANE_Device *s_dev = convertFromESCLDev(dev);
+	if (!s_dev) {
+            escl_free_sane_device_list();
+            return SANE_STATUS_NO_MEM;
+        }
 	devlist[i] = s_dev;
 	i++;
     }
@@ -998,6 +1150,9 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
     s->val[OPT_SCAN_SOURCE].s = strdup (s->scanner->Sources[s->scanner->source]);
 
     /* "Enhancement" group: */
+    s->inactive_range.min = 0;
+    s->inactive_range.max = 255;
+    s->inactive_range.quant = 1;
     s->opt[OPT_ENHANCEMENT_GROUP].title = SANE_I18N ("Enhancement");
     s->opt[OPT_ENHANCEMENT_GROUP].desc = "";    /* not valid for a group */
     s->opt[OPT_ENHANCEMENT_GROUP].type = SANE_TYPE_GROUP;
@@ -1020,8 +1175,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
        s->brightness_range.max=s->scanner->brightness->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_BRIGHTNESS].constraint.range = &range;
+      s->opt[OPT_BRIGHTNESS].constraint.range = &s->inactive_range;
       s->val[OPT_BRIGHTNESS].w = 0;
       s->opt[OPT_BRIGHTNESS].cap |= SANE_CAP_INACTIVE;
     }
@@ -1039,8 +1193,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
        s->contrast_range.max=s->scanner->contrast->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_CONTRAST].constraint.range = &range;
+      s->opt[OPT_CONTRAST].constraint.range = &s->inactive_range;
       s->val[OPT_CONTRAST].w = 0;
       s->opt[OPT_CONTRAST].cap |= SANE_CAP_INACTIVE;
     }
@@ -1058,8 +1211,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
        s->sharpen_range.max=s->scanner->sharpen->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_SHARPEN].constraint.range = &range;
+      s->opt[OPT_SHARPEN].constraint.range = &s->inactive_range;
       s->val[OPT_SHARPEN].w = 0;
       s->opt[OPT_SHARPEN].cap |= SANE_CAP_INACTIVE;
     }
@@ -1078,8 +1230,7 @@ init_options(SANE_String_Const name_source, escl_sane_t *s)
       s->thresold_range.max=s->scanner->threshold->max;
     }
     else{
-      SANE_Range range = { 0, 255, 0 };
-      s->opt[OPT_THRESHOLD].constraint.range = &range;
+      s->opt[OPT_THRESHOLD].constraint.range = &s->inactive_range;
       s->val[OPT_THRESHOLD].w = 0;
       s->opt[OPT_THRESHOLD].cap |= SANE_CAP_INACTIVE;
     }
@@ -1160,20 +1311,13 @@ _get_hack(SANE_String_Const name, ESCL_Device *device)
   FILE *fp;
   SANE_Char line[PATH_MAX];
   DBG (3, "_get_hack: start\n");
-  if (device->model_name &&
-      (strcasestr(device->model_name, "LaserJet FlowMFP M578") ||
-       strcasestr(device->model_name, "LaserJet MFP M630"))) {
-       device->hack = curl_slist_append(NULL, "Host: localhost");
-       DBG (3, "_get_hack: finish\n");
-       return;
-  }
-
   /* open configuration file */
   fp = sanei_config_open (ESCL_CONFIG_FILE);
   if (!fp)
     {
       DBG(4, "_get_hack: couldn't access %s\n", ESCL_CONFIG_FILE);
       DBG (3, "_get_hack: exit\n");
+      return;
     }
 
   /* loop reading the configuration file, all line beginning by "option " are
@@ -1184,11 +1328,8 @@ _get_hack(SANE_String_Const name, ESCL_Device *device)
     {
        if (strstr(line, name)) {
           DBG (3, "_get_hack: idevice found\n");
-	  if (strstr(line, "hack=localhost")) {
-              DBG (3, "_get_hack: device found\n");
-	      device->hack = curl_slist_append(NULL, "Host: localhost");
-	  }
-	  goto finish_hack;
+	  escl_hack_apply_config(device, line);
+          goto finish_hack;
        }
     }
 finish_hack:
@@ -1209,6 +1350,7 @@ _get_blacklist_pdf(void)
     {
       DBG(4, "_get_blacklit: couldn't access %s\n", ESCL_CONFIG_FILE);
       DBG (3, "_get_blacklist: exit\n");
+      return NULL;
     }
 
   /* loop reading the configuration file, all line beginning by "option " are
@@ -1259,6 +1401,7 @@ sane_open(SANE_String_Const name, SANE_Handle *h)
         escl_free_device(device);
         return status;
     }
+    _get_hack(name, device);
 
     handler = (escl_sane_t *)calloc(1, sizeof(escl_sane_t));
     if (handler == NULL) {
@@ -1266,14 +1409,30 @@ sane_open(SANE_String_Const name, SANE_Handle *h)
         return (SANE_STATUS_NO_MEM);
     }
     handler->device = device;  // Handler owns device now.
+    for (ESCL_Device *known = list_devices_primary; known; known = known->next) {
+        if (known->port_nb == device->port_nb &&
+            !strcmp(known->ip_address, device->ip_address) &&
+            !strcmp(known->type, device->type)) {
+            status = escl_copy_addresses(device, known);
+            if (status != SANE_STATUS_GOOD) {
+                escl_free_handler(handler);
+                return status;
+            }
+            break;
+        }
+    }
     blacklist = _get_blacklist_pdf();
-    handler->scanner = escl_capabilities(device, blacklist, &status);
+    do {
+        handler->scanner = escl_capabilities(device, blacklist, &status);
+        if (status == SANE_STATUS_GOOD || !escl_use_next_address(device))
+            break;
+        DBG(10, "Retrying eSCL device with an alternate address\n");
+    } while (1);
+    free(blacklist);
     if (status != SANE_STATUS_GOOD) {
         escl_free_handler(handler);
         return (status);
     }
-    _get_hack(name, device);
-
     status = init_options(NULL, handler);
     if (status != SANE_STATUS_GOOD) {
         escl_free_handler(handler);
@@ -1309,6 +1468,10 @@ sane_cancel(SANE_Handle h)
 {
     DBG (10, "escl sane_cancel\n");
     escl_sane_t *handler = h;
+    escl_jpeg_stream_finish(handler->scanner);
+    escl_png_stream_finish(handler->scanner);
+    escl_tiff_stream_finish(handler->scanner);
+    escl_pdf_stream_finish(handler->scanner);
     if (handler->scanner->tmp)
     {
       fclose(handler->scanner->tmp);
@@ -1375,11 +1538,14 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
 {
     DBG (10, "escl sane_control_option\n");
     escl_sane_t *handler = h;
+    SANE_Status status;
 
     if (i)
 	*i = 0;
-    if (n >= NUM_OPTIONS || n < 0)
+    if (!handler || !v || n >= NUM_OPTIONS || n < 0)
 	return (SANE_STATUS_INVAL);
+    if (!SANE_OPTION_IS_ACTIVE(handler->opt[n].cap))
+        return (SANE_STATUS_INVAL);
     if (a == SANE_ACTION_GET_VALUE) {
 	switch (n) {
 	case OPT_TL_X:
@@ -1393,6 +1559,7 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
         case OPT_BRIGHTNESS:
         case OPT_CONTRAST:
         case OPT_SHARPEN:
+	case OPT_THRESHOLD:
 	    *(SANE_Word *) v = handler->val[n].w;
 	    break;
 	case OPT_SCAN_SOURCE:
@@ -1406,6 +1573,11 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
 	return (SANE_STATUS_GOOD);
     }
     if (a == SANE_ACTION_SET_VALUE) {
+	if (!SANE_OPTION_IS_SETTABLE(handler->opt[n].cap))
+	    return (SANE_STATUS_INVAL);
+	status = sanei_constrain_value(&handler->opt[n], v, i);
+	if (status != SANE_STATUS_GOOD)
+	    return status;
 	switch (n) {
 	case OPT_TL_X:
 	case OPT_TL_Y:
@@ -1417,15 +1589,16 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
         case OPT_BRIGHTNESS:
         case OPT_CONTRAST:
         case OPT_SHARPEN:
+	case OPT_THRESHOLD:
 	    handler->val[n].w = *(SANE_Word *) v;
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
 	    break;
 	case OPT_SCAN_SOURCE:
 	    DBG(10, "SET OPT_SCAN_SOURCE(%s)\n", (SANE_String_Const)v);
 	    init_options_small((SANE_String_Const)v, handler);
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
 	    break;
 	case OPT_MODE:
 	    if (handler->val[n].s)
@@ -1453,7 +1626,7 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
             }
             DBG (10, "Color Mode allocation (%s).\n", handler->scanner->caps[handler->scanner->source].default_color);
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
             if (handler->scanner->brightness)
                 handler->opt[OPT_BRIGHTNESS].cap |= SANE_CAP_INACTIVE;
             if (handler->scanner->contrast)
@@ -1479,13 +1652,14 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v, SANE_Int 
             handler->val[n].w = _get_resolution(handler, (int)(*(SANE_Word *) v));
 	    handler->scanner->caps[handler->scanner->source].default_resolution = handler->val[n].w;
 	    if (i)
-		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS | SANE_INFO_INEXACT;
+		*i |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
 	    break;
 	default:
 	    break;
 	}
+	return (SANE_STATUS_GOOD);
     }
-    return (SANE_STATUS_GOOD);
+    return (SANE_STATUS_UNSUPPORTED);
 }
 
 static SANE_Bool
@@ -1530,6 +1704,11 @@ sane_start(SANE_Handle h)
 
     if (handler->device == NULL) {
         DBG(10, "Missing handler device.\n");
+        return (SANE_STATUS_INVAL);
+    }
+    if (handler->val[OPT_BR_X].w <= handler->val[OPT_TL_X].w ||
+        handler->val[OPT_BR_Y].w <= handler->val[OPT_TL_Y].w) {
+        DBG(10, "Invalid scan region\n");
         return (SANE_STATUS_INVAL);
     }
     handler->cancel = SANE_FALSE;
@@ -1586,21 +1765,17 @@ sane_start(SANE_Handle h)
        }
        DBG (10, "Before newjob Color Mode allocation (%s).\n", handler->scanner->caps[handler->scanner->source].default_color);
        handler->scanner->caps[handler->scanner->source].height =
-            MM_TO_PIXEL(handler->val[OPT_BR_Y].w, 300.0);
+            MM_TO_PIXEL((handler->val[OPT_BR_Y].w -
+                         handler->val[OPT_TL_Y].w), 300.0);
        handler->scanner->caps[handler->scanner->source].width =
-            MM_TO_PIXEL(handler->val[OPT_BR_X].w, 300.0);;
-       if (handler->x_range1.min == handler->val[OPT_TL_X].w)
-           handler->scanner->caps[handler->scanner->source].pos_x = 0;
-       else
-           handler->scanner->caps[handler->scanner->source].pos_x =
-               MM_TO_PIXEL((handler->val[OPT_TL_X].w - handler->x_range1.min),
-               300.0);
-       if (handler->y_range1.min == handler->val[OPT_TL_X].w)
-           handler->scanner->caps[handler->scanner->source].pos_y = 0;
-       else
-           handler->scanner->caps[handler->scanner->source].pos_y =
-               MM_TO_PIXEL((handler->val[OPT_TL_Y].w - handler->y_range1.min),
-               300.0);
+            MM_TO_PIXEL((handler->val[OPT_BR_X].w -
+                         handler->val[OPT_TL_X].w), 300.0);
+       handler->scanner->caps[handler->scanner->source].pos_x =
+            MM_TO_PIXEL((handler->val[OPT_TL_X].w - handler->x_range1.min),
+                        300.0);
+       handler->scanner->caps[handler->scanner->source].pos_y =
+            MM_TO_PIXEL((handler->val[OPT_TL_Y].w - handler->y_range1.min),
+                        300.0);
        DBG(10, "Calculate Size Image [%dx%d|%dx%d]\n",
 	        handler->scanner->caps[handler->scanner->source].pos_x,
 	        handler->scanner->caps[handler->scanner->source].pos_y,
@@ -1689,24 +1864,39 @@ sane_start(SANE_Handle h)
          return SANE_STATUS_NO_DOCS;
        }
     }
-    status = escl_scan(handler->scanner, handler->device, handler->scanner->scanJob, handler->result);
-    if (status != SANE_STATUS_GOOD)
-       return (status);
     if (!strcmp(handler->scanner->caps[handler->scanner->source].default_format, "image/jpeg"))
     {
-       status = get_JPEG_data(handler->scanner, &w, &he, &bps);
+       status = escl_jpeg_stream_start(handler->scanner, handler->device,
+                                       handler->scanner->scanJob, handler->result,
+                                       &w, &he, &bps);
     }
-    else if (!strcmp(handler->scanner->caps[handler->scanner->source].default_format, "image/png"))
+    else if (!strcmp(handler->scanner->caps[handler->scanner->source].default_format, "image/png") &&
+             handler->scanner->png_stream == NULL)
     {
-       status = get_PNG_data(handler->scanner, &w, &he, &bps);
+       status = escl_png_stream_start(handler->scanner, handler->device,
+                                      handler->scanner->scanJob, handler->result,
+                                      &w, &he, &bps);
     }
     else if (!strcmp(handler->scanner->caps[handler->scanner->source].default_format, "image/tiff"))
     {
-       status = get_TIFF_data(handler->scanner, &w, &he, &bps);
+       status = escl_tiff_stream_start(handler->scanner, handler->device,
+                                       handler->scanner->scanJob, handler->result,
+                                       &w, &he, &bps);
+    }
+    else
+       status = escl_scan(handler->scanner, handler->device,
+                          handler->scanner->scanJob, handler->result);
+    if (status != SANE_STATUS_GOOD)
+       return (status);
+    if (!strcmp(handler->scanner->caps[handler->scanner->source].default_format, "image/jpeg") ||
+        !strcmp(handler->scanner->caps[handler->scanner->source].default_format, "image/png") ||
+        !strcmp(handler->scanner->caps[handler->scanner->source].default_format, "image/tiff"))
+    {
+       /* The progressive decoder remains active and produces rows from sane_read. */
     }
     else if (!strcmp(handler->scanner->caps[handler->scanner->source].default_format, "application/pdf"))
     {
-       status = get_PDF_data(handler->scanner, &w, &he, &bps);
+       status = escl_pdf_stream_start(handler->scanner, &w, &he, &bps);
     }
     else {
        DBG(10, "Unknown image format\n");
@@ -1787,7 +1977,35 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *len)
             return (status);
         handler->decompress_scan_data = SANE_TRUE;
     }
-    if (handler->scanner->img_data == NULL)
+    if (handler->scanner->jpeg_stream != NULL) {
+        status = escl_jpeg_stream_read(handler->scanner, buf, maxlen, len);
+        if (status != SANE_STATUS_EOF)
+            return status;
+        escl_jpeg_stream_finish(handler->scanner);
+        handler->end_read = SANE_TRUE;
+    }
+    if (handler->scanner->png_stream != NULL) {
+        status = escl_png_stream_read(handler->scanner, buf, maxlen, len);
+        if (status != SANE_STATUS_EOF)
+            return status;
+        escl_png_stream_finish(handler->scanner);
+        handler->end_read = SANE_TRUE;
+    }
+    if (handler->scanner->tiff_stream != NULL) {
+        status = escl_tiff_stream_read(handler->scanner, buf, maxlen, len);
+        if (status != SANE_STATUS_EOF)
+            return status;
+        escl_tiff_stream_finish(handler->scanner);
+        handler->end_read = SANE_TRUE;
+    }
+    if (handler->scanner->pdf_stream != NULL) {
+        status = escl_pdf_stream_read(handler->scanner, buf, maxlen, len);
+        if (status != SANE_STATUS_EOF)
+            return status;
+        escl_pdf_stream_finish(handler->scanner);
+        handler->end_read = SANE_TRUE;
+    }
+    if (handler->scanner->img_data == NULL && !handler->end_read)
         return (SANE_STATUS_INVAL);
     if (!handler->end_read) {
         readbyte = min((handler->scanner->img_size - handler->scanner->img_read), maxlen);
@@ -1820,6 +2038,12 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *len)
 	     next_page = SANE_TRUE;
           handler->scanner->work = SANE_TRUE;
           handler->ps.last_frame = !next_page;
+        } else {
+          /* A platen scan is always a single-frame acquisition.  Keep the
+           * terminal state explicit so a stale ADF state cannot make the
+           * frontend request another page. */
+          handler->scanner->work = SANE_FALSE;
+          handler->ps.last_frame = SANE_TRUE;
         }
         return SANE_STATUS_EOF;
     }
@@ -1836,47 +2060,4 @@ SANE_Status
 sane_set_io_mode(SANE_Handle __sane_unused__ handle, SANE_Bool __sane_unused__ non_blocking)
 {
     return (SANE_STATUS_UNSUPPORTED);
-}
-
-/**
- * \fn void escl_curl_url(CURL *handle, const ESCL_Device *device, SANE_String_Const path)
- * \brief Uses the device info in 'device' and the path from 'path' to construct
- *        a full URL.  Sets this URL and any necessary connection options into
- *        'handle'.
- */
-void
-escl_curl_url(CURL *handle, const ESCL_Device *device, SANE_String_Const path)
-{
-    int url_len;
-    char *url;
-
-    url_len = snprintf(NULL, 0, "%s://%s:%d%s",
-                       (device->https ? "https" : "http"), device->ip_address,
-                       device->port_nb, path);
-    url_len++;
-    url = (char *)malloc(url_len);
-    snprintf(url, url_len, "%s://%s:%d%s",
-             (device->https ? "https" : "http"), device->ip_address,
-             device->port_nb, path);
-
-    DBG( 10, "escl_curl_url: URL: %s\n", url );
-    curl_easy_setopt(handle, CURLOPT_URL, url);
-    free(url);
-    DBG( 10, "Before use hack\n");
-    if (device->hack) {
-        DBG( 10, "Use hack\n");
-        curl_easy_setopt(handle, CURLOPT_HTTPHEADER, device->hack);
-    }
-    DBG( 10, "After use hack\n");
-    if (device->https) {
-        DBG( 10, "Ignoring safety certificates, use https\n");
-        curl_easy_setopt(handle, CURLOPT_USE_SSL, (long)CURLUSESSL_TRY);
-        curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 0L);
-    }
-    if (device->unix_socket != NULL) {
-        DBG( 10, "Using local socket %s\n", device->unix_socket );
-        curl_easy_setopt(handle, CURLOPT_UNIX_SOCKET_PATH,
-                         device->unix_socket);
-    }
 }

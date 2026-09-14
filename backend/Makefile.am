@@ -623,15 +623,17 @@ if have_libxml2
 libescl_la_SOURCES = escl/escl.c \
 	escl/escl_capabilities.c \
 	escl/escl_devices.c \
+	escl/escl_http.c \
 	escl/escl.h \
+	escl/escl_hack.c \
 	escl/escl_newjob.c \
 	escl/escl_reset.c \
 	escl/escl_scan.c \
-	escl/escl_status.c \
 	escl/escl_jpeg.c \
 	escl/escl_png.c \
 	escl/escl_tiff.c \
 	escl/escl_pdf.c \
+	escl/escl_status.c \
 	escl/escl_crop.c
 libescl_la_CPPFLAGS = $(AM_CPPFLAGS) $(JPEG_CFLAGS) $(PNG_CFLAGS) $(TIFF_CFLAGS) $(POPPLER_GLIB_CFLAGS) $(XML_CFLAGS) $(libcurl_CFLAGS) $(AVAHI_CFLAGS) -DBACKEND_NAME=escl
 
@@ -646,7 +648,7 @@ libsane_escl_la_LIBADD = $(COMMON_LIBS) \
     ../sanei/sanei_config.lo \
     sane_strstatus.lo \
     $(MATH_LIB) $(JPEG_LIBS) $(PNG_LIBS) $(TIFF_LIBS) $(POPPLER_GLIB_LIBS) \
-    $(XML_LIBS) $(libcurl_LIBS) $(AVAHI_LIBS)
+    $(XML_LIBS) $(libcurl_LIBS) $(AVAHI_LIBS) $(SANEI_THREAD_LIBS)
 endif
 endif
 endif
@@ -1464,7 +1466,7 @@ libpixma_la_SOURCES = \
 	pixma/pixma_bjnp.h \
 	pixma/pixma_bjnp_private.h \
 	pixma/pixma_rename.h
-libpixma_la_CPPFLAGS = $(AM_CPPFLAGS) $(XML_CFLAGS) -DBACKEND_NAME=pixma
+libpixma_la_CPPFLAGS = $(AM_CPPFLAGS) $(XML_CFLAGS) $(libcurl_CFLAGS) $(SNMP_CFLAGS) -DBACKEND_NAME=pixma
 
 $(srcdir)/pixma/pixma_sane_options.h: $(srcdir)/pixma/pixma.c
 	@if $(AM_V_P); then \
@@ -1497,7 +1499,7 @@ libsane_pixma_la_LIBADD = $(COMMON_LIBS) \
     sane_strstatus.lo \
     ../sanei/sanei_usb.lo \
     ../sanei/sanei_thread.lo \
-    $(SANEI_SANEI_JPEG_LO) $(JPEG_LIBS) $(XML_LIBS) $(MATH_LIB) $(SOCKET_LIBS) $(USB_LIBS) $(SANEI_THREAD_LIBS) $(RESMGR_LIBS)
+    $(SANEI_SANEI_JPEG_LO) $(JPEG_LIBS) $(XML_LIBS) $(libcurl_LIBS) $(SNMP_LIBS) $(MATH_LIB) $(SOCKET_LIBS) $(USB_LIBS) $(SANEI_THREAD_LIBS) $(RESMGR_LIBS)
 EXTRA_DIST += pixma.conf.in
 
 libplustek_la_SOURCES = plustek.c plustek.h

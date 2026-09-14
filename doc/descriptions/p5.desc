@@ -20,7 +20,7 @@
                                   ;               :meta, :api
 
 :mfg "PRIMAX"                     ; name a manufacturer
-:url "http://www.primax.com.tw"
+:url "http://www.primax.com.tw/"
 
 :model "PagePartner"
 :interface "Parport (EPP/ECP)"

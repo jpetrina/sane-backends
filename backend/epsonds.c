@@ -1262,6 +1262,7 @@ const  epsonds_profile_map epsonds_models_predefined[] = {
   {0x114F, "PID 114F","M3140 Series", 7, 0},
   {0x1143, "PID 1143","L3150 Series", 7, 0},
   {0x1143, "PID 1143","ET-2710 Series", 7, 0},
+  {0x1187, "PID 1187","ET-2800 Series", 7, 0},
   {0x118A, "PID 118A","ET-2810 Series", 7, 0},
   {0x118A, "PID 118A","L3250 Series", 7, 0},
   {0x119B, "PID 119B","XP-2150 Series", 7, 0},
@@ -1270,6 +1271,13 @@ const  epsonds_profile_map epsonds_models_predefined[] = {
   {0x018F, "DS-C330","DS-C330", 5, 0},
   {0x0191, "DS-C490","DS-C490", 5, 0},
   {0x0198, "DS-1730","DS-1730", 5, 1},
+  {0x01A0, "DS-530X","DS-530X", 2, 0},
+  {0x01A1, "DS-530III","DS-530III", 2, 0},
+  {0x01A2, "ES-550W","ES-550W", 2, 0},
+  {0x01A3, "DS-785W","DS-785W", 2, 0},
+  {0x01A4, "ES-590W","ES-590W", 2, 0},
+  {0x01A5, "RR-620W","RR-620W", 2, 0},
+  {0x01A6, "DS-787W","DS-787W", 2, 0},
   {0x00, "","", 0x00 , 0x00}
 };
 

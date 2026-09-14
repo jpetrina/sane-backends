@@ -1,5 +1,5 @@
 # This file was generated from description files (*.desc)
-# by sane-desc 3.6 from sane-backends 1.0.29-241-g1f9590ab
+# by sane-desc 3.7 from sane-backends 1.4.0.254-1d47d-dirty
 #
 # The entries below are used to detect a USB device when it's plugged in
 # and then run a script to change the ownership and

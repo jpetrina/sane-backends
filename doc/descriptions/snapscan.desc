@@ -115,13 +115,13 @@
 ;------------------------------------------------------------------------------
 
 :mfg "Acer Peripherals"
-:comment "Company was renamed to <a href=\"#BENQ\">Benq</a>."
+:comment "Company was renamed to <a href=\"#Z-BENQ\">BenQ</a>."
 
 :mfg "Vuego"
-:comment "Company was renamed to <a href=\"#BENQ\">Benq</a>."
+:comment "Company was renamed to <a href=\"#Z-BENQ\">BenQ</a>."
 
-:mfg "Benq (Acer)"
-:url "http://www.benq.com"
+:mfg "BenQ"
+:url "http://www.benq.com/"
 :comment "Formerly Acer Peripherals"
 
 :model "300f"
@@ -257,8 +257,8 @@
 
 ;------------------------------------------------------------------------------
 
-:mfg "Guillemot / Hercules"
-:url "http://www.guillemot.com"
+:mfg "Guillemot"
+:url "http://www.guillemot.com/"
 
 :model "Maxi Scan A4 Deluxe (SCSI)"
 :interface "SCSI"
@@ -283,10 +283,13 @@
 :status :good
 :comment "Rebadged Benq 620U, needs Benq firmware file u96v???.bin"
 
+:mfg "Hercules"
+:comment "Company was acquired by <a href=\"#Z-GUILLEMOT\">Guillemot</a>."
+
 ;------------------------------------------------------------------------------
 
 :mfg "Mitsubishi"
-:url "http://www.mitsubishi.com"
+:url "http://www.mitsubishi.com/"
 
 :model "Diamondview 648UT"
 :interface "USB"
@@ -303,7 +306,7 @@
 ;------------------------------------------------------------------------------
 
 :mfg "Epson"
-:url "http://www.epson.com"
+:url "http://www.epson.com/"
 
 :model "GT-7400U"	; product spec (JP)
 :interface "USB"

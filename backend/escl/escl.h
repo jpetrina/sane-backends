@@ -89,6 +89,15 @@ typedef struct {
 } ESCL_SCANOPTS;
 
 
+typedef struct ESCL_Address {
+    struct ESCL_Address *next;
+    char *ip_address;
+    int port_nb;
+    char *type;
+    int tls;
+    SANE_Bool https;
+} ESCL_Address;
+
 typedef struct ESCL_Device {
     struct ESCL_Device *next;
 
@@ -103,6 +112,11 @@ typedef struct ESCL_Device {
     SANE_Bool https;
     struct curl_slist *hack;
     char     *unix_socket;
+    ESCL_Address *addresses;
+    struct {
+        SANE_Bool host_localhost;
+        SANE_Bool disable_pdf;
+    } hacks;
 } ESCL_Device;
 
 typedef struct capst
@@ -161,6 +175,10 @@ typedef struct capabilities
     FILE *tmp;
     char *scanJob;
     unsigned char *img_data;
+    void *jpeg_stream;
+    void *png_stream;
+    void *tiff_stream;
+    void *pdf_stream;
     long img_size;
     long img_read;
     size_t real_read;
@@ -220,7 +238,9 @@ enum
 #define PIXEL_TO_MM(pixels, dpi) SANE_FIX((double)pixels * 25.4 / (dpi))
 #define MM_TO_PIXEL(millimeters, dpi) (SANE_Word)round(SANE_UNFIX(millimeters) * (dpi) / 25.4)
 
-ESCL_Device *escl_devices(SANE_Status *status);
+ESCL_Device *escl_devices(SANE_Status *status, SANE_Bool disable_https);
+SANE_Bool escl_parse_disable_https(SANE_String_Const line,
+                                   SANE_Bool *disable_https);
 SANE_Status escl_device_add(int port_nb,
                             const char *model_name,
                             char *ip_address,
@@ -236,6 +256,7 @@ SANE_Status escl_status(const ESCL_Device *device,
 capabilities_t *escl_capabilities(ESCL_Device *device,
                                   char *blacklist,
                                   SANE_Status *status);
+void escl_free_capabilities(capabilities_t *scanner);
 
 char *escl_newjob(capabilities_t *scanner,
                   const ESCL_Device *device,
@@ -245,6 +266,8 @@ SANE_Status escl_scan(capabilities_t *scanner,
                       const ESCL_Device *device,
                       char *scanJob,
                       char *result);
+
+SANE_Status escl_reset_scan_file(capabilities_t *scanner);
 
 void escl_scanner(const ESCL_Device *device,
                   char *scanJob,
@@ -259,6 +282,17 @@ typedef void CURL;
 void escl_curl_url(CURL *handle,
                    const ESCL_Device *device,
                    SANE_String_Const path);
+CURL *escl_curl_init(const ESCL_Device *device,
+                    SANE_String_Const path);
+SANE_Status escl_curl_status(CURL *handle, CURLcode result);
+SANE_Status escl_http_status(long response);
+SANE_Bool escl_curl_retry(SANE_Status status,
+                          int attempt,
+                          int max_attempts);
+void escl_hack_apply(ESCL_Device *device,
+                     SANE_String_Const server);
+void escl_hack_apply_config(ESCL_Device *device,
+                            SANE_String_Const line);
 
 unsigned char *escl_crop_surface(capabilities_t *scanner,
                                  unsigned char *surface,
@@ -269,27 +303,56 @@ unsigned char *escl_crop_surface(capabilities_t *scanner,
                                  int *height);
 
 // JPEG
-SANE_Status get_JPEG_data(capabilities_t *scanner,
-                          int *width,
-                          int *height,
-                          int *bps);
+SANE_Status escl_jpeg_stream_start(capabilities_t *scanner,
+                                   const ESCL_Device *device,
+                                   char *scanJob,
+                                   char *result,
+                                   int *width,
+                                   int *height,
+                                   int *bps);
+SANE_Status escl_jpeg_stream_read(capabilities_t *scanner,
+                                  unsigned char *buf,
+                                  SANE_Int maxlen,
+                                  SANE_Int *len);
+void escl_jpeg_stream_finish(capabilities_t *scanner);
 
-// PNG
-SANE_Status get_PNG_data(capabilities_t *scanner,
-                         int *width,
-                         int *height,
-                         int *bps);
+SANE_Status escl_png_stream_start(capabilities_t *scanner,
+                                  const ESCL_Device *device,
+                                  char *scanJob,
+                                  char *result,
+                                  int *width,
+                                  int *height,
+                                  int *bps);
+SANE_Status escl_png_stream_read(capabilities_t *scanner,
+                                 unsigned char *buf,
+                                 SANE_Int maxlen,
+                                 SANE_Int *len);
+void escl_png_stream_finish(capabilities_t *scanner);
 
-// TIFF
-SANE_Status get_TIFF_data(capabilities_t *scanner,
-                          int *width,
-                          int *height,
-                          int *bps);
+SANE_Status escl_tiff_stream_start(capabilities_t *scanner,
+                                   const ESCL_Device *device,
+                                   char *scanJob,
+                                   char *result,
+                                   int *width,
+                                   int *height,
+                                   int *bps);
+SANE_Status escl_tiff_stream_read(capabilities_t *scanner,
+                                  unsigned char *buf,
+                                  SANE_Int maxlen,
+                                  SANE_Int *len);
+void escl_tiff_stream_finish(capabilities_t *scanner);
 
-// PDF
-SANE_Status get_PDF_data(capabilities_t *scanner,
-                         int *width,
-                         int *height,
-                         int *bps);
+SANE_Status escl_pdf_stream_start(capabilities_t *scanner,
+                                  int *width,
+                                  int *height,
+                                  int *bps);
+SANE_Status escl_pdf_stream_read(capabilities_t *scanner,
+                                 unsigned char *buf,
+                                 SANE_Int maxlen,
+                                 SANE_Int *len);
+void escl_pdf_stream_finish(capabilities_t *scanner);
+
+#define ESCL_CONNECT_TIMEOUT 10L
+#define ESCL_REQUEST_TIMEOUT 300L
 
 #endif

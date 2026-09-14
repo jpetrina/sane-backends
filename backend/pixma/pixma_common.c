@@ -74,15 +74,34 @@ extern const pixma_config_t pixma_mp750_devices[];
 extern const pixma_config_t pixma_mp730_devices[];
 extern const pixma_config_t pixma_mp800_devices[];
 extern const pixma_config_t pixma_iclass_devices[];
+extern pixma_config_t *pixma_custom_mp150_devices;
+extern int pixma_custom_mp150_devices_count;
+extern pixma_config_t *pixma_custom_iclass_devices;
+extern int pixma_custom_iclass_devices_count;
 
-static const pixma_config_t *const pixma_devices[] = {
-  pixma_mp150_devices,
-  pixma_mp750_devices,
-  pixma_mp730_devices,
-  pixma_mp800_devices,
-  pixma_iclass_devices,
-  NULL
-};
+static void
+pixma_cleanup_custom_devices (void)
+{
+  int i;
+
+  for (i = 0; i < pixma_custom_mp150_devices_count; i++)
+    {
+      free ((void *) pixma_custom_mp150_devices[i].name);
+      free ((void *) pixma_custom_mp150_devices[i].model);
+    }
+  free (pixma_custom_mp150_devices);
+  pixma_custom_mp150_devices = NULL;
+  pixma_custom_mp150_devices_count = 0;
+
+  for (i = 0; i < pixma_custom_iclass_devices_count; i++)
+    {
+      free ((void *) pixma_custom_iclass_devices[i].name);
+      free ((void *) pixma_custom_iclass_devices[i].model);
+    }
+  free (pixma_custom_iclass_devices);
+  pixma_custom_iclass_devices = NULL;
+  pixma_custom_iclass_devices_count = 0;
+}
 
 static pixma_t *first_pixma = NULL;
 static time_t tstart_sec = 0;
@@ -777,6 +796,7 @@ pixma_cleanup (void)
   while (first_pixma)
     pixma_close (first_pixma);
   pixma_io_cleanup ();
+  pixma_cleanup_custom_devices ();
 }
 
 int
@@ -1223,6 +1243,33 @@ pixma_fill_gamma_table (double gamma, uint8_t * table, unsigned n)
 int
 pixma_find_scanners (const char **conf_devices, SANE_Bool local_only)
 {
+  const pixma_config_t *pixma_devices[] = {
+    pixma_mp150_devices,
+    pixma_mp750_devices,
+    pixma_mp730_devices,
+    pixma_mp800_devices,
+    pixma_iclass_devices,
+    NULL,       // space for custom configured devices
+    NULL,       // space for custom configured devices
+    NULL
+  };
+
+  /*
+   * Add to list any custom configured devices.
+   *
+   */
+  size_t spare_pos = 5; // first free slot.
+
+  if (pixma_custom_mp150_devices_count > 0)
+    {
+      pixma_devices[spare_pos++] = pixma_custom_mp150_devices;
+    }
+
+  if (pixma_custom_iclass_devices_count > 0)
+    {
+      pixma_devices[spare_pos++] = pixma_custom_iclass_devices;
+    }
+
   return pixma_collect_devices (conf_devices, pixma_devices, local_only);
 }
 
@@ -1352,4 +1399,44 @@ clean:
   xmlFreeDoc(doc);
   return status;
 }
+
+const char *ccaps [18] = {"PIXMA_CAP_EASY_RGB",
+                          "PIXMA_CAP_GRAY",
+                          "PIXMA_CAP_ADF",
+                          "PIXMA_CAP_48BIT",
+                          "PIXMA_CAP_GAMMA_TABLE",
+                          "PIXMA_CAP_EVENTS",
+                          "PIXMA_CAP_TPU",
+                          "PIXMA_CAP_ADFDUP",
+                          "PIXMA_CAP_CIS",
+                          "PIXMA_CAP_CCD",
+                          "PIXMA_CAP_LINEART",
+                          "PIXMA_CAP_NEGATIVE",
+                          "PIXMA_CAP_TPUIR",
+                          "PIXMA_CAP_ADF_WAIT",
+                          "PIXMA_CAP_ADF_JPEG",
+                          "PIXMA_CAP_JPEG",
+                          "PIXMA_CAP_GT_4096",
+                          NULL
+                      };
+
+const unsigned ucaps [18] = {PIXMA_CAP_EASY_RGB,
+                             PIXMA_CAP_GRAY,
+                             PIXMA_CAP_ADF,
+                             PIXMA_CAP_48BIT,
+                             PIXMA_CAP_GAMMA_TABLE,
+                             PIXMA_CAP_EVENTS,
+                             PIXMA_CAP_TPU,
+                             PIXMA_CAP_ADFDUP,
+                             PIXMA_CAP_CIS,
+                             PIXMA_CAP_CCD,
+                             PIXMA_CAP_LINEART,
+                             PIXMA_CAP_NEGATIVE,
+                             PIXMA_CAP_TPUIR,
+                             PIXMA_CAP_ADF_WAIT,
+                             PIXMA_CAP_ADF_JPEG,
+                             PIXMA_CAP_JPEG,
+                             PIXMA_CAP_GT_4096,
+                             0
+                      };
 #endif

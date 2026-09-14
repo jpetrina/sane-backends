@@ -64,6 +64,32 @@ A list of devices that use the eSCL protocol can be found at
 .IR https://support.apple.com/en-us/HT201311 .
 While these devices are expected to work, your mileage may vary.
 
+.SH CONFIGURATION
+The
+.I escl.conf
+file supports the following option:
+.TP
+.B option disable-https yes
+Disable discovery of devices advertised through the HTTPS
+.B _uscans._tcp
+service. HTTP discovery through
+.B _uscan._tcp
+and devices explicitly listed in the configuration file remain available.
+.TP
+.B device URL "Model" "hack=host-localhost,hack=disable-pdf"
+Apply model-specific compatibility hacks to a manually configured device.
+The
+.B hack=host-localhost
+hack sends a
+.B Host: localhost
+HTTP header. The
+.B hack=disable-pdf
+hack disables PDF output for devices that advertise PDF incorrectly.
+The historical
+.B hack=localhost
+setting remains supported as an alias for
+.B hack=host-localhost.
+
 .SH FILES
 .TP
 .I @CONFIGDIR@/escl.conf

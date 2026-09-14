@@ -297,7 +297,6 @@ get_protocol_family( const bjnp_sockaddr_t *sa)
 static void
 get_address_info ( const bjnp_sockaddr_t *addr, char * addr_string, int *port)
 {
-  char tmp_addr[BJNP_HOST_MAX];
   if ( addr->addr.sa_family == AF_INET)
     {
       inet_ntop( AF_INET, &(addr -> ipv4.sin_addr.s_addr), addr_string, BJNP_HOST_MAX);
@@ -306,10 +305,14 @@ get_address_info ( const bjnp_sockaddr_t *addr, char * addr_string, int *port)
 #ifdef ENABLE_IPV6
   else if (addr->addr.sa_family == AF_INET6)
     {
+      char tmp_addr[INET6_ADDRSTRLEN];
       inet_ntop( AF_INET6, addr -> ipv6.sin6_addr.s6_addr, tmp_addr, sizeof(tmp_addr) );
 
       if (IN6_IS_ADDR_LINKLOCAL( &(addr -> ipv6.sin6_addr) ) )
-          sprintf(addr_string, "[%s%%%d]", tmp_addr, addr -> ipv6.sin6_scope_id);
+          snprintf (addr_string, BJNP_HOST_MAX, "[%s%%%d]", tmp_addr,
+                    addr -> ipv6.sin6_scope_id);
+      else
+          snprintf (addr_string, BJNP_HOST_MAX, "[%s]", tmp_addr);
 
       *port = ntohs (addr->ipv6.sin6_port);
     }
@@ -571,6 +574,7 @@ split_uri (const char *devname, char *method, char *host, char *port,
     if ( i >= BJNP_ARGS_MAX)
       {
         PDBG (bjnp_dbg (LOG_NOTICE, "split_uri: ERROR - Argument string too long in %s\n", devname));
+        return -1;
       }
     strcpy (args, start);
     }
@@ -1397,7 +1401,8 @@ bjnp_recv_header (int devno, size_t *payload_size )
   struct BJNP_command resp_buf;
   fd_set input;
   struct timeval timeout;
-  int recv_bytes;
+  ssize_t recv_bytes;
+  size_t header_bytes;
   int terrno;
   int result;
   int fd;
@@ -1408,60 +1413,61 @@ bjnp_recv_header (int devno, size_t *payload_size )
   fd = device[devno].tcp_socket;
 
   *payload_size = 0;
-  attempt = 0;
-  do
+  /* get response header. TCP may split it across multiple segments. */
+  header_bytes = 0;
+  while (header_bytes < sizeof (struct BJNP_command))
     {
-      /* wait for data to be received, ignore signals being received */
-      FD_ZERO (&input);
-      FD_SET (fd, &input);
-
-      timeout.tv_sec = device[devno].bjnp_ip_timeout /1000;
-      timeout.tv_usec = device[devno].bjnp_ip_timeout %1000;
-    }
-  while ( ( (result = select (fd + 1, &input, NULL, NULL, &timeout)) <= 0) &&
-	 (errno == EINTR) && (attempt++ < BJNP_MAX_SELECT_ATTEMPTS));
-
-  if (result < 0)
-    {
-      terrno = errno;
-      PDBG (bjnp_dbg (LOG_CRIT,
-		       "bjnp_recv_header: ERROR - could not read response header (select): %s!\n",
-		       strerror (terrno)));
-      errno = terrno;
-      return SANE_STATUS_IO_ERROR;
-    }
-  else if (result == 0)
-    {
-      terrno = errno;
-      PDBG (bjnp_dbg (LOG_CRIT,
-		"bjnp_recv_header: ERROR - could not read response header (select timed out after %d ms)!\n",
-		device[devno].bjnp_ip_timeout ) );
-      errno = terrno;
-      return SANE_STATUS_IO_ERROR;
-    }
-
-  /* get response header */
-
-  if ((recv_bytes =
-       recv (fd, (char *) &resp_buf,
-	     sizeof (struct BJNP_command),
-	     0)) != sizeof (struct BJNP_command))
-    {
-      terrno = errno;
-      if (recv_bytes == 0)
+      attempt = 0;
+      do
         {
-          PDBG (bjnp_dbg (LOG_CRIT,
-          		"bjnp_recv_header: ERROR - (recv) Scanner closed the TCP-connection!\n"));
-        } else {
-          PDBG (bjnp_dbg (LOG_CRIT,
-	      	       "bjnp_recv_header: ERROR - (recv) could not read response header, received %d bytes!\n",
-		       recv_bytes));
-          PDBG (bjnp_dbg
-	  		(LOG_CRIT, "bjnp_recv_header: ERROR - (recv) error: %s!\n",
-	     		strerror (terrno)));
+          /* Wait for the next part, ignoring interrupted waits. */
+          FD_ZERO (&input);
+          FD_SET (fd, &input);
+          timeout.tv_sec = device[devno].bjnp_ip_timeout / 1000;
+          timeout.tv_usec = device[devno].bjnp_ip_timeout % 1000;
         }
-      errno = terrno;
-      return SANE_STATUS_IO_ERROR;
+      while (((result = select (fd + 1, &input, NULL, NULL, &timeout)) <= 0) &&
+             (errno == EINTR) && (attempt++ < BJNP_MAX_SELECT_ATTEMPTS));
+
+      if (result < 0)
+        {
+          terrno = errno;
+          PDBG (bjnp_dbg (LOG_CRIT,
+                          "bjnp_recv_header: ERROR - could not read response header (select): %s!\n",
+                          strerror (terrno)));
+          errno = terrno;
+          return SANE_STATUS_IO_ERROR;
+        }
+      if (result == 0)
+        {
+          terrno = errno;
+          PDBG (bjnp_dbg (LOG_CRIT,
+                          "bjnp_recv_header: ERROR - could not read response header (select timed out after %d ms)!\n",
+                          device[devno].bjnp_ip_timeout));
+          errno = terrno;
+          return SANE_STATUS_IO_ERROR;
+        }
+
+      recv_bytes = recv (fd, (char *) &resp_buf + header_bytes,
+                         sizeof (struct BJNP_command) - header_bytes, 0);
+      if (recv_bytes <= 0)
+        {
+          terrno = errno;
+          if (recv_bytes == 0)
+            {
+              PDBG (bjnp_dbg (LOG_CRIT,
+                              "bjnp_recv_header: ERROR - (recv) Scanner closed the TCP-connection!\n"));
+            }
+          else
+            {
+              PDBG (bjnp_dbg (LOG_CRIT,
+                              "bjnp_recv_header: ERROR - (recv) could not read response header after %ld bytes: %s!\n",
+                              (long) header_bytes, strerror (terrno)));
+            }
+          errno = terrno;
+          return SANE_STATUS_IO_ERROR;
+        }
+      header_bytes += (size_t) recv_bytes;
     }
 
   if (resp_buf.cmd_code != device[devno].last_cmd)
@@ -1513,6 +1519,12 @@ bjnp_init_device_structure(int dn, bjnp_sockaddr_t *sa, bjnp_protocol_defs_t *pr
   device[dn].tcp_socket = -1;
 
   device[dn].addr = (bjnp_sockaddr_t *) malloc(sizeof ( bjnp_sockaddr_t) );
+  if (device[dn].addr == NULL)
+    {
+      PDBG (bjnp_dbg
+            (LOG_CRIT, "bjnp_init_device_structure: Cannot allocate scanner address\n"));
+      return -1;
+    }
   memset( device[dn].addr, 0, sizeof( bjnp_sockaddr_t ) );
   memcpy(device[dn].addr, sa, sa_size((bjnp_sockaddr_t *)sa) );
   device[dn].address_level = get_scanner_name(sa, name);
@@ -1530,7 +1542,9 @@ bjnp_init_device_structure(int dn, bjnp_sockaddr_t *sa, bjnp_protocol_defs_t *pr
     {
       PDBG (bjnp_dbg
             (LOG_CRIT, "bjnp_init_device_structure: Cannot read mac address, skipping this scanner\n"  ) );
-            device[dn].open = 0;
+      free (device[dn].addr);
+      device[dn].addr = NULL;
+      device[dn].open = 0;
       return -1;
     }
   device[dn].open = 1;
@@ -1729,6 +1743,20 @@ static void bjnp_close_tcp(int devno)
       PDBG( bjnp_dbg( LOG_INFO, "bjnp_close_tcp: socket not open, nothing to do.\n"));
     }
   device[devno].open = 0;
+}
+
+static void
+bjnp_cleanup_devices (void)
+{
+  int i;
+
+  for (i = 0; i < bjnp_no_devices; i++)
+    {
+      bjnp_close_tcp (i);
+      bjnp_free_device_structure (i);
+    }
+
+  bjnp_no_devices = 0;
 }
 
 static BJNP_Status
@@ -1994,7 +2022,13 @@ extern void
 sanei_bjnp_init (void)
 {
   DBG_INIT();
-  bjnp_no_devices = 0;
+  bjnp_cleanup_devices ();
+}
+
+extern void
+sanei_bjnp_cleanup (void)
+{
+  bjnp_cleanup_devices ();
 }
 
 /**
@@ -2042,7 +2076,7 @@ sanei_bjnp_find_devices (const char **conf_devices,
   memset( &scanner_sa, 0 ,sizeof( scanner_sa ) );
   PDBG (bjnp_dbg (LOG_INFO, "sanei_bjnp_find_devices, pixma backend version: %d.%d.%d\n",
 	PIXMA_VERSION_MAJOR, PIXMA_VERSION_MINOR, PIXMA_VERSION_BUILD));
-  bjnp_no_devices = 0;
+  bjnp_cleanup_devices ();
 
   for (i=0; i < BJNP_SOCK_MAX; i++)
     {
@@ -2079,8 +2113,21 @@ sanei_bjnp_find_devices (const char **conf_devices,
 	  else
             {
               PDBG (bjnp_dbg (LOG_DEBUG, "sanei_bjnp_find_devices: Adding scanner from pixma.conf: %s\n", conf_devices[i]));
-              memcpy(uri, conf_devices[i], sizeof(uri));
-              add_timeout_to_uri(uri, timeout_default, sizeof(uri));
+              int uri_len = snprintf (uri, sizeof (uri), "%s", conf_devices[i]);
+              if (uri_len < 0 || (size_t) uri_len >= sizeof (uri))
+                {
+                  PDBG (bjnp_dbg (LOG_NOTICE,
+                                  "sanei_bjnp_find_devices: URI is too long, skipping: %s\n",
+                                  conf_devices[i]));
+                  continue;
+                }
+              if (add_timeout_to_uri(uri, timeout_default, sizeof(uri)) != 0)
+                {
+                  PDBG (bjnp_dbg (LOG_NOTICE,
+                                  "sanei_bjnp_find_devices: Failed to add timeout to URI, skipping: %s\n",
+                                  conf_devices[i]));
+                  continue;
+                }
               add_scanner(&dev_no, uri, attach_bjnp, pixma_devices);
 	    }
         }

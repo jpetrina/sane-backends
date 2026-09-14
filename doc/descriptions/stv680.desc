@@ -20,7 +20,7 @@
                                   ;               :meta, :api
 
 :mfg "Aiptek"                         ; name a manufacturer
-:url "http://www.aiptek.com.tw"
+:url "http://www.aiptek.com.tw/"
 
 ; name models for above-specified mfg.
 :model "Aiptek Pencam"
@@ -30,7 +30,7 @@
 :comment "image is OK for CIF and QCIF, VGA and QVGA untested, streaming video is a problem"
 
 :mfg "Konica"                         ; name a manufacturer
-:url "http://www.konicaminolta.com"
+:url "http://www.konicaminolta.com/"
 
 ; name models for above-specified mfg.
 :model "e-mini"
