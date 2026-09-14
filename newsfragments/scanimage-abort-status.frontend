@@ -1,0 +1,2 @@
+scanimage: Report cancellation instead of success when a second stop signal
+forces an immediate abort.

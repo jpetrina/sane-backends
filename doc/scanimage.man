@@ -478,6 +478,19 @@ filename
 .IR /tmp/input.ppm .
 .RE
 
+.SH SIGNALS
+While a scan is in progress,
+.B scanimage
+handles
+.B SIGINT
+and
+.B SIGTERM
+by requesting cancellation. A second signal terminates the program
+immediately. In either case,
+.B scanimage
+exits with status 2
+.RB ( SANE_STATUS_CANCELLED ).
+
 .SH ENVIRONMENT
 .TP
 .B SANE_DEFAULT_DEVICE

@@ -333,7 +333,7 @@ sighandler (int signum)
       else
 	{
 	  fprintf (stderr, "%s: aborting\n", prog_name);
-	  _exit (0);
+	  _exit (SANE_STATUS_CANCELLED);
 	}
     }
 }

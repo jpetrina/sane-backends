@@ -11,3 +11,10 @@ fix the bug. :-)
 The current tests use the test backend to scan in flatbed, hand scanner and
 three pass mode. Also a 16 bit color image is created and compared to the
 "right" one. This test should detect any little/big endian issues in scanimage.
+
+The scanimage_cancel_test test runs under 'make check'. It sends real SIGINT
+and SIGTERM signals to child processes using scanimage's cancellation handler.
+The SANE cancellation call is replaced with a notification, so no scanner or
+backend initialization is needed. It checks repeated and mixed stop signals,
+with pipe synchronization and bounded child lifetimes. Platforms without fork,
+poll, or poll.h skip this test.

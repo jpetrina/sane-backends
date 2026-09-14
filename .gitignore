@@ -47,6 +47,9 @@ Makefile.in
 
 # `make check` artifacts
 test-suite.log
+/testsuite/scanimage_cancel_test
+/testsuite/scanimage_cancel_test.log
+/testsuite/scanimage_cancel_test.trs
 /testsuite/sanei/sanei_*_test
 /testsuite/sanei/sanei_*_test.log
 /testsuite/sanei/sanei_*_test.trs

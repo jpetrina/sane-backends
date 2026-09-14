@@ -314,7 +314,7 @@ AC_CHECK_FUNCS(atexit ioperm i386_set_ioperm \
     mkdir strftime strstr strtod  \
     cfmakeraw tcsendbreak strcasecmp strncasecmp _portaccess \
     pidfd_open \
-    getaddrinfo getnameinfo poll setitimer iopl getuid getpass)
+    getaddrinfo getnameinfo poll fork setitimer iopl getuid getpass)
 
 dnl sys/io.h might provide ioperm but not inb,outb (like for
 dnl non i386/x32/x86_64 with musl libc)
