@@ -700,6 +700,15 @@ static Avision_HWEntry Avision_Device_List [] =
     /* status="complete" */
 
     { NULL, NULL,
+      0x0638, 0x2a1e,
+      "iVina", "FB6280E",
+      AV_NON_INTERLACED_DUPLEX_300,
+      { 0, {0, 0}, {{0, 0}, {0, 0}} }
+    },
+    /* comment="1 pass, 600 dpi, A3, zero edge" */
+    /* status="basic" */
+
+    { NULL, NULL,
       0x0638, 0x0a84,
       "Avision", "FB2080E",
       0,
