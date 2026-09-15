@@ -1521,6 +1521,17 @@ static Avision_HWEntry Avision_Device_List [] =
     },
     /* status="untested" */
 
+    { NULL, NULL,
+      0x04a7, 0x04c2,
+      "Xerox", "DocuMate3125",
+      AV_INT_BUTTON | AV_USE_2ND_BULK_EP | AV_NO_DETECT_ACCESSORIES |
+      AV_READ_STRIPE_32 | AV_COLUMN_INTERLEAVED_3 |
+      AV_COLUMN_INTERLEAVED_COLOR_ONLY | AV_NO_IDLE_RELEASE,
+      { 0, {0, 0}, {{0, 0}, {0, 0}} }
+    },
+    /* comment="1 pass, 600 dpi, sheetfed duplex ADF - USB 2.0" */
+    /* status="basic" */
+
 #ifdef FAKE_ENTRIES_FOR_DESC_GENERATION
     { NULL, NULL,
       0x0638, 0x0a16,
@@ -7088,6 +7099,8 @@ do_cancel (Avision_Scanner* s)
 {
   int status;
 
+  const SANE_Bool was_scanning = s->scanning;
+
   DBG (3, "do_cancel:\n");
 
   s->prepared = s->scanning = SANE_FALSE;
@@ -7115,10 +7128,12 @@ do_cancel (Avision_Scanner* s)
       DBG (1, "do_cancel: release_unit failed\n");
   }
 
-  DBG (4, "FORCE RELEASE UNIT ON CANCEL\n");
-  status = release_unit (s, 1);
-  if (status != SANE_STATUS_GOOD)
-    DBG (1, "do_cancel: release_unit failed\n");
+  if (was_scanning || !(s->hw->hw->feature_type & AV_NO_IDLE_RELEASE)) {
+    DBG (4, "FORCE RELEASE UNIT ON CANCEL\n");
+    status = release_unit (s, 1);
+    if (status != SANE_STATUS_GOOD)
+      DBG (1, "do_cancel: release_unit failed\n");
+  }
 
   return SANE_STATUS_CANCELLED;
 }
@@ -8155,7 +8170,9 @@ reader_process (void *data)
          interleaves that many parts of the page. Regroup them before any
          other post-processing. */
       if ((dev->hw->feature_type & AV_COLUMN_INTERLEAVED_3) &&
-          s->avdimen.hw_xres < dev->inquiry_optical_res)
+          s->avdimen.hw_xres < dev->inquiry_optical_res &&
+          (!(dev->hw->feature_type & AV_COLUMN_INTERLEAVED_COLOR_ONLY) ||
+           color_mode_is_color (s->c_mode)))
         {
           const unsigned int segs = 3;
           const unsigned int px = (unsigned int) s->avdimen.hw_pixels_per_line;

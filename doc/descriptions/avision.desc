@@ -871,6 +871,12 @@
 :usbid "0x04a7" "0x049a"
 :status :untested
 
+:model "DocuMate3125"
+:interface "USB"
+:usbid "0x04a7" "0x04c2"
+:comment "1 pass, 600 dpi, sheetfed duplex ADF - USB 2.0"
+:status :basic
+
 
 :mfg "OKI"
 

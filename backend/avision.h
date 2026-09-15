@@ -326,6 +326,17 @@ typedef struct Avision_HWEntry {
      out of ordinary idle reports. (HP ScanJet Pro 3000 s2.) */
   #define AV_NO_BUTTON_SYNTH ((uint64_t)1<<49)
 
+  /* Only colour scans arrive column-interleaved; gray and lineart are
+     already in order, so apply AV_COLUMN_INTERLEAVED_3 to colour only.
+     (Xerox DocuMate 3125.) */
+  #define AV_COLUMN_INTERLEAVED_COLOR_ONLY ((uint64_t)1<<50)
+
+  /* The reader already releases the unit after every page. A second
+     RELEASE UNIT from do_cancel() with no scan running makes the device
+     stop answering for ~20s and then drop off the bus, so only send it
+     while a scan is in progress. (Xerox DocuMate 3125.) */
+  #define AV_NO_IDLE_RELEASE ((uint64_t)1<<51)
+
     /* maybe more ...*/
   uint64_t feature_type;
 
