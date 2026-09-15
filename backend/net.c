@@ -312,6 +312,22 @@ add_device (const char *name, Net_Device ** ndp)
 }
 #endif /* NET_USES_AF_INDEP */
 
+static SANE_Status
+add_device_locked (const char *name, Net_Device ** ndp)
+{
+  SANE_Status status;
+#if WITH_AVAHI
+  if (avahi_thread)
+    avahi_threaded_poll_lock (avahi_thread);
+#endif /* WITH_AVAHI */
+  status = add_device (name, ndp);
+#if WITH_AVAHI
+  if (avahi_thread)
+    avahi_threaded_poll_unlock (avahi_thread);
+#endif /* WITH_AVAHI */
+  return status;
+}
+
 /* Calls getpwuid_r(). The return value must be freed by the caller. */
 static char* get_current_username(void)
 {
@@ -1071,14 +1087,8 @@ sane_init (SANE_Int * version_code, SANE_Auth_Callback authorize)
 
 	      continue;
 	    }
-#if WITH_AVAHI
-	  avahi_threaded_poll_lock (avahi_thread);
-#endif /* WITH_AVAHI */
 	  DBG (2, "sane_init: trying to add %s\n", device_name);
-	  add_device (device_name, 0);
-#if WITH_AVAHI
-	  avahi_threaded_poll_unlock (avahi_thread);
-#endif /* WITH_AVAHI */
+	  add_device_locked (device_name, 0);
 	}
 
       fclose (fp);
@@ -1122,14 +1132,8 @@ sane_init (SANE_Int * version_code, SANE_Auth_Callback authorize)
 	      if (host[0] == '\0')
 		  continue;
 #endif /* ENABLE_IPV6 */
-#if WITH_AVAHI
-	      avahi_threaded_poll_lock (avahi_thread);
-#endif /* WITH_AVAHI */
 	      DBG (2, "sane_init: trying to add %s\n", host);
-	      add_device (host, 0);
-#if WITH_AVAHI
-	      avahi_threaded_poll_unlock (avahi_thread);
-#endif /* WITH_AVAHI */
+	      add_device_locked (host, 0);
 	    }
 	  free (copy);
 	}
@@ -1545,13 +1549,7 @@ sane_open (SANE_String_Const full_name, SANE_Handle * meta_handle)
       DBG (1,
 	   "sane_open: device %s not found, trying to register it anyway\n",
 	   nd_name);
-#if WITH_AVAHI
-      avahi_threaded_poll_lock (avahi_thread);
-#endif /* WITH_AVAHI */
-      status = add_device (nd_name, &dev);
-#if WITH_AVAHI
-      avahi_threaded_poll_unlock (avahi_thread);
-#endif /* WITH_AVAHI */
+      status = add_device_locked (nd_name, &dev);
       if (status != SANE_STATUS_GOOD)
 	{
 	  DBG (1, "sane_open: could not open device\n");

@@ -236,6 +236,7 @@ struct saned_child {
 };
 struct saned_child *children;
 int numchildren;
+static volatile sig_atomic_t shutdown_requested;
 
 /* Linked list of fds to be polled */
 enum saned_fd_type {
@@ -2487,6 +2488,9 @@ handle_client (int fd)
   if (pid == 0)
     {
       /* child */
+      signal (SIGINT, NULL);
+      signal (SIGTERM, NULL);
+
       if (log_to_syslog)
 	closelog();
 
@@ -2551,7 +2555,7 @@ sig_int_term_handler (int signum)
   signal (SIGINT, NULL);
   signal (SIGTERM, NULL);
 
-  bail_out (0);
+  shutdown_requested = 1;
 }
 
 
@@ -3322,7 +3326,7 @@ run_standalone (char *user)
 
   DBG (DBG_MSG, "run_standalone: waiting for control connection\n");
 
-  while (running)
+  while (running && !shutdown_requested)
     {
       struct saned_child *child;
       struct saned_fd *sfd;

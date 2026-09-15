@@ -4,7 +4,7 @@
 ##  This file is part of the "Sane" build infra-structure.  See
 ##  included LICENSE file for license information.
 
-SUBDIRS = backend sanei tools
+SUBDIRS = backend sanei tools saned
 
 check_PROGRAMS = scanimage_cancel_test
 TESTS = $(check_PROGRAMS)
@@ -39,6 +39,7 @@ help:
 	@echo "Use 'make test' to run the tests."
 
 test: test.local
+	cd saned && $(MAKE) test
 
 test.local:
 	@echo "**** Testing $(SCANIMAGE) with device $(DEVICE)"

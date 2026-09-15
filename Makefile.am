@@ -118,7 +118,7 @@ libcheck:
 # Must run testsuite after install or else shared library backends
 # will not be found (including test backend).
 installcheck-local:
-	cd testsuite && $(MAKE) test.local
+	cd testsuite && $(MAKE) test
 
 md5: dist
 	md5sum $(distdir).tar.gz > $(distdir).tar.gz.md5
