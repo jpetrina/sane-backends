@@ -407,7 +407,8 @@
 :model "P-215II"
 :interface "USB"
 :usbid "0x1083" "0x165b"
-:status :untested
+:status :basic
+:comment "Color ADF front and duplex tested at 200, 300, 400 and 600 dpi."
 
 :model "FSU-201"
 :interface "USB"
