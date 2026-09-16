@@ -369,6 +369,7 @@
          - initial support for DR-3080CII (#567)
       v68 2026-09-15, Mark31415
          - improve P-215II color calibration
+         - compensate P-215II duplex back-side start offset
 
    SANE FLOW DIAGRAM
 
@@ -1689,6 +1690,8 @@ init_model (struct scanner *s)
      * P-215II. Keep the existing P-215 behavior until it is validated.
      */
     if (!strcmp (s->model_name, "P-215II")) {
+      /* Compensate the P-215II duplex back-side start offset. */
+      s->duplex_offset = 320;
       s->fcal_src = FCAL_SRC_SCAN;
       s->fcal_dest = FCAL_DEST_SW;
     }
