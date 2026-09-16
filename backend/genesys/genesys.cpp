@@ -4188,7 +4188,7 @@ static std::size_t max_string_size(const std::vector<const char*>& strings)
         if (!s) {
             continue;
         }
-        max_size = std::max(max_size, std::strlen(s));
+        max_size = std::max(max_size, std::strlen(s) + 1);
     }
     return max_size;
 }
