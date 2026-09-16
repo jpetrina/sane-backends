@@ -97,6 +97,7 @@ enum class FrontendType : unsigned
     WOLFSON_GL841, // old code path, likely wrong calculation
     WOLFSON_GL846, // old code path, likely wrong calculation
     ANALOG_DEVICES_GL847, // old code path, likely wrong calculation
+    ANALOG_DEVICES_GL848, // HP Scanjet 200 (GL848+); protocol identical to GL847 for AFE writes
     WOLFSON_GL124, // old code path, likely wrong calculation
 };
 

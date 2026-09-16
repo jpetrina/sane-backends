@@ -41,6 +41,7 @@ std::uint8_t ScannerInterfaceUsb::read_register(std::uint16_t address)
     std::uint8_t value = 0;
 
     if (dev_->model->asic_type == AsicType::GL847 ||
+        dev_->model->asic_type == AsicType::GL848 ||
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
         dev_->model->asic_type == AsicType::GL124)
@@ -86,6 +87,7 @@ void ScannerInterfaceUsb::write_register(std::uint16_t address, std::uint8_t val
                     static_cast<unsigned>(value));
 
     if (dev_->model->asic_type == AsicType::GL847 ||
+        dev_->model->asic_type == AsicType::GL848 ||
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
         dev_->model->asic_type == AsicType::GL124)
@@ -189,7 +191,8 @@ static void bulk_read_data_send_header(UsbDevice& usb_dev, AsicType asic_type, s
     if (asic_type == AsicType::GL124 ||
         asic_type == AsicType::GL845 ||
         asic_type == AsicType::GL846 ||
-        asic_type == AsicType::GL847)
+        asic_type == AsicType::GL847 ||
+        asic_type == AsicType::GL848)
     {
         // hard coded 0x10000000 address
         outdata[0] = 0;
@@ -231,7 +234,8 @@ void ScannerInterfaceUsb::bulk_read_data(std::uint8_t addr, std::uint8_t* data, 
     if (dev_->model->asic_type == AsicType::GL124 ||
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
-        dev_->model->asic_type == AsicType::GL847)
+        dev_->model->asic_type == AsicType::GL847 ||
+        dev_->model->asic_type == AsicType::GL848)
     {
         is_addr_used = 0;
         has_header_before_each_chunk = 1;
@@ -384,6 +388,7 @@ void ScannerInterfaceUsb::write_ahb(std::uint32_t addr, std::uint32_t size, std:
     if (dev_->model->asic_type != AsicType::GL845 &&
         dev_->model->asic_type != AsicType::GL846 &&
         dev_->model->asic_type != AsicType::GL847 &&
+        dev_->model->asic_type != AsicType::GL848 &&
         dev_->model->asic_type != AsicType::GL124)
     {
         throw SaneException("Unsupported transfer type");

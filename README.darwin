@@ -1,49 +1,245 @@
-SANE and Darwin (Mac OS X)
+SANE and Darwin (macOS)
+=======================
+
+Two supported paths on macOS:
+
+  * Install the ready-made Homebrew package (`brew install sane-backends`)
+    if you do not need local patches.
+  * Build from source and install into your home directory under
+    $HOME/.local (or ~/sane).  This is the recommended workflow for
+    development and for backends that are not yet in an upstream
+    release, and it is what the rest of this file documents.
+
+Homebrew is still used for build-time dependencies (libusb, jpeg,
+autotools, ...), but SANE itself lives in your home directory, so no
+`sudo` is needed and `brew` never touches the files you install.
+
+
+Pre-built package (Homebrew)
+============================
+
+    brew install sane-backends
+    scanimage -L
+    sane-find-scanner -v -v
+
+On Apple Silicon Homebrew lives in /opt/homebrew, on Intel in
+/usr/local.  Configuration files are under $(brew --prefix)/etc/sane.d/,
+including dll.conf.
+
+
+Building from source
+====================
+
+Dependencies
+------------
+
+Install Xcode command-line tools and the libraries the Homebrew
+sane-backends formula uses:
+
+    xcode-select --install
+    brew install pkgconf libusb jpeg-turbo libpng libtiff net-snmp
+
+A git checkout also needs the autotools (a release tarball already
+contains configure):
+
+    brew install autoconf autoconf-archive automake libtool gettext
+
+macOS already provides Python (used by configure) and libxml2.
+
+
+Environment
+-----------
+
+Put Homebrew's gettext on PATH and Homebrew's include/lib on the
+compiler search path.  PKG_CONFIG_PATH is enough for libusb; png,
+jpeg and tiff are detected with AC_CHECK_LIB, which does not consult
+pkg-config.  Without CPPFLAGS/LDFLAGS, configure silently skips them
+and `scanimage --format=png` prints "PNG support not compiled in".
+Both work on Apple Silicon (/opt/homebrew) and Intel (/usr/local):
+
+    export PATH="$(brew --prefix)/opt/gettext/bin:$PATH"
+    export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig"
+    export CPPFLAGS="-I$(brew --prefix)/include"
+    export LDFLAGS="-L$(brew --prefix)/lib"
+
+Add $HOME/.local/bin to PATH once, in ~/.zshrc:
+
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+    exec zsh -l
+
+
+Configure, build, install
+-------------------------
+
+Use a literal path in --prefix.  A shell variable like $PREFIX is
+tempting but easy to forget to export in a fresh terminal; an empty
+$PREFIX silently expands to `--prefix=""`, which makes autotools try
+to install into `/include`, `/lib`, ... and fails with `Read-only
+file system` under SIP.
+
+    ./autogen.sh    # git checkout only; tarball already ships configure
+    ./configure --enable-local-backends \
+                --prefix="$HOME/.local" \
+                --localstatedir="$HOME/.local/var" \
+                --without-gphoto2 \
+                --with-usb=yes
+    make -j$(sysctl -n hw.ncpu)
+    make install            # no sudo -- $HOME/.local is under $HOME
+    mkdir -p "$HOME/.local/var/lock/sane"
+
+Prefer `~/sane` (a single, self-contained tree you can rm -rf)?  Just
+replace $HOME/.local with $HOME/sane in the four lines above and add
+$HOME/sane/bin to PATH instead.
+
+Check that everything came out where you expect:
+
+    which scanimage         # -> $HOME/.local/bin/scanimage
+    scanimage -L
+    # png/jpeg/tiff require the CPPFLAGS/LDFLAGS above at configure time:
+    scanimage --help | grep 'file format'
+
+
+Uninstall
+---------
+
+From the same source tree that you configured with `--prefix="$HOME/.local"`:
+
+    make uninstall
+
+That removes the binaries, libraries, headers and man pages that this
+build installed.  Do not `rm -rf "$HOME/.local"`: that prefix is often
+shared with other software.
+
+`make install` does not overwrite configuration files that already
+existed, and `make uninstall` leaves them too.  To drop those as well:
+
+    rm -rf "$HOME/.local/etc/sane.d" \
+           "$HOME/.local/var/lock/sane"
+
+Host-side calibration cache lives outside the prefix:
+
+    rm -rf "$HOME/.sane"
+
+If PATH was added only for this install, drop the
+`export PATH="$HOME/.local/bin:$PATH"` line from ~/.zshrc.
+
+If you installed into ~/sane instead, that tree is self-contained:
+
+    rm -rf "$HOME/sane"
+
+
+Selecting a subset of backends
+------------------------------
+
+scanimage is built in frontend/ and installed as $PREFIX/bin/scanimage.
+It links against libsane, so at least one backend must be built.  To
+compile only a few (faster; useful when one backend fails to build):
+
+    ./configure --with-usb=yes --without-gphoto2 BACKENDS="net genesys"
+
+See README (the upstream one) for the full list of configure options.
+
+
+Running without installing
 --------------------------
 
-Building:
----------
-You may get the message: "gcc: Internal compiler error: program cc1obj got
-fatal signal 11". That's not a bug in SANE. Probably a compiler or hardware
-problem.  The error usually occurs in canon.c because that's the most complex
-backend (at least concerning compilation). If you can't update your compiler,
-try to reduce optimization (e.g. CFLAGS="-O1" ./configure). Another
-work-around: Disable the canon backend in backend/Makefile.in (look at
-PRELOADABLE_BACKENDS) and rerun configure.
+For iterative backend development you do not have to `make install`
+at all.  The SANE dll backend reads two environment variables that
+let `frontend/scanimage` load configs and backends straight from the
+build tree:
 
-General:
---------
-If scanimage -L (or any other frontend) stops with a segmentation fault in the
-sm3600 backend, disable sm3600 in dll.conf if you don't need it.
+    export SANE_CONFIG_DIR="$PWD/backend"        # dll.conf + *.conf
+    export LD_LIBRARY_PATH="$PWD/backend/.libs"  # libsane-<be>.so
+    ./frontend/scanimage -L
 
-Backends that use the function "fork" may not work at least with USB scanners.
-That's a limitation of MacOS X (doesn't use file descriptors for USB access).
-Most backends have been modified to use threads on MacOS X and should
-work. Others don't use fork at all. Both types of backends should work with
-MacOS X. Changing the backends to use threads is an ongoing effort.
+DYLD_LIBRARY_PATH is not needed here: the SANE dll backend consults
+LD_LIBRARY_PATH itself before falling back to the compiled-in install
+prefix.
 
-SCSI-scanners and Firewire scanners:
-------------------------------------
-There is support for SCSI and Firewire scanners but hasn't had much
-testing. Please send failure and success reports to the sane-devel mailing
-list. At least the Epson Perfection 1640SU and the CANON IX-06015C (CanoScan
-600) are reported to work.
 
-USB-scanners:
--------------
-Work with libusb. Try "sane-find-scanner -v -v" and report success or
-failure to the SANE mailing list. At least the following scanners are
-known to work: UMAX Astra 1220U and 2000U, Epson Perfection 1640SU and
-2450 Photo.
+USB scanners
+============
 
-Use libusb version 0.1.11 or later (or a cvs checkout from 2005-09-01
-or later). If you use earlier versions the libusb code needs to be
-patched.
+USB access uses libusb-1.0 (--with-usb=yes).  Apple Silicon and Intel
+builds are native; Rosetta is not required.
 
-Parport-scanners:
------------------
-I don't have any information about these. Please contact me or the SANE mailing
-list if you succeeded in using one of these.
+If `scanimage -L` does not list a USB scanner, another application
+may already have an exclusive hold on the device (Image Capture, a
+vendor driver, or another SANE frontend).  Unplug/replug the scanner
+or quit those programs and try again.  Enable the matching backend in
+$HOME/.local/etc/sane.d/dll.conf.
 
-2003-12-26 Henning Meier-Geinitz <henning@meier-geinitz.de>
-2005-05-07 Mattias Ellert <mattias.ellert@tsl.uu.se>
+    sane-find-scanner -v -v
+    scanimage -L
+
+To confirm at the kernel level that macOS sees the device:
+
+    ioreg -p IOUSB -l -w 0 | grep -A2 -i 'idVendor\|USB Product'
+
+
+HP Scanjet 200: white-sheet calibration
+=======================================
+
+Each optical pass (300 / 600 / 1200 / 2400 dpi) has its own host-side
+flat-field file under `$HOME/.sane/hewlett-packard-scanjet-200-shading-<dpi>.bin`.
+75 / 100 / 150 dpi share the 300 dpi file; 200 dpi shares 600 dpi.
+
+Use a clean, unmarked, *white* A4 sheet. Cream, grey, or printed paper
+will be treated as white and every later scan will look dark or muddy.
+The sheet must cover the full width of the glass, sit flat, and the lid
+must be closed. Dust, creases and writing become stripes in every scan.
+
+`--force-calibration` always measures its own ~20 mm strip after the
+park-to-page move. Crop options (`-x` / `-y`) do not limit that strip:
+the sheet must cover the glass from the top. 2400 dpi takes a few
+minutes — leave the lid closed until the carriage is home.
+
+    scanimage -L
+    scanimage --force-calibration --mode Color --resolution 300 --format=png -y 40 > /dev/null
+    scanimage --force-calibration --mode Color --resolution 600 --format=png -y 40 > /dev/null
+    scanimage --force-calibration --mode Color --resolution 1200 --format=png -y 40 > /dev/null
+    scanimage --force-calibration --mode Color --resolution 2400 --format=png -y 40 > /dev/null
+
+A good profile has target ≈ 42300 at 300/600/1200 dpi. 2400 dpi is
+also ≈ 40000 when the CIS LED GPIOs are armed (the capture tables
+write 0xA7/0xA9 = 0x50); if the lamp did not come up the same sheet
+lands around 23000. A printed page at 300–1200 lands around 22000
+and is rejected (the previous good file is kept). Confirm with:
+
+    SANE_DEBUG_GENESYS=5 scanimage --force-calibration --mode Color \
+        --resolution 2400 --format=png -y 40 > /dev/null 2> cal.log
+    grep -E 'target=|white sheet|measured and saved' cal.log
+
+Then scan as usual, without `--force-calibration`:
+
+    scanimage --format=png --mode Color --resolution 2400 > scan2400.png
+
+To throw the cache away and start over: `scanimage --clear-calibration`
+(or delete the `hewlett-packard-scanjet-200-shading-*.bin` files) and
+repeat with a white sheet.
+
+
+SCSI and FireWire scanners
+==========================
+
+The Darwin build links CoreFoundation and IOKit.  SCSI and FireWire
+devices can work, but they have had less testing than USB.  Please
+send success or failure reports to the sane-devel mailing list.
+
+
+Parallel-port scanners
+======================
+
+Not expected to work on current Mac hardware.
+
+
+Notes
+=====
+
+macOS USB access does not use file descriptors, so backends that fork
+a helper process may fail for USB scanners.  The Darwin build uses
+pthreads instead of fork (this is forced in the configure checks).
+Most backends have been updated accordingly.
+
+If `scanimage -L` (or any other frontend) crashes in a backend you do
+not need, comment that backend out in $HOME/.local/etc/sane.d/dll.conf.

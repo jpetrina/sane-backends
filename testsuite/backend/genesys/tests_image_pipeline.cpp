@@ -530,6 +530,227 @@ void test_node_merge_color_to_gray()
     ASSERT_EQ(out_data, expected_data);
 }
 
+void test_node_mirror_rows_i8()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = { 0x10, 0x20, 0x30, 0x40 };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(4, 1, PixelFormat::I8,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeMirrorRows>();
+
+    ASSERT_EQ(stack.get_output_width(), 4u);
+    ASSERT_EQ(stack.get_output_height(), 1u);
+
+    auto out_data = stack.get_all_data();
+    Data expected_data = { 0x40, 0x30, 0x20, 0x10 };
+    ASSERT_EQ(out_data, expected_data);
+}
+
+void test_node_decimate_lines_i8()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = {
+        0x0a, 0x14,
+        0x1e, 0x28,
+        0x32, 0x3c,
+        0x46, 0x50,
+    };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(2, 4, PixelFormat::I8,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeDecimateLines>(2);
+
+    ASSERT_EQ(stack.get_output_width(), 2u);
+    ASSERT_EQ(stack.get_output_height(), 2u);
+    ASSERT_EQ(stack.get_output_format(), PixelFormat::I8);
+
+    auto out_data = stack.get_all_data();
+    Data expected_data = {
+        0x14, 0x1e,
+        0x3c, 0x46,
+    };
+    ASSERT_EQ(out_data, expected_data);
+}
+
+void test_node_extract_rgb888()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = {
+        0x11, 0x12, 0x13,
+        0x21, 0x22, 0x23,
+        0x31, 0x32, 0x33,
+    };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(3, 1, PixelFormat::RGB888,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeExtract>(1, 0, 1, 1);
+
+    ASSERT_EQ(stack.get_output_width(), 1u);
+    ASSERT_EQ(stack.get_output_row_bytes(), 3u);
+
+    auto out_data = stack.get_all_data();
+    Data expected_data = { 0x21, 0x22, 0x23 };
+    ASSERT_EQ(out_data, expected_data);
+}
+
+void test_node_auto_levels_i16()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    // Little-endian 16-bit samples spanning a narrow CIS-like range.
+    auto le = [](std::uint16_t v) -> Data {
+        return { static_cast<std::uint8_t>(v & 0xff),
+                 static_cast<std::uint8_t>((v >> 8) & 0xff) };
+    };
+    Data in_data;
+    const std::uint16_t values[] = { 1000, 1000, 2000, 3000, 4000, 5000, 6000, 6000 };
+    for (auto v : values) {
+        auto bytes = le(v);
+        in_data.insert(in_data.end(), bytes.begin(), bytes.end());
+    }
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(8, 1, PixelFormat::I16,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeAutoLevels>();
+
+    ASSERT_EQ(stack.get_output_width(), 8u);
+    ASSERT_EQ(stack.get_output_format(), PixelFormat::I16);
+
+    auto out_data = stack.get_all_data();
+    auto read_le = [](const Data& d, std::size_t i) {
+        return static_cast<std::uint16_t>(d[i * 2] | (d[i * 2 + 1] << 8));
+    };
+    // 2nd percentile is 1000, 98th is 6000: those map to 0 and ~65535.
+    ASSERT_EQ(read_le(out_data, 0), 0u);
+    ASSERT_EQ(read_le(out_data, 1), 0u);
+    ASSERT_EQ(read_le(out_data, 6), 65535u);
+    ASSERT_EQ(read_le(out_data, 7), 65535u);
+    auto mid = read_le(out_data, 3); // 3000, halfway in linear, sRGB-encoded
+    ASSERT_TRUE(mid > 20000u && mid < 50000u);
+}
+
+void test_node_auto_levels_calibrated_i16()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    auto le = [](std::uint16_t v) -> Data {
+        return { static_cast<std::uint8_t>(v & 0xff),
+                 static_cast<std::uint8_t>((v >> 8) & 0xff) };
+    };
+    auto read_le = [](const Data& d, std::size_t i) {
+        return static_cast<std::uint16_t>(d[i * 2] | (d[i * 2 + 1] << 8));
+    };
+
+    // 200 samples: two at 800, rest at 20000. 0.5th percentile is 800,
+    // below the floor of 2000, so black adapts down and 800 maps to 0.
+    Data in_data;
+    for (int i = 0; i < 2; ++i) {
+        auto dark = le(800);
+        in_data.insert(in_data.end(), dark.begin(), dark.end());
+    }
+    for (int i = 2; i < 200; ++i) {
+        auto bytes = le(20000);
+        in_data.insert(in_data.end(), bytes.begin(), bytes.end());
+    }
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(200, 1, PixelFormat::I16,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeAutoLevels>(2000, 20000, true);
+
+    auto out_data = stack.get_all_data();
+    ASSERT_EQ(read_le(out_data, 0), 0u);
+    ASSERT_EQ(read_le(out_data, 1), 0u);
+    ASSERT_EQ(read_le(out_data, 2), 65535u);
+    ASSERT_EQ(read_le(out_data, 199), 65535u);
+}
+
+void test_node_auto_levels_calibrated_floor_i16()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    auto le = [](std::uint16_t v) -> Data {
+        return { static_cast<std::uint8_t>(v & 0xff),
+                 static_cast<std::uint8_t>((v >> 8) & 0xff) };
+    };
+    auto read_le = [](const Data& d, std::size_t i) {
+        return static_cast<std::uint16_t>(d[i * 2] | (d[i * 2 + 1] << 8));
+    };
+
+    // All samples above the 10% floor: black stays at 2000, so 2000 → 0
+    // and 1999 would clip. 5000 is a midtone, not white.
+    Data in_data;
+    for (int i = 0; i < 50; ++i) {
+        auto bytes = le(5000);
+        in_data.insert(in_data.end(), bytes.begin(), bytes.end());
+    }
+    for (int i = 0; i < 50; ++i) {
+        auto bytes = le(20000);
+        in_data.insert(in_data.end(), bytes.begin(), bytes.end());
+    }
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(100, 1, PixelFormat::I16,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeAutoLevels>(2000, 20000, true);
+
+    auto out_data = stack.get_all_data();
+    ASSERT_EQ(read_le(out_data, 50), 65535u);
+    auto mid = read_le(out_data, 0); // 5000
+    ASSERT_TRUE(mid > 10000u && mid < 40000u);
+}
+
+void test_node_flat_field_rgb16()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    auto le = [](std::uint16_t v) -> Data {
+        return { static_cast<std::uint8_t>(v & 0xff),
+                 static_cast<std::uint8_t>((v >> 8) & 0xff) };
+    };
+
+    Data in_data;
+    const std::uint16_t pixels[][3] = {
+        { 1000, 2000, 3000 },
+        { 1000, 2000, 3000 },
+    };
+    for (const auto& p : pixels) {
+        for (unsigned c = 0; c < 3; ++c) {
+            auto bytes = le(p[c]);
+            in_data.insert(in_data.end(), bytes.begin(), bytes.end());
+        }
+    }
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(2, 1, PixelFormat::RGB161616,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeFlatField>(
+        std::vector<std::uint16_t>{ 500, 1000 },
+        std::vector<std::uint16_t>{ 1000, 2000 },
+        std::vector<std::uint16_t>{ 1500, 3000 },
+        1000);
+
+    auto out_data = stack.get_all_data();
+    auto read_le = [](const Data& d, std::size_t i) {
+        return static_cast<std::uint16_t>(d[i * 2] | (d[i * 2 + 1] << 8));
+    };
+    // value * target / ref: first column doubles, second stays.
+    ASSERT_EQ(read_le(out_data, 0), 2000u);
+    ASSERT_EQ(read_le(out_data, 1), 2000u);
+    ASSERT_EQ(read_le(out_data, 2), 2000u);
+    ASSERT_EQ(read_le(out_data, 3), 1000u);
+    ASSERT_EQ(read_le(out_data, 4), 1000u);
+    ASSERT_EQ(read_le(out_data, 5), 1000u);
+}
+
 
 void test_node_split_mono_lines()
 {
@@ -970,6 +1191,13 @@ void test_image_pipeline()
     test_node_invert_1_bits();
     test_node_merge_mono_lines_to_color();
     test_node_merge_color_to_gray();
+    test_node_mirror_rows_i8();
+    test_node_decimate_lines_i8();
+    test_node_extract_rgb888();
+    test_node_auto_levels_i16();
+    test_node_auto_levels_calibrated_i16();
+    test_node_auto_levels_calibrated_floor_i16();
+    test_node_flat_field_rgb16();
     test_node_split_mono_lines();
     test_node_component_shift_lines();
     test_node_pixel_shift_columns_no_switch();

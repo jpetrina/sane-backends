@@ -42,7 +42,8 @@ TestScannerInterface::TestScannerInterface(Genesys_Device* dev, std::uint16_t ve
         dev_->model->asic_type == AsicType::GL843 ||
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
-        dev_->model->asic_type == AsicType::GL847)
+        dev_->model->asic_type == AsicType::GL847 ||
+        dev_->model->asic_type == AsicType::GL848)
     {
         write_register(0x40, 0x00);
     }
@@ -57,7 +58,8 @@ TestScannerInterface::TestScannerInterface(Genesys_Device* dev, std::uint16_t ve
 
     if (dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
-        dev_->model->asic_type == AsicType::GL847)
+        dev_->model->asic_type == AsicType::GL847 ||
+        dev_->model->asic_type == AsicType::GL848)
     {
         write_register(0xbd, 0x00);
         write_register(0xbe, 0x00);

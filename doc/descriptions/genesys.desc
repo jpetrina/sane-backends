@@ -160,6 +160,12 @@
 :status :untested
 :comment "Not supported yet"
 
+:model "ScanJet 200"
+:interface "USB"
+:usbid "0x03f0" "0x1c05"
+:status :basic
+:comment "GL848+ ASIC, tested on one unit. Host-side CIS pipeline and flat-field."
+
 ; -----------------------------------------------------------------------------
 
 :mfg "Canon"

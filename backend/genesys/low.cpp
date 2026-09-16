@@ -41,6 +41,7 @@
 #include "gl843.h"
 #include "gl846.h"
 #include "gl847.h"
+#include "gl848.h"
 #include "gl646.h"
 
 #include <cstdio>
@@ -64,6 +65,7 @@ std::unique_ptr<CommandSet> create_cmd_set(AsicType asic_type)
         case AsicType::GL845: // since only a few reg bits differs we handle both together
         case AsicType::GL846: return std::unique_ptr<CommandSet>(new gl846::CommandSetGl846{});
         case AsicType::GL847: return std::unique_ptr<CommandSet>(new gl847::CommandSetGl847{});
+        case AsicType::GL848: return std::unique_ptr<CommandSet>(new gl848::CommandSetGl848{});
         case AsicType::GL124: return std::unique_ptr<CommandSet>(new gl124::CommandSetGl124{});
         default: throw SaneException(SANE_STATUS_INVAL, "unknown ASIC type");
     }
@@ -98,7 +100,8 @@ unsigned sanei_genesys_get_bulk_max_size(AsicType asic_type)
     */
     if (asic_type == AsicType::GL124 ||
         asic_type == AsicType::GL846 ||
-        asic_type == AsicType::GL847)
+        asic_type == AsicType::GL847 ||
+        asic_type == AsicType::GL848)
     {
         return 0xeff0;
     }
@@ -111,6 +114,7 @@ void sanei_genesys_set_buffer_address(Genesys_Device* dev, std::uint32_t addr)
     DBG_HELPER(dbg);
 
     if (dev->model->asic_type==AsicType::GL847 ||
+        dev->model->asic_type==AsicType::GL848 ||
         dev->model->asic_type==AsicType::GL845 ||
         dev->model->asic_type==AsicType::GL846 ||
         dev->model->asic_type==AsicType::GL124)
@@ -139,7 +143,8 @@ Status scanner_read_status(Genesys_Device& dev)
     std::uint16_t address = 0;
 
     switch (dev.model->asic_type) {
-        case AsicType::GL124: address = 0x101; break;
+        case AsicType::GL124:
+        case AsicType::GL848: address = 0x101; break;
         case AsicType::GL646:
         case AsicType::GL841:
         case AsicType::GL842:
@@ -170,6 +175,25 @@ Status scanner_read_status(Genesys_Device& dev)
     status.is_lamp_on = value & LAMPSTS;
     status.is_front_end_busy = value & FEBUSY;
     status.is_motor_enabled = value & MOTORENB;
+
+    if (dev.model->asic_type == AsicType::GL848) {
+        // 0x101 is the home/motor bank on GL848+ (bit 0x08 home, 0x01
+        // motor running). Scan-buffer readiness lives on 0x100: data is
+        // flowing when bit 0 is set and bit 7 is clear (Windows log:
+        // 0xb2 empty → 0x36 ramp → 0x33 flowing). Using 0x101's unused
+        // 0x40 bit as BUFEMPTY made an idle-at-home scanner look like
+        // it had a full DRAM, so we bulk-read zeros without waiting.
+        std::uint8_t scan_status = 0;
+        try {
+            scan_status = dev.interface->read_register(0x100);
+        } catch (...) {
+            scan_status = 0;
+        }
+        const bool data_ready = (scan_status & 0x01) != 0 && (scan_status & 0x80) == 0;
+        status.is_buffer_empty = !data_ready;
+        DBG(DBG_io, "%s: GL848 0x101=0x%02x 0x100=0x%02x data_ready=%d\n",
+            __func__, value, scan_status, data_ready ? 1 : 0);
+    }
 
     if (DBG_LEVEL >= DBG_io) {
         debug_print_status(dbg, status);
@@ -232,10 +256,12 @@ void sanei_genesys_read_valid_words(Genesys_Device* dev, unsigned int* words)
   switch (dev->model->asic_type)
     {
     case AsicType::GL124:
-            *words = dev->interface->read_register(0x102) & 0x03;
-            *words = *words * 256 + dev->interface->read_register(0x103);
-            *words = *words * 256 + dev->interface->read_register(0x104);
-            *words = *words * 256 + dev->interface->read_register(0x105);
+    case AsicType::GL848:
+            // GL848+ valid-word counter is a 24-bit big-endian field at
+            // 0x102..0x104 (one control-in of 4 bytes, first three used).
+            *words = (static_cast<unsigned>(dev->interface->read_register(0x102)) << 16)
+                   + (static_cast<unsigned>(dev->interface->read_register(0x103)) << 8)
+                   +  static_cast<unsigned>(dev->interface->read_register(0x104));
             break;
 
     case AsicType::GL845:
@@ -273,7 +299,10 @@ void sanei_genesys_read_scancnt(Genesys_Device* dev, unsigned int* words)
 {
     DBG_HELPER(dbg);
 
-    if (dev->model->asic_type == AsicType::GL124) {
+    if (dev->model->asic_type == AsicType::GL124 ||
+        dev->model->asic_type == AsicType::GL848) {
+        // GL848+ mirrors GL124's high-bank layout for the scan-line
+        // counter at 0x10b..0x10d.
         *words = (dev->interface->read_register(0x10b) & 0x0f) << 16;
         *words += (dev->interface->read_register(0x10c) << 8);
         *words += dev->interface->read_register(0x10d);
@@ -546,6 +575,16 @@ void sanei_genesys_read_feed_steps(Genesys_Device* dev, unsigned int* steps)
         *steps += (dev->interface->read_register(0x109) << 8);
         *steps += dev->interface->read_register(0x10a);
     }
+    else if (dev->model->asic_type == AsicType::GL848) {
+        // The HP driver never polls a feed-step counter on this ASIC; it
+        // waits on 0x100 (scan-buffer status) instead. Returning 0 here
+        // would hang genesys_start_scan's "wait until FEEDL steps" loop,
+        // and returning the 0x102 valid-word field would skip that wait
+        // whenever leftover DRAM looked non-zero. Signal "already there"
+        // so the subsequent wait_until_buffer_non_empty() (now backed by
+        // 0x100) is the real barrier.
+        *steps = 0xffffffffu;
+    }
   else
     {
         *steps = dev->interface->read_register(0x4a);
@@ -768,7 +807,8 @@ void compute_session_pixel_offsets(const Genesys_Device* dev, ScanSession& s,
                dev->model->asic_type == AsicType::GL843 ||
                dev->model->asic_type == AsicType::GL845 ||
                dev->model->asic_type == AsicType::GL846 ||
-               dev->model->asic_type == AsicType::GL847)
+               dev->model->asic_type == AsicType::GL847 ||
+               dev->model->asic_type == AsicType::GL848)
     {
         unsigned startx_xres = s.optical_resolution;
         if (dev->model->model_id == ModelId::CANON_5600F ||
@@ -814,6 +854,9 @@ unsigned session_adjust_output_pixels(unsigned output_pixels,
                                       unsigned output_xresolution, unsigned output_yresolution,
                                       bool adjust_output_pixels)
 {
+    if (dev.model->asic_type == AsicType::GL848) {
+        return output_pixels;
+    }
     bool adjust_optical_pixels = !adjust_output_pixels;
     if (dev.model->model_id == ModelId::CANON_5600F) {
         adjust_optical_pixels = true;
@@ -860,6 +903,7 @@ unsigned session_adjust_output_pixels(unsigned output_pixels,
         // TODO invert test logic or generalize behaviour across all ASICs
         if (has_flag(dev.model->flags, ModelFlag::SIS_SENSOR) ||
             dev.model->asic_type == AsicType::GL847 ||
+            dev.model->asic_type == AsicType::GL848 ||
             dev.model->asic_type == AsicType::GL124 ||
             dev.model->asic_type == AsicType::GL845 ||
             dev.model->asic_type == AsicType::GL846 ||
@@ -881,6 +925,7 @@ unsigned session_adjust_output_pixels(unsigned output_pixels,
         if (output_xresolution >= 1200 && (
                     dev.model->asic_type == AsicType::GL124 ||
                     dev.model->asic_type == AsicType::GL847 ||
+                    dev.model->asic_type == AsicType::GL848 ||
                     dev.session.params.xres < dev.session.params.yres))
         {
             if (output_xresolution < output_yresolution) {
@@ -984,7 +1029,8 @@ void compute_session(const Genesys_Device* dev, ScanSession& s, const Genesys_Se
     // FIXME: Use ModelFlag::SIS_SENSOR
     if ((dev->model->asic_type == AsicType::GL845 ||
          dev->model->asic_type == AsicType::GL846 ||
-         dev->model->asic_type == AsicType::GL847) &&
+         dev->model->asic_type == AsicType::GL847 ||
+         dev->model->asic_type == AsicType::GL848) &&
         dev->model->model_id != ModelId::PLUSTEK_OPTICFILM_7400 &&
         dev->model->model_id != ModelId::PLUSTEK_OPTICFILM_8200I)
     {
@@ -1076,7 +1122,8 @@ void compute_session(const Genesys_Device* dev, ScanSession& s, const Genesys_Se
 
     if (dev->model->asic_type == AsicType::GL845 ||
         dev->model->asic_type == AsicType::GL846 ||
-        dev->model->asic_type == AsicType::GL847)
+        dev->model->asic_type == AsicType::GL847 ||
+        dev->model->asic_type == AsicType::GL848)
     {
         if (dev->model->model_id == ModelId::CANON_5600F) {
             s.output_segment_pixel_group_count = s.output_pixels / s.segment_count;
@@ -1485,6 +1532,7 @@ void scanner_start_action(Genesys_Device& dev, bool start_motor)
         case AsicType::GL845:
         case AsicType::GL846:
         case AsicType::GL847:
+        case AsicType::GL848:
         case AsicType::GL124:
             break;
         default:
@@ -1492,7 +1540,12 @@ void scanner_start_action(Genesys_Device& dev, bool start_motor)
     }
 
     if (start_motor) {
-        dev.interface->write_register(0x0f, 0x01);
+        // The HP Scanjet 200 (GL848+) captured driver writes 0xff — not
+        // the usual 0x01 — to REG_0x0F when it wants the motor and the
+        // CIS clocking to start together. Anything else here leaves the
+        // motor idle and the DRAM never fills.
+        std::uint8_t val = (dev.model->asic_type == AsicType::GL848) ? 0xff : 0x01;
+        dev.interface->write_register(0x0f, val);
     } else {
         dev.interface->write_register(0x0f, 0);
     }
@@ -1568,7 +1621,9 @@ void regs_set_exposure(AsicType asic_type, Genesys_Register_Set& regs,
             regs.set16(gl846::REG_EXPB, exposure.blue);
             break;
         }
-        case AsicType::GL847: {
+        case AsicType::GL847:
+        case AsicType::GL848: {
+            // GL848+ shares the EXPR/EXPG/EXPB register offsets with GL847.
             regs.set16(gl847::REG_EXPR, exposure.red);
             regs.set16(gl847::REG_EXPG, exposure.green);
             regs.set16(gl847::REG_EXPB, exposure.blue);
@@ -1604,7 +1659,8 @@ void regs_set_optical_off(AsicType asic_type, Genesys_Register_Set& regs)
             regs.find_reg(gl846::REG_0x01).value &= ~gl846::REG_0x01_SCAN;
             break;
         }
-        case AsicType::GL847: {
+        case AsicType::GL847:
+        case AsicType::GL848: {
             regs.find_reg(gl847::REG_0x01).value &= ~gl847::REG_0x01_SCAN;
             break;
         }
@@ -1632,6 +1688,7 @@ bool get_registers_gain4_bit(AsicType asic_type, const Genesys_Register_Set& reg
         case AsicType::GL846:
             return static_cast<bool>(regs.get8(gl846::REG_0x06) & gl846::REG_0x06_GAIN4);
         case AsicType::GL847:
+        case AsicType::GL848:
             return static_cast<bool>(regs.get8(gl847::REG_0x06) & gl847::REG_0x06_GAIN4);
         case AsicType::GL124:
             return static_cast<bool>(regs.get8(gl124::REG_0x06) & gl124::REG_0x06_GAIN4);
