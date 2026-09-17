@@ -1,0 +1,287 @@
+:backend "oki"
+:version "1.0-0"
+:manpage "sane-oki"
+:devicetype :scanner
+
+:mfg "OKI"
+:url "https://www.oki.com/"
+
+:model "MB461"
+:interface "USB"
+:usbid "0x06bc" "0x02bd"
+:status :basic
+
+:model "MB471"
+:interface "USB"
+:usbid "0x06bc" "0x02be"
+:status :basic
+
+:model "MB491"
+:interface "USB"
+:usbid "0x06bc" "0x02bf"
+:status :basic
+
+:model "ES4161 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02ca"
+:status :basic
+
+:model "ES4191 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02cb"
+:status :basic
+
+:model "MPS4200mb"
+:interface "USB"
+:usbid "0x06bc" "0x02d4"
+:status :basic
+
+:model "MB451"
+:interface "USB"
+:usbid "0x06bc" "0x02ee"
+:status :basic
+
+:model "MB441"
+:interface "USB"
+:usbid "0x06bc" "0x02ef"
+:status :basic
+
+:model "MC351"
+:interface "USB"
+:usbid "0x06bc" "0x026f"
+:status :basic
+
+:model "ES3451 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0274"
+:status :basic
+
+:model "MC361"
+:interface "USB"
+:usbid "0x06bc" "0x0279"
+:status :basic
+
+:model "ES3461 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x027e"
+:status :basic
+
+:model "MC561"
+:interface "USB"
+:usbid "0x06bc" "0x0283"
+:status :basic
+
+:model "CX2731 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0287"
+:status :basic
+
+:model "ES5461 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0288"
+:status :basic
+
+:model "MC352"
+:interface "USB"
+:usbid "0x06bc" "0x02e7"
+:status :basic
+
+:model "MC362"
+:interface "USB"
+:usbid "0x06bc" "0x02e8"
+:status :basic
+
+:model "MC562"
+:interface "USB"
+:usbid "0x06bc" "0x02e9"
+:status :basic
+
+:model "ES3452 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02ea"
+:status :basic
+
+:model "ES5462 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02eb"
+:status :basic
+
+:model "MB472"
+:interface "USB"
+:usbid "0x06bc" "0x034d"
+:status :basic
+
+:model "MB492"
+:interface "USB"
+:usbid "0x06bc" "0x034e"
+:status :basic
+
+:model "MB562"
+:interface "USB"
+:usbid "0x06bc" "0x034f"
+:status :basic
+
+:model "ES4192 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0350"
+:status :basic
+
+:model "ES5162 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0351"
+:status :basic
+
+:model "ES4172LP MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0377"
+:status :basic
+
+:model "ES5162LP MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0378"
+:status :basic
+
+:model "MC332"
+:interface "USB"
+:usbid "0x06bc" "0x0323"
+:status :basic
+
+:model "MC342"
+:interface "USB"
+:usbid "0x06bc" "0x0324"
+:status :basic
+
+:model "MPS2731mc"
+:interface "USB"
+:usbid "0x06bc" "0x0325"
+:status :basic
+
+:model "MC363"
+:interface "USB"
+:usbid "0x06bc" "0x0382"
+:status :basic
+
+:model "MC563"
+:interface "USB"
+:usbid "0x06bc" "0x0383"
+:status :basic
+
+:model "ES5463 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0384"
+:status :basic
+
+:model "MC573"
+:interface "USB"
+:usbid "0x06bc" "0x0394"
+:status :basic
+
+:model "ES5473 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0395"
+:status :basic
+
+:model "MC860"
+:interface "USB"
+:usbid "0x06bc" "0x01db"
+:status :basic
+
+:model "CX2633 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x01df"
+:status :basic
+
+:model "ES8460 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x01e0"
+:status :basic
+
+:model "MC861"
+:interface "USB"
+:usbid "0x06bc" "0x02b4"
+:status :basic
+
+:model "ES8461 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02b5"
+:status :basic
+
+:model "MC851"
+:interface "USB"
+:usbid "0x06bc" "0x02b6"
+:status :basic
+
+:model "ES8451 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02b7"
+:status :basic
+
+:model "MC862"
+:interface "USB"
+:usbid "0x06bc" "0x02f7"
+:status :basic
+
+:model "MC852"
+:interface "USB"
+:usbid "0x06bc" "0x02f8"
+:status :basic
+
+:model "ES8462 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02f9"
+:status :basic
+
+:model "MB491+LP MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02fe"
+:status :basic
+
+:model "MB461+LP MFP"
+:interface "USB"
+:usbid "0x06bc" "0x02ff"
+:status :basic
+
+:model "MPS4700mb"
+:interface "USB"
+:usbid "0x06bc" "0x0300"
+:status :basic
+
+:model "MC853"
+:interface "USB"
+:usbid "0x06bc" "0x035b"
+:status :basic
+
+:model "MC863"
+:interface "USB"
+:usbid "0x06bc" "0x035c"
+:status :basic
+
+:model "MC873"
+:interface "USB"
+:usbid "0x06bc" "0x035d"
+:status :basic
+
+:model "MC883"
+:interface "USB"
+:usbid "0x06bc" "0x035e"
+:status :basic
+
+:model "ES8453 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x035f"
+:status :basic
+
+:model "ES8463 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0360"
+:status :basic
+
+:model "ES8473 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0361"
+:status :basic
+
+:model "ES8483 MFP"
+:interface "USB"
+:usbid "0x06bc" "0x0362"
+:status :basic
