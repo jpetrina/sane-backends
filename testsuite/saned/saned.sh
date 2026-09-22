@@ -13,6 +13,8 @@ READY_TIMEOUT=10
 TEST_TIMEOUT=60
 
 export SANE_CONFIG_DIR=$(mktemp -d)
+LD_LIBRARY_PATH="$(cd ../../backend/.libs && pwd)${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH
 SANED_LOG="$SANE_CONFIG_DIR/saned.log"
 
 SANED_PID=
@@ -36,6 +38,11 @@ trap cleanup EXIT INT TERM
 
 if test ! -x "$SANED"; then
     echo "saned test: saned not built, skipping"
+    exit 0
+fi
+
+if test ! -f ../../backend/libsane-test.la; then
+    echo "saned test: test backend not built, skipping"
     exit 0
 fi
 

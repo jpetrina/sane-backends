@@ -10,6 +10,10 @@ DEVICE    = net:localhost:test
 
 EXTRA_DIST = README saned.sh
 
+if COMPILE_SANED
+TESTS = saned.sh
+endif
+
 all: help
 
 help:

@@ -7,7 +7,7 @@
 SUBDIRS = backend sanei tools saned
 
 check_PROGRAMS = scanimage_cancel_test
-TESTS = $(check_PROGRAMS)
+TESTS = $(check_PROGRAMS) scanimage.sh
 
 AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include -I$(top_srcdir)/include
 
@@ -24,14 +24,7 @@ scanimage_cancel_test_LDADD += -lstdc++
 endif
 endif
 
-SCANIMAGE = ../frontend/scanimage$(EXEEXT)
-TESTFILE  = $(srcdir)/testfile.pnm
-OUTFILE   = outfile.pnm
-DEVICE    = test
-OPTIONS   = --mode Color --depth 16 --test-picture "Color pattern" --resolution 50 -y 20 -x 20 > $(OUTFILE)
-
-EXTRA_DIST = README testfile.pnm
-CLEANFILES = $(OUTFILE)
+EXTRA_DIST = README testfile.pnm scanimage.sh
 
 all: help
 
@@ -42,23 +35,4 @@ test: test.local
 	cd saned && $(MAKE) test
 
 test.local:
-	@echo "**** Testing $(SCANIMAGE) with device $(DEVICE)"
-	@if echo "---> Trying flatbed scanner" && \
-	  $(SCANIMAGE) -d $(DEVICE) -T && \
-	  echo "<--- Flatbed scanner succeeded" && \
-	  echo "---> Trying three pass flatbed scanner" && \
-	  $(SCANIMAGE) -d $(DEVICE) --mode Color --three-pass=yes   -T && \
-	  echo "<--- Three pass scanner succeeded" && \
-	  echo "---> Trying hand scanner" && \
-	  $(SCANIMAGE) -d $(DEVICE) --hand-scanner=yes -T && \
-	  echo "<--- Hand scanner succeeded" && \
-	  echo "---> Checking 16 bit color mode" && \
-	  $(SCANIMAGE) -d $(DEVICE) $(OPTIONS) && \
-	  cmp -s $(TESTFILE) $(OUTFILE) && \
-	  echo "<--- 16 bit color mode succeeded" && \
-	  rm $(OUTFILE) ; \
-	then echo ; echo ; echo "**** All tests passed" ; \
-	else echo ; echo; \
-	echo "**** Something failed (maybe test backend not enabled by configure?)";\
-	exit 1; \
-	fi
+	@$(srcdir)/scanimage.sh --installed
