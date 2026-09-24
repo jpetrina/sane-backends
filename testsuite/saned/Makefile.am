@@ -11,9 +11,15 @@ DEVICE    = net:localhost:test
 EXTRA_DIST = README saned.sh
 
 if COMPILE_SANED
-TESTS = saned.sh
-endif
+check_PROGRAMS = saned_test
+TESTS = saned.sh $(check_PROGRAMS)
 
+saned_test_SOURCES = saned_test.c
+saned_test_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_srcdir) -I$(top_srcdir)/include \
+	-I$(top_builddir)/include $(AVAHI_CFLAGS)
+saned_test_LDADD = ../../sanei/libsanei.la ../../lib/liblib.la \
+	$(SYSLOG_LIBS) $(SYSTEMD_LIBS) $(AVAHI_LIBS)
+endif
 all: help
 
 help:

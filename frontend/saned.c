@@ -605,7 +605,7 @@ check_v4_in_range (struct sockaddr_in *sin, char *base_ip, char *netmask)
   cidr = strtol (netmask, &end, 10);
 
   /* Sanity check on the cidr value */
-  if ((cidr < 0) || (cidr > 32) || (end == netmask))
+  if ((cidr < 0) || (cidr > 32) || (end == netmask) || (*end != '\0'))
     {
       DBG (DBG_ERR, "check_v4_in_range: invalid CIDR value (%s) !\n", netmask);
       return SANE_FALSE;
@@ -671,7 +671,7 @@ check_v6_in_range (struct sockaddr_in6 *sin6, char *base_ip, char *netmask)
   cidr = strtol (netmask, &end, 10);
 
   /* Sanity check on the cidr value */
-  if ((cidr < 0) || (cidr > 128) || (end == netmask))
+  if ((cidr < 0) || (cidr > 128) || (end == netmask) || (*end != '\0'))
     {
       DBG (DBG_ERR, "check_v6_in_range: invalid CIDR value (%s) !\n", netmask);
       return SANE_FALSE;
@@ -736,7 +736,7 @@ check_v4_in_range (struct in_addr *inaddr, struct in_addr *base, char *netmask)
   cidr = strtol (netmask, &end, 10);
 
   /* sanity check on the cidr value */
-  if ((cidr < 0) || (cidr > 32) || (end == netmask))
+  if ((cidr < 0) || (cidr > 32) || (end == netmask) || (*end != '\0'))
     {
       DBG (DBG_ERR, "check_v4_in_range: invalid CIDR value (%s) !\n", netmask);
       return SANE_FALSE;

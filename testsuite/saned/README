@@ -1,6 +1,7 @@
-SANE saned test
+SANE saned tests
 ===============
 
-Starts saned in standalone mode serving the test backend and tests
-it through the net backend with scanimage -T, exercising the
-network protocol stack (saned, backend/net.c and the wire codecs).
+An end-to-end test that starts saned in standalone mode serving the test backend
+and tests it through the net backend with scanimage -T, exercising the network
+protocol stack (saned, backend/net.c and the wire codecs), along with unit
+tests.
