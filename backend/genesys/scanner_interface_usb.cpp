@@ -43,7 +43,8 @@ std::uint8_t ScannerInterfaceUsb::read_register(std::uint16_t address)
     if (dev_->model->asic_type == AsicType::GL847 ||
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
-        dev_->model->asic_type == AsicType::GL124)
+        dev_->model->asic_type == AsicType::GL124 ||
+        dev_->model->asic_type == AsicType::GL128)
     {
         std::uint8_t value2x8[2];
         std::uint16_t address16 = 0x22 + (address << 8);
@@ -88,7 +89,8 @@ void ScannerInterfaceUsb::write_register(std::uint16_t address, std::uint8_t val
     if (dev_->model->asic_type == AsicType::GL847 ||
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
-        dev_->model->asic_type == AsicType::GL124)
+        dev_->model->asic_type == AsicType::GL124 ||
+        dev_->model->asic_type == AsicType::GL128)
     {
         std::uint8_t buffer[2];
 
@@ -189,7 +191,8 @@ static void bulk_read_data_send_header(UsbDevice& usb_dev, AsicType asic_type, s
     if (asic_type == AsicType::GL124 ||
         asic_type == AsicType::GL845 ||
         asic_type == AsicType::GL846 ||
-        asic_type == AsicType::GL847)
+        asic_type == AsicType::GL847 ||
+        asic_type == AsicType::GL128)
     {
         // hard coded 0x10000000 address
         outdata[0] = 0;
@@ -231,7 +234,8 @@ void ScannerInterfaceUsb::bulk_read_data(std::uint8_t addr, std::uint8_t* data, 
     if (dev_->model->asic_type == AsicType::GL124 ||
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
-        dev_->model->asic_type == AsicType::GL847)
+        dev_->model->asic_type == AsicType::GL847 ||
+        dev_->model->asic_type == AsicType::GL128)
     {
         is_addr_used = 0;
         has_header_before_each_chunk = 1;
@@ -384,7 +388,8 @@ void ScannerInterfaceUsb::write_ahb(std::uint32_t addr, std::uint32_t size, std:
     if (dev_->model->asic_type != AsicType::GL845 &&
         dev_->model->asic_type != AsicType::GL846 &&
         dev_->model->asic_type != AsicType::GL847 &&
-        dev_->model->asic_type != AsicType::GL124)
+        dev_->model->asic_type != AsicType::GL124 &&
+        dev_->model->asic_type != AsicType::GL128)
     {
         throw SaneException("Unsupported transfer type");
     }
@@ -438,7 +443,7 @@ void ScannerInterfaceUsb::write_fe_register(std::uint8_t address, std::uint16_t 
     Genesys_Register_Set reg(Genesys_Register_Set::SEQUENTIAL);
 
     reg.init_reg(0x51, address);
-    if (dev_->model->asic_type == AsicType::GL124) {
+    if (dev_->model->asic_type == AsicType::GL124 || dev_->model->asic_type == AsicType::GL128) {
         reg.init_reg(0x5d, (value / 256) & 0xff);
         reg.init_reg(0x5e, value & 0xff);
     } else {

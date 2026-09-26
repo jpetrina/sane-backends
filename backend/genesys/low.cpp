@@ -35,6 +35,8 @@
 #include "gl646_registers.h"
 
 #include "gl124.h"
+#include "gl128_registers.h"
+#include "gl128.h"
 #include "gl646.h"
 #include "gl841.h"
 #include "gl842.h"
@@ -65,6 +67,7 @@ std::unique_ptr<CommandSet> create_cmd_set(AsicType asic_type)
         case AsicType::GL846: return std::unique_ptr<CommandSet>(new gl846::CommandSetGl846{});
         case AsicType::GL847: return std::unique_ptr<CommandSet>(new gl847::CommandSetGl847{});
         case AsicType::GL124: return std::unique_ptr<CommandSet>(new gl124::CommandSetGl124{});
+        case AsicType::GL128: return std::unique_ptr<CommandSet>(new gl128::CommandSetGl128{});
         default: throw SaneException(SANE_STATUS_INVAL, "unknown ASIC type");
     }
 }
@@ -140,6 +143,7 @@ Status scanner_read_status(Genesys_Device& dev)
 
     switch (dev.model->asic_type) {
         case AsicType::GL124: address = 0x101; break;
+        case AsicType::GL128: address = 0x101; break;
         case AsicType::GL646:
         case AsicType::GL841:
         case AsicType::GL842:
@@ -232,6 +236,7 @@ void sanei_genesys_read_valid_words(Genesys_Device* dev, unsigned int* words)
   switch (dev->model->asic_type)
     {
     case AsicType::GL124:
+    case AsicType::GL128:
             *words = dev->interface->read_register(0x102) & 0x03;
             *words = *words * 256 + dev->interface->read_register(0x103);
             *words = *words * 256 + dev->interface->read_register(0x104);
@@ -273,7 +278,7 @@ void sanei_genesys_read_scancnt(Genesys_Device* dev, unsigned int* words)
 {
     DBG_HELPER(dbg);
 
-    if (dev->model->asic_type == AsicType::GL124) {
+    if (dev->model->asic_type == AsicType::GL124 || dev->model->asic_type == AsicType::GL128) {
         *words = (dev->interface->read_register(0x10b) & 0x0f) << 16;
         *words += (dev->interface->read_register(0x10c) << 8);
         *words += dev->interface->read_register(0x10d);
@@ -541,7 +546,7 @@ void sanei_genesys_read_feed_steps(Genesys_Device* dev, unsigned int* steps)
 {
     DBG_HELPER(dbg);
 
-    if (dev->model->asic_type == AsicType::GL124) {
+    if (dev->model->asic_type == AsicType::GL124 || dev->model->asic_type == AsicType::GL128) {
         *steps = (dev->interface->read_register(0x108) & 0x1f) << 16;
         *steps += (dev->interface->read_register(0x109) << 8);
         *steps += dev->interface->read_register(0x10a);
@@ -1222,6 +1227,24 @@ ImagePipelineStack build_image_pipeline(const Genesys_Device& dev, const ScanSes
         pipeline.push_node<ImagePipelineNodeDebug>(debug_prefix + "_5_after_format.tiff");
     }
 
+    // GL128 samples Y at twice the resolution. The CCD unstagger is given in
+    // these buffer rows (see gl128 calculate_scan_session()) and runs first;
+    // then row pairs are averaged, before the colour line shift.
+    if (dev.model->asic_type == AsicType::GL128 && session.num_staggered_lines > 0) {
+        pipeline.push_node<ImagePipelineNodePixelShiftLines>(session.stagger_y.shifts());
+
+        if (log_image_data) {
+            pipeline.push_node<ImagePipelineNodeDebug>(debug_prefix + "_5b_after_y_unstagger.tiff");
+        }
+    }
+
+    if (dev.model->asic_type == AsicType::GL128 && session.params.lines > 0 &&
+        session.optical_line_count / session.params.lines > 1)
+    {
+        pipeline.push_node<ImagePipelineNodeAverageRows>(
+                session.optical_line_count / session.params.lines);
+    }
+
     if (session.max_color_shift_lines > 0 && session.params.channels == 3) {
         pipeline.push_node<ImagePipelineNodeComponentShiftLines>(
                     session.color_shift_lines_r,
@@ -1243,12 +1266,21 @@ ImagePipelineStack build_image_pipeline(const Genesys_Device& dev, const ScanSes
         }
     }
 
-    if (session.num_staggered_lines > 0) {
+    if (session.num_staggered_lines > 0 && dev.model->asic_type != AsicType::GL128) {
         pipeline.push_node<ImagePipelineNodePixelShiftLines>(session.stagger_y.shifts());
 
         if (log_image_data) {
             pipeline.push_node<ImagePipelineNodeDebug>(debug_prefix + "_8_after_y_unstagger.tiff");
         }
+    }
+
+    // GL128 below 600 dpi: the scan runs at 600 dpi; average down to the
+    // requested resolution after the line shifts.
+    if (dev.model->asic_type == AsicType::GL128 &&
+        gl128::gl128_host_downsample(session.params.xres) > 1)
+    {
+        pipeline.push_node<ImagePipelineNodeBlockAverage>(
+                gl128::gl128_host_downsample(session.params.xres));
     }
 
     if (session.use_host_side_calib &&
@@ -1266,15 +1298,32 @@ ImagePipelineStack build_image_pipeline(const Genesys_Device& dev, const ScanSes
     }
 
     if (session.use_host_side_gray) {
-        pipeline.push_node<ImagePipelineNodeMergeColorToGray>();
+        // ModelFlag::HOST_SIDE_GRAY uses ColorFilter::NONE (luminance); GL128
+        // gray keeps the selected filter's channel.
+        pipeline.push_node<ImagePipelineNodeMergeColorToGray>(session.params.color_filter);
 
         if (log_image_data) {
             pipeline.push_node<ImagePipelineNodeDebug>(debug_prefix + "_10_after_nogray.tiff");
         }
     }
 
+    // GL128 rounds the scan width up to its alignment (see
+    // calculate_scan_session()); crop the surplus columns at the native end
+    // rather than rescaling the row.
+    if (dev.model->asic_type == AsicType::GL128 &&
+        pipeline.get_output_width() > session.params.get_requested_pixels())
+    {
+        pipeline.push_node<ImagePipelineNodeExtract>(0, 0,
+                session.params.get_requested_pixels(), pipeline.get_output_height());
+    }
+
     if (pipeline.get_output_width() != session.params.get_requested_pixels()) {
         pipeline.push_node<ImagePipelineNodeScaleRows>(session.params.get_requested_pixels());
+    }
+
+    // GL128 lines are mirrored in X relative to the film.
+    if (dev.model->asic_type == AsicType::GL128) {
+        pipeline.push_node<ImagePipelineNodeMirrorX>();
     }
 
     return pipeline;
@@ -1468,7 +1517,11 @@ void sanei_genesys_asic_init(Genesys_Device* dev)
             dev->set_head_pos_unknown(ScanHeadId::SECONDARY);
         }
     }
-    dev->cmd_set->move_back_home(dev, true);
+    // GL128 has no standalone home seek; the carriage parks at the end of
+    // every scan.
+    if (dev->model->asic_type != AsicType::GL128) {
+        dev->cmd_set->move_back_home(dev, true);
+    }
 
     // Set powersaving (default = 15 minutes)
     dev->cmd_set->set_powersaving(dev, 15);
@@ -1486,6 +1539,7 @@ void scanner_start_action(Genesys_Device& dev, bool start_motor)
         case AsicType::GL846:
         case AsicType::GL847:
         case AsicType::GL124:
+        case AsicType::GL128:
             break;
         default:
             throw SaneException("Unsupported chip");
@@ -1535,6 +1589,12 @@ void regs_set_exposure(AsicType asic_type, Genesys_Register_Set& regs,
             regs.set24(gl124::REG_EXPR, exposure.red);
             regs.set24(gl124::REG_EXPG, exposure.green);
             regs.set24(gl124::REG_EXPB, exposure.blue);
+            break;
+        }
+        case AsicType::GL128: {
+            // One exposure register for all channels.
+            regs.set24(gl128::REG_EXPOSURE,
+                      std::max(std::max(exposure.red, exposure.green), exposure.blue));
             break;
         }
         case AsicType::GL646: {
@@ -1610,6 +1670,10 @@ void regs_set_optical_off(AsicType asic_type, Genesys_Register_Set& regs)
         }
         case AsicType::GL124: {
             regs.find_reg(gl124::REG_0x01).value &= ~gl124::REG_0x01_SCAN;
+            break;
+        }
+        case AsicType::GL128: {
+            regs.find_reg(gl128::REG_0x01).value &= ~gl128::REG_0x01_SCAN;
             break;
         }
         default:
