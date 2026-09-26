@@ -71,11 +71,11 @@
 :status :complete
 :comment "900, 1800, 3600 and 7200 dpi resolutions are supported in both regular transparency and infrared modes"
 
-:model "OpticFilm 8200i"
+:model "OpticFilm 8200i SE"
 :interface "USB"
 :usbid "0x07b3" "0x1825"
-:status :unsupported
-:comment "GL128 based"
+:status :basic
+:comment "GL128 based. 16-bit colour and gray transparency scans at 150-7200 dpi; no infrared yet"
 
 ; -----------------------------------------------------------------------------
 
