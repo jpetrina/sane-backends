@@ -379,6 +379,16 @@ void genesys_init_gpo_tables()
         { 0xa6, 0x00 }, { 0xa7, 0x07 }, { 0xa8, 0x20 }, { 0xa9, 0x01 },
     };
     s_gpo->push_back(gpo);
+    gpo = Genesys_Gpo();
+    gpo.id = GpioId::PLUSTEK_OPTICFILM_8200I_SE;
+    // GPO registers at boot (pyopticfilm GPO_REGS). gl128.cpp writes them in
+    // asic_boot(); this entry is for the table lookup.
+    gpo.regs = {
+        { 0xa2, 0x00 }, { 0xa3, 0x00 }, { 0xa4, 0x00 },
+        { 0xa6, 0x00 }, { 0xa7, 0x00 }, { 0xa8, 0x00 }, { 0xa9, 0x00 },
+        { 0xaa, 0x00 }, { 0xac, 0x00 }, { 0xad, 0x01 }, { 0xae, 0x00 },
+    };
+    s_gpo->push_back(gpo);
 
 
     gpo = Genesys_Gpo();

@@ -588,6 +588,26 @@ void genesys_init_motor_tables()
     motor.profiles.push_back(profile);
     motor.fast_profiles.push_back(profile);
     s_motors->push_back(std::move(motor));
+    motor = Genesys_Motor();
+    motor.id = MotorId::PLUSTEK_OPTICFILM_8200I_SE;
+    motor.base_ydpi = 7200;
+
+    // gl128.cpp uploads SilverFast's slope tables itself and does not use
+    // these profiles; they describe the same ramps (first value, last value,
+    // length) for code that looks the motor up.
+    profile = MotorProfile();
+    profile.slope = MotorSlope::create_from_steps(5854, 208, 255);  // fast slope
+    profile.step_type = StepType::QUARTER;
+    profile.motor_vref = 3;
+    motor.fast_profiles.push_back(profile);
+
+    profile = MotorProfile();
+    profile.slope = MotorSlope::create_from_steps(8116, 1041, 256);  // slow slope
+    profile.step_type = StepType::QUARTER;
+    profile.motor_vref = 3;
+    motor.profiles.push_back(profile);
+
+    s_motors->push_back(std::move(motor));
 
 
     motor = Genesys_Motor();

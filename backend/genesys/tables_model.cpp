@@ -2755,6 +2755,80 @@ void genesys_init_usb_device_tables()
     model.name = "plustek-opticfilm-7600i-v2";
     model.model = "OpticFilm 7600i (v2)";
     s_usb_devices->emplace_back(0x07b3, 0x0c3b, 0x0605, model);
+    // OpticFilm 8200i SE: GL128 instead of the 8200i's GL845 (USB 0x130d);
+    // the scanner itself is labelled "8200i". Values from USB captures of the
+    // vendor driver (largely as decoded by pyopticfilm).
+    model = Genesys_Model();
+    model.name = "plustek-opticfilm-8200i-se";
+    model.vendor = "PLUSTEK";
+    model.model = "OpticFilm 8200i SE";
+    model.model_id = ModelId::PLUSTEK_OPTICFILM_8200I_SE;
+    model.asic_type = AsicType::GL128;
+
+    // SilverFast's resolutions; 150 and 300 dpi scan at 600 and are averaged
+    // on the host. Infrared is not supported yet.
+    model.resolutions = {
+        {
+            { ScanMethod::TRANSPARENCY },
+            { 7200, 3600, 2400, 1800, 1440, 1200, 900, 720, 600, 300, 150 },
+            { 7200, 3600, 2400, 1800, 1440, 1200, 900, 720, 600, 300, 150 },
+        }
+    };
+
+    // Linear 16-bit output only.
+    model.bpp_gray_values = { 16 };
+    model.bpp_color_values = { 16 };
+    model.default_method = ScanMethod::TRANSPARENCY;
+
+    // Transparency-only scanner: the flatbed geometry and the calibration
+    // areas below are not used (shading is done by the ASIC, see gl128.cpp).
+    model.x_offset = 0.0;
+    model.y_offset = 0.0;
+    model.x_size = 36.0;
+    model.y_size = 44.0;
+
+    model.y_offset_calib_white = 0.0;
+    model.y_size_calib_mm = 0.0;
+    model.x_offset_calib_black = 6.5;
+    model.x_size_calib_mm = 36.83;
+
+    model.x_offset_ta = 0.43;
+    model.y_offset_ta = 28.5;
+    model.x_size_ta = 36.58;
+    model.y_size_ta = 25.59;
+
+    model.y_offset_sensor_to_ta = 0.0;
+    model.y_offset_calib_black_ta = 6.5;
+    model.y_offset_calib_white_ta = 0.0;
+    model.y_size_calib_ta_mm = 2.0;
+
+    model.post_scan = 0.0;
+    model.eject_feed = 0.0;
+
+    // Colour line shift at 7200 dpi (the 8200i's GL845 sensor uses 0/12/24).
+    model.ld_shift_r = 0;
+    model.ld_shift_g = 24;
+    model.ld_shift_b = 48;
+
+    model.line_mode_color_order = ColorOrder::RGB;
+
+    model.is_cis = false;
+    model.is_sheetfed = false;
+    model.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_8200I_SE;
+    model.adc_id = AdcId::PLUSTEK_OPTICFILM_8200I_SE;
+    model.gpio_id = GpioId::PLUSTEK_OPTICFILM_8200I_SE;
+    model.motor_id = MotorId::PLUSTEK_OPTICFILM_8200I_SE;
+
+    // The front end and shading are programmed by gl128.cpp before every
+    // image pass. UNTESTED until the session tests have reference output.
+    model.flags = ModelFlag::UNTESTED |
+                  ModelFlag::UTA_NO_SECONDARY_MOTOR |
+                  ModelFlag::DISABLE_SHADING_CALIBRATION |
+                  ModelFlag::DISABLE_ADC_CALIBRATION;
+
+    model.search_lines = 200;
+
+    s_usb_devices->emplace_back(0x07b3, 0x1825, model);
 
 
     model = Genesys_Model();
