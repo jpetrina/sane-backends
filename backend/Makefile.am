@@ -765,6 +765,7 @@ libgenesys_la_SOURCES = genesys/genesys.cpp genesys/genesys.h \
     genesys/fwd.h \
     genesys/gl646.cpp genesys/gl646.h genesys/gl646_registers.h \
     genesys/gl124.cpp genesys/gl124.h genesys/gl124_registers.h \
+    genesys/gl128.cpp genesys/gl128.h genesys/gl128_registers.h \
     genesys/gl841.cpp genesys/gl841.h genesys/gl841_registers.h \
     genesys/gl842.cpp genesys/gl842.h genesys/gl842_registers.h \
     genesys/gl843.cpp genesys/gl843.h genesys/gl843_registers.h \

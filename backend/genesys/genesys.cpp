@@ -39,6 +39,7 @@
 
 #include "genesys.h"
 #include "gl124_registers.h"
+#include "gl128_registers.h"
 #include "gl841_registers.h"
 #include "gl842_registers.h"
 #include "gl843_registers.h"
@@ -481,6 +482,10 @@ void scanner_clear_scan_and_feed_counts(Genesys_Device& dev)
                                           gl124::REG_0x0D_CLRLNCNT | gl124::REG_0x0D_CLRMCNT);
             break;
         }
+        case AsicType::GL128: {
+            dev.interface->write_register(gl128::REG_CLRCNT, gl128::CLRCNT_ALL);
+            break;
+        }
         default:
             throw SaneException("Unsupported asic type");
     }
@@ -639,6 +644,11 @@ bool scanner_is_motor_stopped(Genesys_Device& dev)
             return (!(reg & gl124::REG_0x100_DATAENB) && !(reg & gl124::REG_0x100_MOTMFLG) &&
                     !status.is_motor_enabled);
         }
+        case AsicType::GL128: {
+            // No DATAENB/MOTMFLG register as on GL124; status only.
+            auto status = scanner_read_status(dev);
+            return !status.is_motor_enabled && status.is_feeding_finished;
+        }
         default:
             throw SaneException("Unsupported asic type");
     }
@@ -674,6 +684,7 @@ void scanner_stop_action(Genesys_Device& dev)
         case AsicType::GL846:
         case AsicType::GL847:
         case AsicType::GL124:
+        case AsicType::GL128:
             break;
         default:
             throw SaneException("Unsupported asic type");
@@ -714,6 +725,7 @@ void scanner_stop_action_no_move(Genesys_Device& dev, genesys::Genesys_Register_
         case AsicType::GL846:
         case AsicType::GL847:
         case AsicType::GL124:
+        case AsicType::GL128:
             break;
         default:
             throw SaneException("Unsupported asic type");
@@ -733,6 +745,12 @@ void scanner_move(Genesys_Device& dev, ScanMethod scan_method, unsigned steps, D
     DBG_HELPER_ARGS(dbg, "steps=%d direction=%d", steps, static_cast<unsigned>(direction));
 
     auto local_reg = dev.reg;
+    // GL128: a zero-step feed does nothing. Starting the motor with AGOHOME
+    // armed at home (scanner_move_to_ta() on this transparency-only scanner)
+    // hangs with status 0xcd.
+    if (dev.model->asic_type == AsicType::GL128 && steps == 0) {
+        return;
+    }
 
     unsigned resolution = dev.model->get_resolution_settings(scan_method).get_min_resolution_y();
 

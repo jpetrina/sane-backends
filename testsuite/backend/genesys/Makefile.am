@@ -22,6 +22,7 @@ AM_CPPFLAGS += -I. -I$(srcdir) -I$(top_builddir)/include -I$(top_srcdir)/include
 genesys_unit_tests_SOURCES = tests.cpp tests.h \
     minigtest.cpp minigtest.h tests_printers.h \
     tests_calibration.cpp \
+    tests_gl128.cpp \
     tests_image.cpp \
     tests_image_pipeline.cpp \
     tests_motor.cpp \

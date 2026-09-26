@@ -397,7 +397,8 @@ PixelFormat ImagePipelineNodeSplitMonoLines::get_output_format(PixelFormat input
 }
 
 
-ImagePipelineNodeMergeColorToGray::ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source) :
+ImagePipelineNodeMergeColorToGray::ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source,
+                                                                     ColorFilter filter) :
     source_(source)
 {
 
@@ -405,6 +406,12 @@ ImagePipelineNodeMergeColorToGray::ImagePipelineNodeMergeColorToGray(ImagePipeli
     float red_mult = 0.2125f;
     float green_mult = 0.7154f;
     float blue_mult = 0.0721f;
+    switch (filter) {
+        case ColorFilter::RED: red_mult = 1.0f; green_mult = 0.0f; blue_mult = 0.0f; break;
+        case ColorFilter::GREEN: red_mult = 0.0f; green_mult = 1.0f; blue_mult = 0.0f; break;
+        case ColorFilter::BLUE: red_mult = 0.0f; green_mult = 0.0f; blue_mult = 1.0f; break;
+        default: break;
+    }
 
     switch (get_pixel_format_color_order(source_.get_format())) {
         case ColorOrder::RGB: {
@@ -740,7 +747,8 @@ bool ImagePipelineNodeExtract::get_next_row_data(std::uint8_t* out_data)
             set_raw_pixel_to_row(out_data, i + x_src_width, RawPixel{}, format);
         }
     } else {
-        std::size_t bpp = get_pixel_format_depth(format) / 8;
+        // bytes per pixel, all channels (depth is per channel)
+        std::size_t bpp = get_pixel_format_depth(format) * get_pixel_channels(format) / 8;
         if (x_src_width > 0) {
             std::memcpy(out_data, cached_line_.data() + offset_x_ * bpp,
                         x_src_width * bpp);

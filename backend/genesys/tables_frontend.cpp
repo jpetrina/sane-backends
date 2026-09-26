@@ -560,6 +560,29 @@ void genesys_init_frontend_tables()
     };
     fe.reg2 = {0x00, 0x00, 0x00};
     s_frontends->push_back(fe);
+    fe = Genesys_Frontend();
+    fe.id = AdcId::PLUSTEK_OPTICFILM_8200I_SE;
+    // Boot values (pyopticfilm FRONTEND_REGS); offsets 0x02-0x04 and gains
+    // 0x05-0x07 are set by gl128.cpp before every image pass.
+    {
+        GenesysFrontendLayout gl128_fe_layout;
+        gl128_fe_layout.type = FrontendType::ANALOG_DEVICES;
+        gl128_fe_layout.offset_addr = { 0x02, 0x03, 0x04 };
+        gl128_fe_layout.gain_addr = { 0x05, 0x06, 0x07 };
+        fe.layout = gl128_fe_layout;
+    }
+    fe.regs = {
+        { 0x00, 0x00f8 },
+        { 0x01, 0x0080 },
+        { 0x02, 0x0000 },
+        { 0x03, 0x0000 },
+        { 0x04, 0x0000 },
+        { 0x05, 0x0000 },
+        { 0x06, 0x0000 },
+        { 0x07, 0x0000 },
+    };
+    fe.reg2 = {0x00, 0x00, 0x00};
+    s_frontends->push_back(fe);
 
 
     fe = Genesys_Frontend();
