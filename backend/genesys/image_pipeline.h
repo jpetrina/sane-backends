@@ -485,6 +485,149 @@ private:
     std::vector<std::uint8_t> cached_line_;
 };
 
+// Averages each group of `factor` rows. Used for GL128, which samples Y at
+// twice the requested resolution.
+class ImagePipelineNodeAverageRows : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeAverageRows(ImagePipelineNode& source, std::size_t factor) :
+        source_(source), factor_{factor}
+    {
+        cached_line_.resize(source_.get_row_bytes());
+        sums_.resize(source_.get_width() * get_pixel_channels(source_.get_format()));
+    }
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return source_.get_height() / factor_; }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override
+    {
+        auto format = get_format();
+        unsigned channels = get_pixel_channels(format);
+        std::size_t width = get_width();
+        std::fill(sums_.begin(), sums_.end(), 0u);
+        bool got_data = true;
+        for (std::size_t i = 0; i < factor_; i++) {
+            if (!source_.get_next_row_data(cached_line_.data())) {
+                got_data = false;
+            }
+            for (std::size_t x = 0; x < width; x++) {
+                for (unsigned c = 0; c < channels; c++) {
+                    sums_[x * channels + c] +=
+                            get_raw_channel_from_row(cached_line_.data(), x, c, format);
+                }
+            }
+        }
+        for (std::size_t x = 0; x < width; x++) {
+            for (unsigned c = 0; c < channels; c++) {
+                auto v = (sums_[x * channels + c] + factor_ / 2) / factor_;
+                set_raw_channel_to_row(out_data, x, c, static_cast<std::uint16_t>(v), format);
+            }
+        }
+        return got_data;
+    }
+
+private:
+    ImagePipelineNode& source_;
+    std::size_t factor_ = 1;
+    std::vector<std::uint8_t> cached_line_;
+    std::vector<std::uint32_t> sums_;
+};
+
+// Averages factor x factor pixel blocks; trailing rows and columns that do
+// not fill a block are dropped. Used for GL128 below 600 dpi.
+class ImagePipelineNodeBlockAverage : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeBlockAverage(ImagePipelineNode& source, std::size_t factor) :
+        source_(source), factor_{factor}
+    {
+        cached_line_.resize(source_.get_row_bytes());
+        sums_.resize(get_width() * get_pixel_channels(source_.get_format()));
+    }
+
+    std::size_t get_width() const override { return source_.get_width() / factor_; }
+    std::size_t get_height() const override { return source_.get_height() / factor_; }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override
+    {
+        auto format = get_format();
+        unsigned channels = get_pixel_channels(format);
+        std::size_t width = get_width();
+        std::fill(sums_.begin(), sums_.end(), 0u);
+        bool got_data = true;
+        for (std::size_t i = 0; i < factor_; i++) {
+            if (!source_.get_next_row_data(cached_line_.data())) {
+                got_data = false;
+            }
+            for (std::size_t x = 0; x < width * factor_; x++) {
+                for (unsigned c = 0; c < channels; c++) {
+                    sums_[(x / factor_) * channels + c] +=
+                            get_raw_channel_from_row(cached_line_.data(), x, c, format);
+                }
+            }
+        }
+        const std::size_t count = factor_ * factor_;
+        for (std::size_t x = 0; x < width; x++) {
+            for (unsigned c = 0; c < channels; c++) {
+                auto v = (sums_[x * channels + c] + count / 2) / count;
+                set_raw_channel_to_row(out_data, x, c, static_cast<std::uint16_t>(v), format);
+            }
+        }
+        return got_data;
+    }
+
+private:
+    ImagePipelineNode& source_;
+    std::size_t factor_ = 1;
+
+    std::vector<std::uint8_t> cached_line_;
+    std::vector<std::uint32_t> sums_;
+};
+
+// Mirrors each row in X. Used for GL128, whose lines are mirrored relative
+// to the film.
+class ImagePipelineNodeMirrorX : public ImagePipelineNode
+{
+public:
+    explicit ImagePipelineNodeMirrorX(ImagePipelineNode& source) :
+        source_(source)
+    {
+        cached_line_.resize(source_.get_row_bytes());
+    }
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return source_.get_height(); }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override
+    {
+        bool got_data = source_.get_next_row_data(cached_line_.data());
+        auto format = get_format();
+        unsigned channels = get_pixel_channels(format);
+        std::size_t width = get_width();
+        for (std::size_t x = 0; x < width; x++) {
+            for (unsigned c = 0; c < channels; c++) {
+                set_raw_channel_to_row(out_data, width - 1 - x, c,
+                        get_raw_channel_from_row(cached_line_.data(), x, c, format), format);
+            }
+        }
+        return got_data;
+    }
+
+private:
+    ImagePipelineNode& source_;
+    std::vector<std::uint8_t> cached_line_;
+};
+
 // A pipeline node that mimics the calibration behavior on Genesys chips
 class ImagePipelineNodeCalibrate : public ImagePipelineNode
 {

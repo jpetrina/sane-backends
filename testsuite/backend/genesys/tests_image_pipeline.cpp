@@ -1006,6 +1006,90 @@ void test_node_merge_color_to_gray_filter()
     ASSERT_EQ(out_data, expected_data);
 }
 
+void test_node_average_rows()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = {
+        0x10, 0x20, 0x31, 0x40,
+        0x12, 0x22, 0x32, 0x42,
+        0x50, 0x60, 0x70, 0x80,
+        0x52, 0x63, 0x70, 0x82,
+        0xff, 0xff, 0xff, 0xff, // incomplete group, dropped
+    };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(4, 5, PixelFormat::I8, std::move(in_data));
+    stack.push_node<ImagePipelineNodeAverageRows>(2);
+
+    ASSERT_EQ(stack.get_output_width(), 4u);
+    ASSERT_EQ(stack.get_output_height(), 2u);
+
+    auto out_data = stack.get_all_data();
+
+    Data expected_data = {
+        0x11, 0x21, 0x32, 0x41,
+        0x51, 0x62, 0x70, 0x81,
+    };
+
+    ASSERT_EQ(out_data, expected_data);
+}
+
+void test_node_block_average()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = {
+        0x10, 0x12, 0x40, 0x42, 0xff,
+        0x14, 0x16, 0x44, 0x46, 0xff,
+        0x80, 0x80, 0x00, 0x04, 0xff,
+        0x80, 0x80, 0x08, 0x0c, 0xff,
+    };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(5, 4, PixelFormat::I8, std::move(in_data));
+    stack.push_node<ImagePipelineNodeBlockAverage>(2);
+
+    ASSERT_EQ(stack.get_output_width(), 2u);
+    ASSERT_EQ(stack.get_output_height(), 2u);
+
+    auto out_data = stack.get_all_data();
+
+    Data expected_data = {
+        0x13, 0x43,
+        0x80, 0x06,
+    };
+
+    ASSERT_EQ(out_data, expected_data);
+}
+
+void test_node_mirror_x()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = {
+        0x10, 0x20, 0x30, 0x11, 0x21, 0x31, 0x12, 0x22, 0x32,
+        0x13, 0x23, 0x33, 0x14, 0x24, 0x34, 0x15, 0x25, 0x35,
+    };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(3, 2, PixelFormat::RGB888,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeMirrorX>();
+
+    ASSERT_EQ(stack.get_output_width(), 3u);
+    ASSERT_EQ(stack.get_output_height(), 2u);
+
+    auto out_data = stack.get_all_data();
+
+    Data expected_data = {
+        0x12, 0x22, 0x32, 0x11, 0x21, 0x31, 0x10, 0x20, 0x30,
+        0x15, 0x25, 0x35, 0x14, 0x24, 0x34, 0x13, 0x23, 0x33,
+    };
+
+    ASSERT_EQ(out_data, expected_data);
+}
+
 void test_image_pipeline()
 {
     test_image_buffer_exact_reads();
@@ -1028,6 +1112,9 @@ void test_image_pipeline()
     test_node_split_mono_lines();
     test_node_component_shift_lines();
     test_node_extract_rgb888();
+    test_node_average_rows();
+    test_node_block_average();
+    test_node_mirror_x();
     test_node_pixel_shift_columns_no_switch();
     test_node_pixel_shift_columns_group_switch_pixel_multiple();
     test_node_pixel_shift_columns_group_switch_pixel_not_multiple();
