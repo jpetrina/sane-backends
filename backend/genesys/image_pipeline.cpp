@@ -740,7 +740,8 @@ bool ImagePipelineNodeExtract::get_next_row_data(std::uint8_t* out_data)
             set_raw_pixel_to_row(out_data, i + x_src_width, RawPixel{}, format);
         }
     } else {
-        std::size_t bpp = get_pixel_format_depth(format) / 8;
+        // bytes per pixel, all channels (depth is per channel)
+        std::size_t bpp = get_pixel_format_depth(format) * get_pixel_channels(format) / 8;
         if (x_src_width > 0) {
             std::memcpy(out_data, cached_line_.data() + offset_x_ * bpp,
                         x_src_width * bpp);

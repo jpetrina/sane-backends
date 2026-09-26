@@ -952,6 +952,35 @@ void test_node_calibrate_16bit()
     ASSERT_EQ(out_data, expected_data);
 }
 
+void test_node_extract_rgb888()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = {
+        0x10, 0x20, 0x30, 0x11, 0x21, 0x31, 0x12, 0x22, 0x32, 0x13, 0x23, 0x33,
+        0x14, 0x24, 0x34, 0x15, 0x25, 0x35, 0x16, 0x26, 0x36, 0x17, 0x27, 0x37,
+    };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(4, 2, PixelFormat::RGB888,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeExtract>(1, 0, 2, 2);
+
+    ASSERT_EQ(stack.get_output_width(), 2u);
+    ASSERT_EQ(stack.get_output_height(), 2u);
+    ASSERT_EQ(stack.get_output_row_bytes(), 6u);
+    ASSERT_EQ(stack.get_output_format(), PixelFormat::RGB888);
+
+    auto out_data = stack.get_all_data();
+
+    Data expected_data = {
+        0x11, 0x21, 0x31, 0x12, 0x22, 0x32,
+        0x15, 0x25, 0x35, 0x16, 0x26, 0x36,
+    };
+
+    ASSERT_EQ(out_data, expected_data);
+}
+
 void test_image_pipeline()
 {
     test_image_buffer_exact_reads();
@@ -972,6 +1001,7 @@ void test_image_pipeline()
     test_node_merge_color_to_gray();
     test_node_split_mono_lines();
     test_node_component_shift_lines();
+    test_node_extract_rgb888();
     test_node_pixel_shift_columns_no_switch();
     test_node_pixel_shift_columns_group_switch_pixel_multiple();
     test_node_pixel_shift_columns_group_switch_pixel_not_multiple();
