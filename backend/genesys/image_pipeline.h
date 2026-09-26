@@ -21,6 +21,7 @@
 #ifndef BACKEND_GENESYS_IMAGE_PIPELINE_H
 #define BACKEND_GENESYS_IMAGE_PIPELINE_H
 
+#include "enums.h"
 #include "image.h"
 #include "image_pixel.h"
 #include "image_buffer.h"
@@ -326,7 +327,10 @@ private:
 class ImagePipelineNodeMergeColorToGray : public ImagePipelineNode
 {
 public:
-    ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source);
+    // ColorFilter::NONE mixes the channels to luminance; RED/GREEN/BLUE keeps
+    // only that channel (gray scans on scanners without hardware gray).
+    ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source,
+                                      ColorFilter filter = ColorFilter::NONE);
 
     std::size_t get_width() const override { return source_.get_width(); }
     std::size_t get_height() const override { return source_.get_height(); }

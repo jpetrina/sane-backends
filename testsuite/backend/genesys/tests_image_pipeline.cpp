@@ -981,6 +981,31 @@ void test_node_extract_rgb888()
     ASSERT_EQ(out_data, expected_data);
 }
 
+void test_node_merge_color_to_gray_filter()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    Data in_data = {
+        0x10, 0x20, 0x30, 0x11, 0x21, 0x31,
+        0x12, 0x22, 0x32, 0x13, 0x23, 0x33,
+    };
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(2, 2, PixelFormat::RGB888,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeMergeColorToGray>(ColorFilter::GREEN);
+
+    ASSERT_EQ(stack.get_output_width(), 2u);
+    ASSERT_EQ(stack.get_output_height(), 2u);
+    ASSERT_EQ(stack.get_output_format(), PixelFormat::I8);
+
+    auto out_data = stack.get_all_data();
+
+    Data expected_data = { 0x20, 0x21, 0x22, 0x23 };
+
+    ASSERT_EQ(out_data, expected_data);
+}
+
 void test_image_pipeline()
 {
     test_image_buffer_exact_reads();
@@ -999,6 +1024,7 @@ void test_image_pipeline()
     test_node_invert_1_bits();
     test_node_merge_mono_lines_to_color();
     test_node_merge_color_to_gray();
+    test_node_merge_color_to_gray_filter();
     test_node_split_mono_lines();
     test_node_component_shift_lines();
     test_node_extract_rgb888();
