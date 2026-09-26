@@ -26,6 +26,7 @@
 int main()
 {
     genesys::test_calibration_parsing();
+    genesys::test_gl128();
     genesys::test_image();
     genesys::test_image_pipeline();
     genesys::test_motor();
