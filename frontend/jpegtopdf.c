@@ -131,6 +131,7 @@ typedef struct sane_pdf_page {
 	SANE_Int		h_72;			/* height (72dpi) */
 	SANE_Int64		offset_table[SANE_PDF_PAGE_OBJ_NUM];	/* xref table */
 	SANE_Int		stream_len;		/* stream object length */
+	SANE_Int64		stream_start;	/* offset of the image stream data */
 	SANE_Int		status;			/* page object status */
 	struct sane_pdf_page	*prev;	/* previous page data */
 	struct sane_pdf_page	*next;	/* next page data */
@@ -172,7 +173,7 @@ EXIT:
 
 static SANE_Int64 _get_current_offset( FILE *fd )
 {
-	SANE_Int64	offset64 = (SANE_Int64)fseek( fd, 0, SEEK_CUR );
+	SANE_Int64	offset64 = (SANE_Int64)ftello( fd );
 
 	if ( offset64 > SANE_PDF_XREF_MAX ) offset64 = -1;
 
@@ -656,6 +657,12 @@ SANE_Int sane_pdf_start_page(
 		goto EXIT;
 	}
 
+	/* the image data (JPEG) is written by the caller from here on */
+	if ( ( p->stream_start = _get_current_offset( pwork->fd ) ) < 0 ) {
+		fprintf ( stderr, " offset > %lld\n", SANE_PDF_XREF_MAX );
+		goto EXIT;
+	}
+
 	ret = SANE_NO_ERR;
 EXIT:
 	return ret;
@@ -676,6 +683,16 @@ SANE_Int sane_pdf_end_page( void *pw )
 	}
 
 	p = pwork->last;
+
+	/* length of the image data written by the caller since sane_pdf_start_page() */
+	{
+		SANE_Int64 end = _get_current_offset( pwork->fd );
+		if ( end < p->stream_start ) {
+			fprintf ( stderr, " offset > %lld\n", SANE_PDF_XREF_MAX );
+			goto EXIT;
+		}
+		p->stream_len = (SANE_Int)( end - p->stream_start );
+	}
 
 	/* <1> endstream, endobj (XObject) */
 	len = snprintf( (char*)str, sizeof(str), SANE_PDF_END_ST_OBJ );
