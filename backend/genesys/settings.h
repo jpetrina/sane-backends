@@ -64,6 +64,10 @@ struct Genesys_Settings
     // cache entries expiration time
     int expiration_time = 0;
 
+    // GL126 (OpticFilm 135i): the frame of the film strip to scan (1-6);
+    // the transport is positioned to it by an absolute feed from home
+    unsigned frame = 1;
+
     unsigned get_channels() const
     {
         if (scan_mode == ScanColorMode::COLOR_SINGLE_PASS)
@@ -239,6 +243,11 @@ struct ScanSession {
     // the number of staggered lines (i.e. lines that overlap during scanning due to line being
     // thinner than the CCD element). Computed according to stagger_y.
     unsigned num_staggered_lines = 0;
+
+    // GL126 (OpticFilm 135i) dual-light stream: 0 keep the even (IR) lines,
+    // 1 keep the odd (visible) lines, 2 keep every line (the plain profile)
+    // (gl126.cpp).
+    unsigned gl126_keep_parity = 2;
 
     // the number of lines that color channels shift due to different physical positions of
     // different color channels.

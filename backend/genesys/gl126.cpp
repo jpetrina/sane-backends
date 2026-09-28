@@ -1,0 +1,2731 @@
+/* sane - Scanner Access Now Easy.
+
+   Copyright (C) 2026 Christian Gillinger
+
+   This file is part of the SANE package.
+
+   This program is free software; you can redistribute it and/or
+   modify it under the terms of the GNU General Public License as
+   published by the Free Software Foundation; either version 2 of the
+   License, or (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful, but
+   WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+#define DEBUG_DECLARE_ONLY
+
+#include "gl126.h"
+#include "gl126_registers.h"
+#include "gl126_tables.h"
+#include "gl126_ops.h"
+#include "gl126_lock.h"
+#include "test_settings.h"
+#include "image_pipeline.h"
+
+#include <algorithm>
+#include <cerrno>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <array>
+#include <chrono>
+#include <functional>
+#include <map>
+#include <thread>
+#include <string>
+#include <vector>
+
+namespace genesys {
+namespace gl126 {
+
+/* ---------------------------------------------------------------- helpers */
+
+namespace {
+
+/** Refuse to touch a scanner whose mechanical state we cannot name.
+
+    This is the C++ side of the driver's own safety model and must stay
+    equivalent to it: reg 0x01 is read first, and unless it reads 0x22
+    (idle, homed) or 0x00 (cold, never homed) the call fails having
+    written nothing. There is exactly one unit in existence and no
+    automatic recovery is attempted: a refusal means the operator
+    power-cycles, not that the backend retries or homes to "fix" the
+    state.
+
+    Called before the first write of any hook that writes. Returns the
+    value read so the caller can tell the cold state (0x00) from the
+    idle-homed one (0x22). */
+std::uint8_t check_start_state(Genesys_Device* dev)
+{
+    std::uint8_t val = dev->interface->read_register(REG_0x01);
+    if (val != 0x22 && val != 0x00) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: refusing to write from an unknown start state "
+                            "(reg 0x01 = 0x%02x, expected 0x22 idle-homed or 0x00 "
+                            "cold). No registers were written. Power-cycle the "
+                            "scanner; no recovery is attempted.", val);
+    }
+    return val;
+}
+
+/** Write (reg, val) pairs the way the vendor and the driver do: as
+    0x40/0x04 wValue 0x83 register batches of up to 32 pairs (64 B) per
+    control transfer, in order, duplicates kept, matching the driver's
+    own write_regs(). Genesys_Register_Set cannot carry this: it
+    de-duplicates by address, and the AFE sequence below repeats
+    0x51/0x5d/0x5e, and one control transfer per register is a wire
+    pattern the unit has never been driven with, so the batch goes to
+    the USB device directly. */
+void write_pairs(Genesys_Device* dev, const RegPair* regs, std::size_t count)
+{
+    constexpr std::size_t PAIRS_PER_TRANSFER = 32;
+    std::uint8_t buf[PAIRS_PER_TRANSFER * 2];
+
+    for (std::size_t i = 0; i < count; i += PAIRS_PER_TRANSFER) {
+        std::size_t n = std::min(PAIRS_PER_TRANSFER, count - i);
+        for (std::size_t j = 0; j < n; j++) {
+            buf[2 * j] = regs[i + j].reg;
+            buf[2 * j + 1] = regs[i + j].val;
+        }
+        dev->interface->get_usb_device().control_msg(REQUEST_TYPE_OUT, REQUEST_BUFFER,
+                                                     VALUE_SET_REGISTER, INDEX,
+                                                     static_cast<int>(n * 2), buf);
+    }
+}
+
+/** Write one generated register table, in capture order. */
+void write_table(Genesys_Device* dev, const RegPair* regs, std::size_t count)
+{
+    write_pairs(dev, regs, count);
+}
+
+/** Program the AFE base values. AFE_BASE holds (afe register, value)
+    pairs, not chip registers: each one reaches the front end through the
+    chip's indirection regs (0x51 = AFE address, 0x5d = high byte (0),
+    0x5e = low byte), one three-pair batch per value, exactly as the
+    driver's own initialize() writes them. Writing the table with
+    write_table() would instead overwrite chip regs 0x00-0x07 (0x01 among
+    them) with AFE values. */
+void write_afe_base(Genesys_Device* dev)
+{
+    for (std::size_t i = 0; i < AFE_BASE_COUNT; i++) {
+        const RegPair triple[3] = {
+            { 0x51, AFE_BASE[i].reg },
+            { 0x5d, 0x00 },
+            { 0x5e, AFE_BASE[i].val },
+        };
+        write_pairs(dev, triple, 3);
+    }
+}
+
+/** The profile for a scan: resolution plus whether the IR channel is
+    captured. Non-3600 resolutions exist only as dual-light captures. */
+const Profile* find_profile(unsigned dpi, bool ir)
+{
+    const char* want = nullptr;
+    if (dpi == 3600) {
+        want = ir ? "ir3600" : "plain3600";
+    } else if (dpi == 600) {
+        want = "dpi600";
+    } else if (dpi == 1200) {
+        want = "dpi1200";
+    } else if (dpi == 2400) {
+        want = "dpi2400";
+    } else if (dpi == 7200) {
+        want = "dpi7200";
+    }
+    if (want == nullptr) {
+        return nullptr;
+    }
+    for (std::size_t i = 0; i < PROFILE_COUNT; i++) {
+        if (std::string(PROFILES[i].name) == want) {
+            return &PROFILES[i];
+        }
+    }
+    return nullptr;
+}
+
+/** The op-program runner's view of the USB device (gl126_ops.h). Three
+    forwards and a clock; nothing is reinterpreted on the way through, so
+    the runner emits exactly the captured control/bulk transfers. */
+class UsbWire : public Wire
+{
+public:
+    explicit UsbWire(Genesys_Device* dev)
+        : usb_(dev->interface->get_usb_device()), iface_(dev->interface.get()) {}
+
+    void control_write(std::uint8_t request, std::uint16_t value, std::uint16_t index,
+                       const std::uint8_t* data, std::size_t len) override
+    {
+        std::vector<std::uint8_t> buf(data, data + len);
+        usb_.control_msg(REQUEST_TYPE_OUT, request, value, index, static_cast<int>(len),
+                         buf.data());
+    }
+
+    void control_read(std::uint8_t request, std::uint16_t value, std::uint16_t index,
+                      std::uint8_t* data, std::size_t len) override
+    {
+        usb_.control_msg(REQUEST_TYPE_IN, request, value, index, static_cast<int>(len), data);
+    }
+
+    std::size_t bulk_read(std::uint8_t* data, std::size_t len) override
+    {
+        std::size_t n = len;
+        usb_.bulk_read(data, &n);
+        return n;
+    }
+
+    std::size_t bulk_write(const std::uint8_t* data, std::size_t len) override
+    {
+        std::size_t n = len;
+        usb_.bulk_write(data, &n);
+        return n;
+    }
+
+    /* Through the scanner interface, not std::this_thread: in this
+       backend a wait is the interface's business (ScannerInterfaceUsb
+       skips it in replay mode, the test interface skips it always), and
+       these are the only waits GL126 has, the poll intervals, and the
+       magazine flow's replayed pacing. Sleeping behind the interface's
+       back made an offline run of the magazine programs take its real
+       wall-clock budget. */
+    void sleep_ms(unsigned ms) override
+    {
+        iface_->sleep_us(ms * 1000);
+    }
+
+    unsigned now_ms() override
+    {
+        auto t = std::chrono::steady_clock::now().time_since_epoch();
+        return static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(t).count());
+    }
+
+private:
+    IUsbDevice& usb_;
+    ScannerInterface* iface_;
+};
+
+const OpProgram& find_program(const Profile& profile, const char* name)
+{
+    for (std::size_t i = 0; i < profile.program_count; i++) {
+        if (std::string(profile.programs[i].name) == name) {
+            return profile.programs[i];
+        }
+    }
+    throw SaneException(SANE_STATUS_INVAL, "gl126: profile '%s' has no op program '%s'",
+                        profile.name, name);
+}
+
+/** Run one captured phase as its op program: the captured transfers in
+    the captured order, the one real wait (data-ready) as an explicit
+    poll with a timeout, and every failure ending the hook with zero
+    further writes and no recovery. */
+void run_phase_program(Genesys_Device* dev, const Profile& profile, const char* name,
+                       RunResult& out,
+                       const std::map<std::string, std::uint8_t>* values = nullptr,
+                       const std::map<std::string, std::vector<std::uint8_t>>* bulk_values = nullptr,
+                       const RunPolicy* policy = nullptr)
+{
+    DBG_HELPER_ARGS(dbg, "phase %s", name);
+    const OpProgram& prog = find_program(profile, name);
+    UsbWire wire(dev);
+    try {
+        run_program(wire, prog, out, policy ? *policy : RunPolicy(), values, bulk_values);
+    } catch (const OpsError& e) {
+        SANE_Status status = SANE_STATUS_IO_ERROR;
+        const char* what = "I/O failure";
+        switch (e.failure) {
+            case OpsFailure::BadAck: what = "register write not acknowledged"; break;
+            case OpsFailure::PollTimeout:
+                status = SANE_STATUS_DEVICE_BUSY;
+                what = "data-ready never set";
+                break;
+            case OpsFailure::ShortBulk: what = "short bulk read"; break;
+            case OpsFailure::MissingInjection:
+                status = SANE_STATUS_INVAL;
+                what = "computed value missing (the captured byte must not be written)";
+                break;
+            case OpsFailure::BadInjection:
+                status = SANE_STATUS_INVAL;
+                what = "computed payload does not fit the captured transfer";
+                break;
+            case OpsFailure::ShortBulkOut: what = "short bulk write"; break;
+        }
+        throw SaneException(status,
+                            "gl126: %s in phase %s at op %zu (%s). Nothing further was "
+                            "written; power-cycle the scanner, no recovery is attempted.",
+                            what, name, e.op_index, e.what());
+    }
+    for (const PollRecord& p : out.polls) {
+        DBG(DBG_info, "gl126: %s op %zu poll: first 0x%02x last 0x%02x, %u polls, %u ms\n",
+            name, p.op_index, p.first, p.last, p.polls, p.elapsed_ms);
+    }
+    for (const ReadRecord& r : out.reads) {
+        if (r.reply_len >= 1 && r.reply[0] != r.captured[0]) {
+            DBG(DBG_info, "gl126: %s op %zu read wValue 0x%04x wIndex 0x%04x: 0x%02x "
+                "(captured 0x%02x)\n", name, r.op_index, r.value, r.index, r.reply[0],
+                r.captured[0]);
+        }
+    }
+}
+
+/** Which calibration step last completed in the current sane_start, per
+    device. Gain calibration runs on the state offset calibration
+    leaves, the post-dark_b state, not the idle-homed one, so it cannot
+    re-check reg 0x01 against 0x22; it checks that offset calibration ran
+    in this sane_start instead, and consumes the mark so a later
+    sane_start cannot reuse it. */
+enum class CalStage { None, OffsetDone, ShadingDone };
+
+/** Per-device scan-pass state (gl126_ops.h, ScanPass): armed by
+    begin_scan(), advanced by read_image_chunk_usb(), consulted by
+    end_scan() for the one question that matters: may PARK run. It also
+    carries the "first chunk" fact (the vendor's first image descriptor
+    has wIndex 8, the later ones 0). */
+std::map<const Genesys_Device*, ScanPass>& scan_pass()
+{
+    static std::map<const Genesys_Device*, ScanPass> passes;
+    return passes;
+}
+
+/* The dual-light image stream keeps one line in two on the host.
+   Height = source height / 2; row k of the output is source row 2k +
+   parity. */
+class ImagePipelineNodeGl126KeepParity : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeGl126KeepParity(ImagePipelineNode& source, unsigned parity) :
+        source_(source), parity_(parity), height_(source.get_height() / 2),
+        skip_(source.get_row_bytes())
+    {
+        DBG_HELPER_ARGS(dbg, "parity=%u height=%zu", parity, height_);
+    }
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return height_; }
+    PixelFormat get_format() const override { return source_.get_format(); }
+    bool eof() const override { return source_.eof(); }
+    bool get_next_row_data(std::uint8_t* out_data) override
+    {
+        bool got = true;
+        if (parity_ == 0) {
+            got &= source_.get_next_row_data(out_data);
+            got &= source_.get_next_row_data(skip_.data());
+        } else {
+            got &= source_.get_next_row_data(skip_.data());
+            got &= source_.get_next_row_data(out_data);
+        }
+        return got;
+    }
+private:
+    ImagePipelineNode& source_;
+    unsigned parity_;
+    std::size_t height_;
+    std::vector<std::uint8_t> skip_;
+};
+std::map<const Genesys_Device*, CalStage>& cal_stage()
+{
+    static std::map<const Genesys_Device*, CalStage> stages;
+    return stages;
+}
+
+/** Concatenate a run's bulk buffers (a phase with several BulkIn ops, like
+    cal_white's three chunks, delivers one measurement). */
+std::vector<std::uint8_t> joined_buffers(const RunResult& r)
+{
+    std::vector<std::uint8_t> out;
+    for (const auto& b : r.buffers) {
+        out.insert(out.end(), b.begin(), b.end());
+    }
+    return out;
+}
+
+void log_dark_means(const char* label, const std::vector<std::uint8_t>& buf)
+{
+    if (buf.size() < 6) {
+        return;
+    }
+    double sum[3] = { 0, 0, 0 };
+    std::size_t n = buf.size() / 6;
+    for (std::size_t i = 0; i < n; i++) {
+        for (unsigned ch = 0; ch < 3; ch++) {
+            std::size_t k = i * 6 + ch * 2;
+            sum[ch] += buf[k] | (buf[k + 1] << 8);
+        }
+    }
+    DBG(DBG_info, "gl126: %s means R %.1f G %.1f B %.1f (%zu px)\n", label,
+        sum[0] / n, sum[1] / n, sum[2] / n, n);
+}
+
+/** Statistics of a packed shading table, for the log (reference ranges
+    seen on hardware: offsets 93-344, gains at 0x4000 for the first
+    upload). */
+void log_shading_table(const char* label, const std::vector<std::uint8_t>& table)
+{
+    if (table.size() < 4) {
+        return;
+    }
+    unsigned off_min = 0xffff, off_max = 0, g_min = 0xffff, g_max = 0;
+    double off_sum = 0, g_sum = 0;
+    std::size_t n = 0;
+    for (std::size_t i = 0; i + 4 <= table.size(); i += 4) {
+        unsigned off = table[i] | (table[i + 1] << 8);
+        unsigned g = table[i + 2] | (table[i + 3] << 8);
+        if (off == 0 && g == 0) {
+            continue;   // block trailer pairs
+        }
+        off_min = std::min(off_min, off); off_max = std::max(off_max, off); off_sum += off;
+        g_min = std::min(g_min, g); g_max = std::max(g_max, g); g_sum += g;
+        n++;
+    }
+    if (n == 0) {
+        return;
+    }
+    DBG(DBG_info, "gl126: %s: %zu pairs, offsets %u..%u (mean %.1f), gains 0x%04x..0x%04x "
+        "(mean %.1f)\n", label, n, off_min, off_max, off_sum / n, g_min, g_max, g_sum / n);
+}
+
+/* The vendor's shading calibration: the dark 128-line measurement with
+   the computed AFE offsets patched in, shading_table() uploaded to
+   scanner RAM, the white 128-line measurement, shading_table2()
+   uploaded. Runs right after the gain checks, on their state; plain
+   3600 dpi only until the dual-light tables are brought up. */
+/* The dual-light profiles' shading, matching the driver's own
+   _scan_dual() step for step. The measurement is shading_lines
+   alternating lines at the full width; the visible (odd) lines make
+   table A (address 0x10014000, applied by the scanner to the
+   odd/visible scan lines), the IR (even) lines table B (0x10034000, the
+   even/IR lines), the empirically corrected assignment. Table 1 is the
+   dark map (offsets, gain 0x4000); table 2 the white uniformity with
+   the vendor's per-address targets and the dual formula (gain from the
+   white mean alone). */
+void run_shading_calibration_dual(Genesys_Device* dev, const Profile& profile)
+{
+    DBG_HELPER(dbg);
+    const unsigned lines = profile.shading_lines;
+    const unsigned width = profile.image_width;
+    const std::size_t meas_len = std::size_t(lines) * width * 6;
+    if (lines == 0 || lines % 2 != 0) {
+        throw SaneException(SANE_STATUS_INVAL, "gl126: profile %s has no dual shading shape",
+                            profile.name);
+    }
+
+    std::map<std::string, std::uint8_t> values;
+    static const char* const ch[3] = { "r", "g", "b" };
+    for (unsigned c = 0; c < 3; c++) {
+        std::uint16_t code = dev->frontend.regs.get_value(static_cast<std::uint16_t>(0x05 + c));
+        values[std::string("offset_") + ch[c] + "_hi"] = static_cast<std::uint8_t>(code >> 8);
+        values[std::string("offset_") + ch[c] + "_lo"] = static_cast<std::uint8_t>(code & 0xff);
+    }
+    RunResult dark;
+    run_phase_program(dev, profile, "cal_shading_measure", dark, &values);
+    std::vector<std::uint8_t> dark_buf = joined_buffers(dark);
+    if (dark_buf.size() != meas_len) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: shading dark measurement is %zu bytes, expected %zu "
+                            "(%u lines x %u px). Nothing further was written.",
+                            dark_buf.size(), meas_len, lines, width);
+    }
+    std::vector<std::uint8_t> dark_ir = alternate_lines(dark_buf.data(), dark_buf.size(), lines, width, 0);
+    std::vector<std::uint8_t> dark_vis = alternate_lines(dark_buf.data(), dark_buf.size(), lines, width, 1);
+
+    std::map<std::string, std::vector<std::uint8_t>> bulk;
+    bulk["shading_table_a"] = shading_table(dark_vis.data(), dark_vis.size(), lines / 2, width);
+    bulk["shading_table_b"] = shading_table(dark_ir.data(), dark_ir.size(), lines / 2, width);
+    log_shading_table("shading table 1A (dark map, visible lines)", bulk["shading_table_a"]);
+    log_shading_table("shading table 1B (dark map, IR lines)", bulk["shading_table_b"]);
+    RunResult upload;
+    run_phase_program(dev, profile, "cal_shading_upload", upload, nullptr, &bulk);
+
+    RunResult white;
+    run_phase_program(dev, profile, "cal_shading_verify", white);
+    std::vector<std::uint8_t> white_buf = joined_buffers(white);
+    if (white_buf.size() != meas_len) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: shading white measurement is %zu bytes, expected %zu. "
+                            "Nothing further was written.", white_buf.size(), meas_len);
+    }
+    std::vector<std::uint8_t> white_ir = alternate_lines(white_buf.data(), white_buf.size(), lines, width, 0);
+    std::vector<std::uint8_t> white_vis = alternate_lines(white_buf.data(), white_buf.size(), lines, width, 1);
+    bulk.clear();
+    bulk["shading_table2_a"] = shading_table2_dual(white_vis.data(), white_vis.size(),
+                                                   dark_vis.data(), dark_vis.size(),
+                                                   lines / 2, width, kShading2TargetA);
+    bulk["shading_table2_b"] = shading_table2_dual(white_ir.data(), white_ir.size(),
+                                                   dark_ir.data(), dark_ir.size(),
+                                                   lines / 2, width, kShading2TargetB);
+    log_shading_table("shading table 2A (white uniformity, visible lines)", bulk["shading_table2_a"]);
+    log_shading_table("shading table 2B (white uniformity, IR lines)", bulk["shading_table2_b"]);
+    RunResult upload2;
+    run_phase_program(dev, profile, "cal_shading_verify_upload", upload2, nullptr, &bulk);
+    log_dark_means("shading dark measurement (visible lines)", dark_vis);
+    log_dark_means("shading dark measurement (IR lines)", dark_ir);
+    log_dark_means("shading white measurement (visible lines)", white_vis);
+    log_dark_means("shading white measurement (IR lines)", white_ir);
+    cal_stage()[dev] = CalStage::ShadingDone;
+}
+
+void run_shading_calibration(Genesys_Device* dev, const Profile& profile)
+{
+    DBG_HELPER(dbg);
+    if (profile.lines_per_chunk != 0) {
+        run_shading_calibration_dual(dev, profile);
+        return;
+    }
+    const std::size_t meas_len = std::size_t(kShadingLines) * kShadingWidth * 6;
+
+    // Dark measurement at the computed offsets (from offset calibration).
+    std::map<std::string, std::uint8_t> values;
+    static const char* const ch[3] = { "r", "g", "b" };
+    for (unsigned c = 0; c < 3; c++) {
+        std::uint16_t code = dev->frontend.regs.get_value(static_cast<std::uint16_t>(0x05 + c));
+        values[std::string("offset_") + ch[c] + "_hi"] = static_cast<std::uint8_t>(code >> 8);
+        values[std::string("offset_") + ch[c] + "_lo"] = static_cast<std::uint8_t>(code & 0xff);
+    }
+    RunResult dark;
+    run_phase_program(dev, profile, "cal_shading_measure", dark, &values);
+    std::vector<std::uint8_t> dark_buf = joined_buffers(dark);
+    if (dark_buf.size() != meas_len) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: shading dark measurement is %zu bytes, expected %zu "
+                            "(%u lines x %u px). Nothing further was written.",
+                            dark_buf.size(), meas_len, kShadingLines, kShadingWidth);
+    }
+
+    // The dark map, uploaded.
+    std::vector<std::uint8_t> table1 = shading_table(dark_buf.data(), dark_buf.size(),
+                                                     kShadingLines, kShadingWidth);
+    log_shading_table("shading table 1 (dark map)", table1);
+    std::map<std::string, std::vector<std::uint8_t>> bulk;
+    bulk["shading_table"] = table1;
+    RunResult upload;
+    run_phase_program(dev, profile, "cal_shading_upload", upload, nullptr, &bulk);
+
+    // White measurement with the dark map applied.
+    RunResult white;
+    run_phase_program(dev, profile, "cal_shading_verify", white);
+    std::vector<std::uint8_t> white_buf = joined_buffers(white);
+    if (white_buf.size() != meas_len) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: shading white measurement is %zu bytes, expected %zu. "
+                            "Nothing further was written.", white_buf.size(), meas_len);
+    }
+
+    // The white-uniformity table, uploaded.
+    std::vector<std::uint8_t> table2 = shading_table2(white_buf.data(), white_buf.size(),
+                                                      dark_buf.data(), dark_buf.size(),
+                                                      kShadingLines, kShadingWidth);
+    log_shading_table("shading table 2 (white uniformity)", table2);
+    bulk.clear();
+    bulk["shading_table2"] = table2;
+    RunResult upload2;
+    run_phase_program(dev, profile, "cal_shading_verify_upload", upload2, nullptr, &bulk);
+    log_dark_means("shading dark measurement", dark_buf);
+    log_dark_means("shading white measurement", white_buf);
+    cal_stage()[dev] = CalStage::ShadingDone;
+}
+
+/** Everything about a scan request that can be refused without touching
+    the device: the profile, the frame bound, the travel ceiling, the
+    ledger invariant and the colour mode. Pure computation on the
+    frontend's settings and the frozen geometry, no device, no wire, so a
+    valid request changes nothing and an invalid one throws before the
+    first register read, let alone the first write. Returns the profile
+    the caller needs anyway.
+
+    Two callers, deliberately:
+      * offset_calibration(), the first hook in a sane_start that writes,
+        which is why this validation exists at all;
+      * load_document(), which runs earlier than calibration (the core
+        calls it first) and moves the magazine. Without the same check
+        there, an invalid scan request with a release pending would
+        drive the loader and only then be refused. It is pure
+        computation, so running it twice in one sane_start costs nothing
+        and cannot diverge. */
+const Profile* validate_scan_request(Genesys_Device* dev)
+{
+    bool ir = dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED;
+    const Profile* profile = find_profile(dev->settings.xres, ir);
+    if (profile == nullptr) {
+        throw SaneException(SANE_STATUS_INVAL, "gl126: no captured profile for %u dpi%s. "
+                            "Nothing was written.",
+                            dev->settings.xres, ir ? " with IR" : "");
+    }
+    unsigned frame = dev->settings.frame;
+    if (frame < 1 || frame > kFrameMax) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: frame %u is outside 1-%u (the six-aperture strip "
+                            "holder). Nothing was written.", frame, kFrameMax);
+    }
+    (void) feedl_for_frame(frame, *profile);   // FEEDL + end_hwdpi <= travel ceiling
+    (void) frame_geometry(*profile, frame);    // ledger consistency invariant
+
+    // The visible pass is always the vendor's 3-channel RGB16 capture. Colour,
+    // IR, and host-side gray (HOST_SIDE_GRAY: colour filter NONE, scanned RGB
+    // and reduced on the host) are captures we perform; a single-channel gray
+    // scan with a colour filter (RED/GREEN/BLUE) is not. calculate_scan_session
+    // leaves that request tolerant so option-init parameter queries do not
+    // fail, which makes this the real guard.
+    bool host_side_gray = has_flag(dev->model->flags, ModelFlag::HOST_SIDE_GRAY) &&
+                          dev->settings.get_channels() == 1 &&
+                          dev->settings.color_filter == ColorFilter::NONE;
+    if (!(ir || dev->settings.get_channels() == 3 || host_side_gray)) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the visible pass is always the vendor's 3-channel RGB16 "
+                            "capture; a single-channel gray scan is not supported. Use Color, "
+                            "or Gray with colour filter None (host-side gray). Nothing was "
+                            "written.");
+    }
+    return profile;
+}
+
+/* ------------------------------------------------------ magazine
+
+   The vendor's insert flow needs the operator to take the magazine out
+   and reseat it to the stop in the middle of the sequence, and SANE has
+   no way for a backend to ask for that during sane_start. "Load film"
+   runs the whole flow in one press: a cold unit's bring-up if needed,
+   the vendor device-open table and the jog (which is what ejects a
+   latched cassette), a read-only wait for the operator's reseat, and
+   then the load itself.
+
+   Nothing here is a new motor sequence: the five programs are the
+   driver's own transfers, wire-equal to it. What lives here is the
+   state machine, the preconditions, and the refusals. */
+
+enum class MagazineState { Unknown, Released, Loaded, Ejected, Failed };
+
+const char* magazine_state_name(MagazineState s)
+{
+    switch (s) {
+    case MagazineState::Unknown:  return "unknown";
+    case MagazineState::Released: return "released";
+    case MagazineState::Loaded:   return "loaded";
+    case MagazineState::Ejected:  return "ejected";
+    case MagazineState::Failed:   return "failed";
+    }
+    return "unknown";
+}
+
+/* The possible values of the "magazine" status line. Declared here,
+   ahead of magazine_check_status_impl() below (which needs the
+   Check-status-only ones), rather than next to
+   magazine_state_values()/magazine_state_text() further down: an
+   unnamed namespace's members are ordinary (internally-linked) members
+   of the enclosing gl126:: namespace, so where exactly they sit in the
+   file only matters for the usual C++ "declared before first use" rule.
+
+   Short, and the state word first: KSane's widget renders an
+   unconstrained string option as an editable combo scrolled to the end
+   of its content, so a long sentence would show its tail and not the
+   state. Every string here fits, and the first word is the answer even
+   if the rest is clipped.
+
+   "Scan" no longer loads anything (load_document() is a pure checker
+   now, magazine_check_scan_allowed() below), so every wording says
+   "press Load film [again]": the button is the only thing that loads
+   the magazine now, always. */
+/* Deliberately not wrapped in SANE_I18N, unlike every other user-facing
+   string in this backend (titles, descriptions). These are compared, not
+   just displayed, and that comparison is where a libksane bug bites.
+
+   KSaneWidgets' LabeledCombo (the widget libksane draws for every SANE
+   value-list option) does `setValue(val)` in response to
+   KSaneCore::Option::valueChanged, and that slot matches
+   `itemData(i) == val` against the combo's items, but the items were
+   populated with each value's internal text (this array, as
+   sane_get_option_descriptor's constraint.string_list), while
+   valueChanged carries the translated text (frontend-side sane_i18n
+   lookup) whenever the option's current msgid has a catalog entry. For a
+   string-list option whose values have a translation, internal and
+   translated never match, so the combo never follows a backend-side
+   value change: it keeps showing whatever it last showed.
+
+   Seen on hardware: after a "Load film" press moved the state to
+   Released, a translated status line stayed on its earlier value, so
+   the operator pressed the button a second time, which re-jogged and
+   un-seated an already-released magazine, and the following scan
+   failed at the feed.
+
+   The workaround: no translation, no mismatch. These strings stay
+   English on purpose until libksane compares itemData against the
+   option's internal value instead of the translated one (a libksane
+   fix, not ours). Titles and descriptions are unaffected: those are
+   one-shot labels/tooltips, never matched against a live value, so
+   their SANE_I18N wrapping is harmless and stays. */
+const char* const kMagazineUnknown         = "not loaded -- press Load film";
+const char* const kMagazineReleased        = "press Load film, then take out, push in";
+/* The wording when the last edge wait timed out without ever seeing the
+   sensor clear: the magazine did not come loose, so the operator has
+   (very likely) not touched it yet. */
+const char* const kMagazineReleasedNoClear = "did not come loose? Load film again";
+/* A "released" mark from an earlier process: whether that wait saw a
+   clear is not recoverable across a process boundary (magazine_saw_
+   clear_map() is in-memory only), so this cross-process text is neutral
+   between the two in-process variants above. */
+const char* const kMagazinePending         = "released earlier -- Load film again";
+const char* const kMagazineLoaded          = "loaded -- set Frame, press Scan";
+const char* const kMagazineEjected         = "ejected -- swap strip, then Load film";
+const char* const kMagazineEjectedPending  = "ejected earlier -- press Load film";
+const char* const kMagazineFailed          = "failed -- power-cycle, then Load film";
+/* "Check status" only: never returned by the ordinary state-machine
+   path in magazine_state_text(), only by magazine_check_status_impl()'s
+   one-shot override (magazine_check_override_map()). */
+const char* const kMagazineCold             = "cold -- press Load film";
+const char* const kMagazineNoMagazine       = "no magazine in the slot";
+const char* const kMagazinePresentNotLoaded = "magazine present, not loaded? Load film";
+const char* const kMagazineUnknownHw        = "unknown state -- power-cycle, Load film";
+
+std::map<const Genesys_Device*, MagazineState>& magazine_state_map()
+{
+    static std::map<const Genesys_Device*, MagazineState> states;
+    return states;
+}
+
+MagazineState magazine_state_of(const Genesys_Device* dev)
+{
+    auto it = magazine_state_map().find(dev);
+    return it == magazine_state_map().end() ? MagazineState::Unknown : it->second;
+}
+
+/* Whether the last edge wait that ended in a timeout ever saw the
+   loader sensor read clear. Meaningful only while the in-process state
+   is Released (a "Load film" press timed out); consulted twice: to
+   choose the status line's wording ("did not come loose" vs. the
+   default retry instruction) and, on the next "Load film" press from
+   Released, to decide whether that press must jog again (no clear was
+   ever seen, the magazine may still be latched, the same recipe that
+   releases a magazine still latched after a power cycle) or may skip
+   straight to another wait (a clear was seen, so the jog already did
+   its job; only the reseat is still pending). A cross-process Released
+   mark carries no such memory (the flag is not persisted to disk), so a
+   press that finds Released only via the mark is treated as a fresh,
+   non-cold press, see magazine_load_film_impl(). */
+std::map<const Genesys_Device*, bool>& magazine_saw_clear_map()
+{
+    static std::map<const Genesys_Device*, bool> flags;
+    return flags;
+}
+
+bool magazine_wait_saw_clear(const Genesys_Device* dev)
+{
+    auto it = magazine_saw_clear_map().find(dev);
+    return it != magazine_saw_clear_map().end() && it->second;
+}
+
+void set_magazine_wait_saw_clear(Genesys_Device* dev, bool saw_clear)
+{
+    magazine_saw_clear_map()[dev] = saw_clear;
+}
+
+/* Whether the pending Released state originated from an Ejected-kind
+   press (no jog, OPEN after the edge, the lenient regs 0x3b/0x3c rule)
+   rather than a genuine release (OPEN+JOG already ran, the strict
+   0x00/0x00 rule). Without this, a timeout on an Ejected-origin wait
+   forgot its origin the moment the in-process state became Released: a
+   second press would then use the strict rule and skip "open", exactly
+   wrong for a magazine that was never jogged, and the retry would
+   refuse Failed on the very regs (0x3b/0x3c left by the last scan
+   profile) the Ejected kind is supposed to tolerate. Persisted
+   alongside saw_clear for the in-process retry; the cross-process
+   equivalent is the mark's own kind: a timeout of an Ejected-origin
+   wait writes an "ejected" mark, not a "released" one, so a fresh
+   process's existing Ejected-mark detection already recovers the same
+   fact with no extra state of its own. */
+std::map<const Genesys_Device*, bool>& magazine_needs_open_map()
+{
+    static std::map<const Genesys_Device*, bool> flags;
+    return flags;
+}
+
+bool magazine_wait_needs_open(const Genesys_Device* dev)
+{
+    auto it = magazine_needs_open_map().find(dev);
+    return it != magazine_needs_open_map().end() && it->second;
+}
+
+void set_magazine_wait_needs_open(Genesys_Device* dev, bool needs_open)
+{
+    magazine_needs_open_map()[dev] = needs_open;
+}
+
+/* "Check status" is allowed to read the hardware and update the status
+   line with what it finds, without the state machine or the marks
+   changing except where the table explicitly says so (the cold row).
+   The other rows are pure diagnostic snapshots ("no magazine in the
+   slot", "magazine present, not loaded?", "unknown state") that do not
+   correspond to any MagazineState transition, so they are kept here as
+   a one-shot override of the text magazine_state_text() would otherwise
+   compute from the state machine. Any real transition
+   (set_magazine_state(), below) invalidates it, so a stale hardware
+   snapshot can never survive the next thing that actually happens. */
+std::map<const Genesys_Device*, std::string>& magazine_check_override_map()
+{
+    static std::map<const Genesys_Device*, std::string> overrides;
+    return overrides;
+}
+
+/* Every transition goes through here, so a debug log of a magazine
+   session reads as the state machine rather than as a pile of
+   transfers. */
+void set_magazine_state(Genesys_Device* dev, MagazineState next)
+{
+    MagazineState prev = magazine_state_of(dev);
+    magazine_state_map()[dev] = next;
+    magazine_check_override_map().erase(dev);
+    if (prev != next) {
+        DBG(DBG_info, "gl126: magazine %s -> %s\n",
+            magazine_state_name(prev), magazine_state_name(next));
+    }
+}
+
+/* The SANE device name ("libusb:001:007"): it carries the USB address,
+   which a power cycle changes, so a mark written before one can never be
+   mistaken for a mark written after it. */
+std::string magazine_device_key(const Genesys_Device* dev)
+{
+    return dev->file_name;
+}
+
+/* Write the cross-process magazine mark for `kind`, logging the outcome
+   either way, so a missing mark can always be explained from the log
+   alone. Both call sites (the Released write in
+   magazine_release_impl() and the Ejected write in
+   write_ejected_mark()) go through this one helper. */
+void write_magazine_mark(Genesys_Device* dev, gl126::MagazineMarkKind kind)
+{
+    std::string key = magazine_device_key(dev);
+    if (gl126::magazine_mark_write(kind, key)) {
+        DBG(DBG_info, "gl126: magazine mark written: %s for %s at %s\n",
+            gl126::magazine_mark_kind_name(kind), key.c_str(),
+            gl126::magazine_mark_path().c_str());
+    } else {
+        // Not fatal: a frontend that keeps the device open (digiKam) has
+        // the in-process record. Only a second process (scanimage) needs
+        // the file, and it will simply report "no load is pending".
+        DBG(DBG_warn, "gl126: could not write the magazine mark (%s) at %s, a load from "
+            "a separate process will not know one is pending\n",
+            gl126::magazine_mark_kind_name(kind), gl126::magazine_mark_path().c_str());
+    }
+}
+
+/* Clear the cross-process magazine mark, logging why and what actually
+   happened: a clear with no reason attached is exactly as unaccountable
+   as a write with no log line was, and "cleared" alone does not say
+   whether there was anything to clear (most of these call sites run
+   whether or not a mark is present, e.g. every MagazineFailGuard-armed
+   failure). */
+void clear_magazine_mark(const char* reason)
+{
+    switch (gl126::magazine_mark_clear()) {
+    case gl126::MagazineMarkClearResult::Removed:
+        DBG(DBG_info, "gl126: magazine mark cleared (%s): removed\n", reason);
+        break;
+    case gl126::MagazineMarkClearResult::NonePresent:
+        DBG(DBG_info, "gl126: magazine mark cleared (%s): none was present\n", reason);
+        break;
+    case gl126::MagazineMarkClearResult::Error:
+        DBG(DBG_warn, "gl126: magazine mark clear (%s) failed: %s\n", reason, strerror(errno));
+        break;
+    }
+}
+
+/* The loader sensor and the state class, from one read of reg 0x101:
+   the same register and the same bit (0x08) the vendor's own config
+   names LoaderSensorReg, verified on hardware (0xe0 without a magazine,
+   0xe8 with). It reports presence, not latching: nowhere in this
+   project does it mean the magazine is mechanically locked. */
+struct MagazineSensor {
+    std::uint8_t status;
+    bool present() const { return (status & 0x08) != 0; }
+    bool idle_class() const { return (status & 0xF0) == 0xF0; }
+};
+
+MagazineSensor read_magazine_sensor(Genesys_Device* dev)
+{
+    MagazineSensor s;
+    s.status = dev->interface->read_register(0x101);
+    return s;
+}
+
+/* ------------------------------------------------- the edge wait
+
+   A plain C++ read-only poll loop, not an op program: there is nothing
+   to replay here, only a register to watch. Poll reg 0x101 every
+   100 ms; require the loader sensor clear on 2 consecutive reads, then
+   present on 5 consecutive reads, then a 600 ms settle (the vendor's
+   own insert-to-LOAD delay) before returning Seen. Timeout at 120 s
+   (capped, test mode only, by $OF135I_SANE_POLL_CAP_MS, the same gate
+   magazine_policy() uses, so a shorter wait can never reach real
+   hardware). No register write of any kind occurs in this loop: only
+   read_register, sleep_ms and the one test_checkpoint() per poll a
+   probe can re-seed the mock from. */
+
+constexpr unsigned kEdgePollIntervalMs = 100;
+constexpr unsigned kEdgeClearReadsNeeded = 2;
+constexpr unsigned kEdgePresentReadsNeeded = 5;
+constexpr unsigned kEdgeSettleMs = 600;
+constexpr unsigned kEdgeTimeoutMs = 120000;
+
+enum class EdgeWaitOutcome {
+    Seen,            // clear, then present again: the reseat happened
+    TimeoutNoClear,  // the sensor never read clear, it did not come loose
+    TimeoutSawClear, // it came loose but never read present again in time
+};
+
+/* The wait's own timeout budget, gated exactly like magazine_policy():
+   $OF135I_SANE_POLL_CAP_MS only ever shortens it, and only when the wire
+   is a mock in test mode, never on real hardware, no matter what an
+   environment happens to carry (the same reasoning magazine_policy()
+   documents). This wait has no wire and no run_program() budget of its
+   own, so it is gated here rather than through RunPolicy. */
+unsigned edge_wait_timeout_ms(Genesys_Device* dev)
+{
+    unsigned budget = kEdgeTimeoutMs;
+    if (!dev->interface->is_mock() || !is_testing_mode()) {
+        return budget;
+    }
+    const char* cap = std::getenv("OF135I_SANE_POLL_CAP_MS");
+    if (cap != nullptr && *cap != '\0') {
+        long v = std::strtol(cap, nullptr, 10);
+        if (v > 0 && static_cast<unsigned>(v) < budget) {
+            budget = static_cast<unsigned>(v);
+        }
+    }
+    return budget;
+}
+
+EdgeWaitOutcome wait_for_magazine_edge(Genesys_Device* dev)
+{
+    unsigned budget_ms = edge_wait_timeout_ms(dev);
+    unsigned max_polls = budget_ms / kEdgePollIntervalMs;
+    if (max_polls == 0) {
+        max_polls = 1;
+    }
+
+    enum class Phase { WaitClear, WaitPresent } phase = Phase::WaitClear;
+    unsigned clear_consec = 0;
+    unsigned present_consec = 0;
+    bool saw_clear = false;
+    unsigned polls = 0;
+    std::uint8_t first_val = 0;
+    std::uint8_t last_val = 0;
+
+    DBG(DBG_info, "gl126: magazine edge wait started (budget %u ms)\n", budget_ms);
+
+    while (polls < max_polls) {
+        std::uint8_t status = dev->interface->read_register(0x101);
+        if (polls == 0) {
+            first_val = status;
+        }
+        last_val = status;
+        ++polls;
+        /* Once per poll, so a probe can re-seed reg 0x101 between reads:
+           present -> clear -> present scripts a successful reseat,
+           present-only or clear-only script the two timeout shapes. */
+        dev->interface->test_checkpoint("gl126_magazine_edge_poll");
+
+        bool present = (status & 0x08) != 0;
+        if (phase == Phase::WaitClear) {
+            if (present) {
+                clear_consec = 0;
+            } else {
+                // saw_clear is a debounced fact: it is only true once
+                // clear_consec actually reaches the threshold (the real
+                // phase transition), not on a single clear read. A
+                // one-poll glitch (a bounce, a mis-timed read) must not
+                // be mistaken for "the magazine came loose": present,
+                // clear-once, present again within the 200 ms window
+                // still counts as "never cleared" for the retry decision
+                // and the status wording alike.
+                if (++clear_consec >= kEdgeClearReadsNeeded) {
+                    saw_clear = true;
+                    phase = Phase::WaitPresent;
+                    present_consec = 0;
+                }
+            }
+        } else {
+            if (present) {
+                if (++present_consec >= kEdgePresentReadsNeeded) {
+                    DBG(DBG_info, "gl126: magazine edge seen (%u polls, ~%u ms); "
+                        "settling %u ms\n", polls, polls * kEdgePollIntervalMs, kEdgeSettleMs);
+                    dev->interface->sleep_ms(kEdgeSettleMs);
+                    return EdgeWaitOutcome::Seen;
+                }
+            } else {
+                present_consec = 0;
+            }
+        }
+        if (polls >= max_polls) {
+            break;
+        }
+        dev->interface->sleep_ms(kEdgePollIntervalMs);
+    }
+
+    DBG(DBG_info, "gl126: magazine edge wait timed out (%u polls, ~%u ms, first 0x%02x "
+        "last 0x%02x, saw a clear read: %s)\n", polls, polls * kEdgePollIntervalMs,
+        first_val, last_val, saw_clear ? "yes" : "no");
+    return saw_clear ? EdgeWaitOutcome::TimeoutSawClear : EdgeWaitOutcome::TimeoutNoClear;
+}
+
+/** Once a magazine operation may have written, any way out other than
+    success leaves the transport in a state nobody can name, so the
+    session is failed and a pending load is invalidated, whatever the
+    exception was.
+
+    Not just OpsError: a real USB failure comes out of IUsbDevice as a
+    plain SaneException ("invalid read, scanner unplugged?"), and the
+    register reads that follow a motor sequence throw the same way,
+    neither of which goes through run_magazine_program()'s handler. This
+    guard catches both, so an actual failure can never leave the state
+    Released and the mark on disk, which would otherwise drive the
+    loader again on the next scan.
+
+    `arm()` is called at the point writes may begin, never before: a
+    refusal that reaches no wire (a bad frame number, a magazine that is
+    not in the slot) is not a failure and must not make the session
+    terminal. */
+class MagazineFailGuard {
+public:
+    explicit MagazineFailGuard(Genesys_Device* dev) : dev_(dev) {}
+
+    ~MagazineFailGuard()
+    {
+        if (!armed_ || done_) {
+            return;
+        }
+        // This runs during stack unwinding, where an escaping exception
+        // would terminate the process. Book-keeping and one mark write,
+        // neither is allowed to become the failure.
+        //
+        // A "failed" mark is written here, not cleared, so a second
+        // process (the next `scanimage` invocation) always has a way to
+        // know the transport's state was never established, rather than
+        // trying a scan, or another magazine action, against it. Every
+        // entry point that already refuses on an in-process Failed state
+        // also refuses on a matching `failed` mark from Unknown
+        // (magazine_check_scan_allowed(), magazine_load_film_impl(),
+        // magazine_eject_impl()); only a cold reg 0x01 read clears it (a
+        // power cycle is the one event that actually re-establishes a
+        // known state).
+        try {
+            set_magazine_state(dev_, MagazineState::Failed);
+            write_magazine_mark(dev_, gl126::MagazineMarkKind::Failed);
+        } catch (...) {
+        }
+    }
+
+    MagazineFailGuard(const MagazineFailGuard&) = delete;
+    MagazineFailGuard& operator=(const MagazineFailGuard&) = delete;
+
+    void arm() { armed_ = true; }
+    void succeeded() { done_ = true; }
+
+private:
+    Genesys_Device* dev_;
+    bool armed_ = false;
+    bool done_ = false;
+};
+
+/* Every magazine poll carries its own budget (gl126_tables.h: timeout_ms,
+   from the driver's own per-site timeouts), so these policy values only
+   ever apply to a program that forgot one, which validate_op_program()
+   in the generator refuses to emit. */
+RunPolicy magazine_policy(Genesys_Device* dev)
+{
+    RunPolicy policy;
+    policy.poll_timeout_ms = 30000;
+    policy.masked_timeout_ms = 30000;
+    /* $OF135I_SANE_POLL_CAP_MS caps every poll site's wait, and is read
+       only when the wire is a mock, the backend's test mode, where the
+       device answers nothing and the cold-start program would otherwise
+       spend the driver's real 1.5 s and 30 s budgets at nineteen poll
+       sites (ten best-effort, nine fail-closed motor completions).
+
+       Gated on the interface, not on the environment: a shorter wait is
+       not automatically a safer one. A best-effort poll that gives up
+       early continues to the next op, which on real hardware could mean
+       continuing before a motor move has finished, so an environment
+       variable must not be able to shorten a wait on the real unit, no
+       matter what a plan or a shell profile says. is_mock() is the
+       device's own answer, and is_testing_mode() is a second,
+       independent condition. */
+    if (!dev->interface->is_mock() || !is_testing_mode()) {
+        return policy;
+    }
+    const char* cap = std::getenv("OF135I_SANE_POLL_CAP_MS");
+    if (cap != nullptr && *cap != '\0') {
+        long v = std::strtol(cap, nullptr, 10);
+        if (v > 0) {
+            policy.max_poll_timeout_ms = static_cast<unsigned>(v);
+        }
+    }
+    return policy;
+}
+
+/** Run one magazine op program (gl126_ops.h magazine_program()). Same
+    fail-closed contract as run_phase_program(): the first failure ends
+    the program with nothing further written and no recovery attempted. */
+/** The op index of a program's Nth PollMasked site, or SIZE_MAX. The load
+    hook uses it to tell the engaging feed's completion apart from the
+    traverse's, which need different words for the operator. */
+std::size_t masked_poll_op_index(const OpProgram& prog, unsigned nth)
+{
+    unsigned seen = 0;
+    for (std::size_t i = 0; i < prog.count; ++i) {
+        if (prog.ops[i].kind == OpKind::PollMasked) {
+            if (seen == nth) {
+                return i;
+            }
+            ++seen;
+        }
+    }
+    return static_cast<std::size_t>(-1);
+}
+
+void run_magazine_program(Genesys_Device* dev, const char* name, RunResult& out,
+                          std::size_t* failed_op = nullptr)
+{
+    DBG_HELPER_ARGS(dbg, "magazine %s", name);
+    const OpProgram* prog = magazine_program(name);
+    if (prog == nullptr) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: no magazine program '%s'",
+                            name);
+    }
+    UsbWire wire(dev);
+    try {
+        run_program(wire, *prog, out, magazine_policy(dev), nullptr, nullptr);
+    } catch (const OpsError& e) {
+        /* The session state is the MagazineFailGuard's business (it also
+           covers the exceptions that never reach this handler); here only
+           the message is built. */
+        if (failed_op != nullptr) {
+            *failed_op = e.op_index;
+        }
+        const char* what = "I/O failure";
+        SANE_Status status = SANE_STATUS_IO_ERROR;
+        switch (e.failure) {
+            case OpsFailure::BadAck: what = "register write not acknowledged"; break;
+            case OpsFailure::PollTimeout:
+                status = SANE_STATUS_DEVICE_BUSY;
+                what = "a motor move did not complete";
+                break;
+            case OpsFailure::ShortBulk: what = "short bulk read"; break;
+            case OpsFailure::ShortBulkOut: what = "short bulk write"; break;
+            case OpsFailure::MissingInjection:
+            case OpsFailure::BadInjection:
+                status = SANE_STATUS_INVAL;
+                what = "a generated table is inconsistent";
+                break;
+        }
+        /* States what happened and stops. No "power-cycle, then press Load
+           film": that is a retry instruction, and a failed magazine
+           sequence leaves the transport in a state nobody has named,
+           the next motor command is a decision, not a reflex. */
+        throw SaneException(status,
+                            "gl126: %s in the magazine %s sequence at op %zu (%s). Nothing "
+                            "further was written and no recovery was attempted; the session "
+                            "is blocked. Read the log before anything else is attempted.",
+                            what, name, e.op_index, e.what());
+    }
+    for (const PollRecord& p : out.polls) {
+        DBG(DBG_info, "gl126: magazine %s op %zu poll: first 0x%02x last 0x%02x, "
+            "%u polls, %u ms\n", name, p.op_index, p.first, p.last, p.polls, p.elapsed_ms);
+    }
+}
+
+/** The "Load film" button: the entire flow in one press, release (when
+    anything needs releasing), a read-only wait for the operator's
+    reseat, and the load. load_document() never runs LOAD itself
+    (magazine_check_scan_allowed() below).
+
+      Unknown, cold (reg 0x01 = 0x00)        cold_init -> OPEN -> JOG ->
+                                              wait -> LOAD
+      Unknown, idle                          OPEN -> JOG -> wait -> LOAD
+      Ejected (in-process, or an "ejected"   wait -> OPEN -> LOAD
+      mark for this device)                  (no jog)
+      Released, last wait saw no clear,      JOG again -> wait -> LOAD
+      non-Ejected origin
+      Released, last wait saw a clear,       wait only -> LOAD
+      non-Ejected origin
+      Released, either, Ejected origin        wait -> OPEN -> LOAD
+      (see 6)                                  (no jog, same as Ejected)
+      Loaded                                 refused, read-only
+      Failed (in-process, or a "failed"      refused, read-only
+      mark)
+      A matching "loaded" mark, Unknown      refused, read-only, same as
+      in-process (see 4)                      in-process Loaded
+
+    A timeout ends the call with no LOAD, state Released, an on-disk
+    mark (kind depends on origin, see (6) below), and SANE_STATUS_GOOD:
+    the operator doing nothing (or not finishing) is not itself an
+    error; the status line carries the instruction
+    (magazine_state_text(), which also picks the wording from whether
+    this wait ever saw a clear). The jog itself, OPEN and LOAD are
+    unchanged, byte-identical programs; the only new thing on the wire
+    is the read-only poll loop between them.
+
+    Edge cases handled here:
+    - **(7) A power cycle inside one process.** reg 0x01 is read here,
+      first thing, before the Loaded/Failed in-process refusals: if it
+      reads cold, neither claim survives a power cycle, so state resets
+      to Unknown and any mark is cleared as stale before anything else
+      is decided, otherwise a scanner power-cycled after a Load film
+      press earlier in the same session would keep refusing "already
+      loaded" forever, with no way back in but a fresh sane_open.
+    - **(4) A cross-process "loaded" mark blocks a second Load film**
+      exactly like the in-process Loaded state does: read-only "already
+      loaded" refusal, not a silent second load attempt.
+    - **(5) A "failed" mark blocks Load film too**, the cross-process
+      counterpart of the in-process Failed refusal.
+    - **(6) The Ejected origin is remembered across a timeout.** A
+      timeout that always set state Released and wrote a "released"
+      mark, whatever the press had started from, would let a second
+      press, now reading Released, treat an Ejected-origin retry as an
+      ordinary release: skip OPEN, and check the Released kind's strict
+      0x3b/0x3c == 0x00/0x00 rule instead of the Ejected kind's lenient
+      one. After a real scan (regs left at, say, 0x02/0x00) that retry
+      would refuse Failed for a magazine that was never actually jogged
+      loose in the first place. So the origin is carried across the
+      timeout: an in-process flag (magazine_wait_needs_open()) for the
+      same-process retry, and the mark's own kind for the cross-process
+      one, a timeout of an Ejected-origin wait writes an "ejected" mark,
+      not "released", so a fresh process's existing Ejected-mark
+      detection recovers the same fact with no new state of its own.
+    - **(1) A post-edge presence + class check.** The edge wait only
+      watches bit 0x08 (present/clear); it does not by itself prove the
+      status byte is in the DONE class a completed load leaves it in
+      (0xf8-shaped, seen on hardware). A magazine pulled back out during
+      the 600 ms settle, or a present-but-busy class, must not reach
+      LOAD, checked here as reg 0x101 alongside reg 0x01/0x3b/0x3c, same
+      refusal shape. */
+void magazine_load_film_impl(Genesys_Device* dev)
+{
+    DBG_HELPER(dbg);
+    MagazineState state = magazine_state_of(dev);
+
+    // (7) A claim this process holds (Loaded or Failed) does not
+    // survive a power cycle, and neither does a MARK saying the same
+    // thing from an earlier process (a "loaded" mark plus a cold read
+    // has the identical bug shape: without this, the Unknown-branch mark
+    // lookup further down would still throw "already loaded" against a
+    // scanner that has since been power-cycled). Read first, before
+    // either refusal: a cold read resets state to Unknown and clears any
+    // mark as stale, so the rest of this call proceeds as a fresh press
+    // instead of refusing forever on a claim nothing can still vouch for.
+    std::uint8_t precheck_reg01 = dev->interface->read_register(REG_0x01);
+    if (precheck_reg01 == 0x00) {
+        gl126::MagazineMarkKind stale_kind = gl126::MagazineMarkKind::Released;
+        std::string stale_key;
+        bool had_mark = gl126::magazine_mark_read(&stale_kind, &stale_key) &&
+                        stale_key == magazine_device_key(dev);
+        bool had_state = state != MagazineState::Unknown;
+        if (had_mark || had_state) {
+            DBG(DBG_info, "gl126: reg 0x01 = 0x00 while %s%s%s, a power cycle happened; "
+                "resetting to Unknown\n",
+                had_state ? "this process believed " : "",
+                had_state ? magazine_state_name(state) : "",
+                had_mark ? (had_state ? ", and a mark was pending" : "a mark was pending") : "");
+            if (had_state) {
+                set_magazine_state(dev, MagazineState::Unknown);
+                state = MagazineState::Unknown;
+            }
+            clear_magazine_mark("cold at load-film start");
+            set_magazine_wait_saw_clear(dev, false);
+            set_magazine_wait_needs_open(dev, false);
+        }
+    }
+
+    if (state == MagazineState::Failed) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the magazine sequence failed earlier in this session; "
+                            "the transport state is unknown. Power-cycle the scanner and "
+                            "open the scanner again. Nothing was written.");
+    }
+    if (state == MagazineState::Loaded) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the magazine is already loaded, press Scan or Eject "
+                            "film. Nothing was written.");
+    }
+
+    // A retry of a press that timed out earlier in this process: whether
+    // that wait ever saw the sensor clear decides whether this press must
+    // jog again (the same double-jog recipe that releases a magazine
+    // still latched after a power cycle) or may go straight back to
+    // waiting (the jog already did its job). A cross-process "released"
+    // mark is deliberately not given this treatment: whether the earlier
+    // wait saw a clear lives only in this process's memory
+    // (magazine_saw_clear_map()), and a mark alone cannot carry that
+    // across a process boundary, the safe default is to treat it like
+    // any other non-cold Unknown press (a fresh OPEN + JOG, always
+    // harmless).
+    bool is_released_retry = (state == MagazineState::Released);
+    bool retry_saw_clear = is_released_retry && magazine_wait_saw_clear(dev);
+    // (6) The other half of a retry: did the wait that put us here
+    // originate from an Ejected-kind press? Only meaningful alongside
+    // is_released_retry.
+    bool retry_needs_open = is_released_retry && magazine_wait_needs_open(dev);
+
+    // Ejected: in-process, or a cross-process "ejected" mark for this
+    // device (the eject already disengaged the magazine, so no jog is
+    // needed, only OPEN).
+    // (D, E) The same Unknown-branch mark lookup also catches a
+    // cross-process "loaded" or "failed" mark, refused read-only exactly
+    // like the in-process state of the same name.
+    bool is_ejected_kind = (state == MagazineState::Ejected);
+    if (state == MagazineState::Unknown) {
+        gl126::MagazineMarkKind marked_kind = gl126::MagazineMarkKind::Released;
+        std::string marked_key;
+        if (gl126::magazine_mark_read(&marked_kind, &marked_key) &&
+            marked_key == magazine_device_key(dev))
+        {
+            if (marked_kind == gl126::MagazineMarkKind::Ejected) {
+                is_ejected_kind = true;
+                DBG(DBG_info, "gl126: an 'ejected' mark from an earlier process applies, "
+                    "no jog\n");
+            } else if (marked_kind == gl126::MagazineMarkKind::Loaded) {
+                throw SaneException(SANE_STATUS_INVAL,
+                                    "gl126: the magazine is already loaded (an earlier process "
+                                    "finished a load), press Scan or Eject film. Nothing was "
+                                    "written.");
+            } else if (marked_kind == gl126::MagazineMarkKind::Failed) {
+                throw SaneException(SANE_STATUS_INVAL,
+                                    "gl126: the magazine sequence failed earlier (in an earlier "
+                                    "process); the transport state is unknown. Power-cycle the "
+                                    "scanner. Nothing was written.");
+            }
+            // A plain "released" mark is not given the retry treatment
+            // either (see the comment above), it falls through to the
+            // ordinary fresh-press path below.
+        }
+    }
+
+    // Whether this press behaves like the Ejected kind end to end: no
+    // jog, OPEN after the edge (not before), the lenient regs rule.
+    bool effective_ejected = is_ejected_kind || retry_needs_open;
+
+    std::uint8_t reg01 = check_start_state(dev);   // 0x22 or 0x00, else refuses
+
+    // From here on anything may have been written, so any way out other
+    // than success (including the timeout this function handles itself,
+    // below) fails the session and invalidates a pending load.
+    MagazineFailGuard guard(dev);
+    guard.arm();
+    /* genesys's own injection point (a no-op on the USB interface, a
+       callback in test mode), placed at the first moment the guard is
+       armed. The offline test throws a non-OpsError exception here to
+       prove that any way out after arming fails the session and drops a
+       pending load. */
+    dev->interface->test_checkpoint("gl126_magazine_armed");
+
+    if (reg01 == 0x00) {
+        // A power cycle happened: whatever the Ejected/Released
+        // shortcuts assumed about the transport's position no longer
+        // holds, the same reasoning that refuses a cold next-strip load
+        // applies here just as much, so a cold read always forces the
+        // full path, never the shortcuts. The eventual outcome (Loaded
+        // on success, Released on a timeout) overwrites whatever
+        // Ejected/Released this call started from either way.
+        is_ejected_kind = false;
+        is_released_retry = false;
+        retry_saw_clear = false;
+        retry_needs_open = false;
+        effective_ejected = false;
+        DBG(DBG_info, "gl126: reg 0x01 = 0x00 (cold, never homed), running the "
+            "vendor cold-start sequence first\n");
+        RunResult cold;
+        run_magazine_program(dev, "cold_init", cold);
+        dev->interface->test_checkpoint("gl126_magazine_after_cold_init");
+        std::uint8_t after = dev->interface->read_register(REG_0x01);
+        if (after != 0x22) {
+            throw SaneException(SANE_STATUS_IO_ERROR,
+                                "gl126: the cold-start sequence completed but reg 0x01 reads "
+                                "0x%02x, not the idle-homed 0x22. This is a new observation, "
+                                "please record it. Nothing further was written; power-cycle "
+                                "the scanner.", after);
+        }
+    }
+
+    if (!effective_ejected && !(is_released_retry && retry_saw_clear)) {
+        // The full release: OPEN + JOG, every non-ejected-origin press
+        // that is either fresh or a retry that never saw a clear ("no
+        // per-state branch": writing the open table again is harmless,
+        // and a second jog from Released is harmless too, it is the
+        // vendor's own recovery for a latched magazine). An
+        // Ejected-origin retry never jogs, whether or not its own wait
+        // saw a clear, effective_ejected already covers that.
+        RunResult open_result;
+        run_magazine_program(dev, "open", open_result);
+        /* Reached on hardware, not on the zero-answering test interface
+           (OPEN stops at its first unacknowledged write there). */
+        dev->interface->test_checkpoint("gl126_magazine_after_open");
+
+        RunResult jog_result;
+        run_magazine_program(dev, "jog", jog_result);
+        dev->interface->test_checkpoint("gl126_magazine_after_jog");
+    }
+
+    if (!effective_ejected) {
+        // (2) Written before the wait starts, not after: a process
+        // killed between here and the wait finishing (Ctrl-C on
+        // `scanimage -n --load-film`, SANE's own signal handling is only
+        // installed after option parsing, or "Terminate" on a frozen
+        // digiKam) must leave a mark that makes the next scan refuse,
+        // never one that lets it proceed against a jogged-but-unloaded
+        // magazine. The Ejected path needs no equivalent write here: its
+        // own "ejected" mark already covers it (written by Eject film,
+        // by an earlier timeout of an Ejected-origin wait, or already
+        // present as a cross-process mark), effective_ejected is false
+        // for exactly the presses that lack one.
+        set_magazine_state(dev, MagazineState::Released);
+        set_magazine_wait_saw_clear(dev, false);
+        set_magazine_wait_needs_open(dev, false);
+        write_magazine_mark(dev, gl126::MagazineMarkKind::Released);
+    }
+
+    EdgeWaitOutcome outcome = wait_for_magazine_edge(dev);
+
+    if (outcome != EdgeWaitOutcome::Seen) {
+        // No LOAD. Not a failure: the operator having done nothing (or
+        // not finished) is an ordinary outcome, so the guard is told
+        // this succeeded (there is nothing to invalidate) and the
+        // state/mark are set explicitly, to Released, the same way
+        // whether this press started from Unknown, Ejected or Released
+        // itself (the table above collapses to this one outcome).
+        //
+        // (2) The mark is written before anything else here, not after:
+        // a process killed between the jog and the wait finishing
+        // (Ctrl-C on `scanimage -n --load-film`, SANE's own SIGINT
+        // handler is only installed after option parsing, or "Terminate"
+        // on a frozen digiKam) must leave a mark that makes the next
+        // scan refuse, never one that lets it proceed against a
+        // jogged-but-unloaded magazine. (6) The mark's kind carries the
+        // origin: an Ejected-origin timeout writes "ejected" (so a fresh
+        // process's existing Ejected-mark detection reapplies the
+        // no-jog, lenient-regs treatment), everything else writes
+        // "released".
+        guard.succeeded();
+        set_magazine_state(dev, MagazineState::Released);
+        set_magazine_wait_saw_clear(dev, outcome == EdgeWaitOutcome::TimeoutSawClear);
+        set_magazine_wait_needs_open(dev, effective_ejected);
+        write_magazine_mark(dev, effective_ejected ? gl126::MagazineMarkKind::Ejected
+                                                    : gl126::MagazineMarkKind::Released);
+        DBG(DBG_info, "gl126: magazine load film: no reseat seen in time (%s); the magazine "
+            "is Released, press Load film again.\n",
+            outcome == EdgeWaitOutcome::TimeoutNoClear ? "sensor never cleared"
+                                                        : "cleared, never came back present");
+        return;
+    }
+
+    // The edge was seen: reg 0x101 read present for 5 consecutive polls
+    // after 2 consecutive clear ones, which already proves bit 0x08, but
+    // not the whole status class. (1) A fresh read after the settle
+    // checks the DONE class too (the 0xf8-shaped pattern seen on
+    // hardware after a load): a magazine pulled back out during the
+    // 600 ms settle, or a present-but-busy class, must not reach LOAD.
+    // Combined with reg 0x01 idle-homed and regs 0x3b/0x3c matching what
+    // the jog (0x00/0x00) or the eject (anything but the base-table
+    // 0xff/0xff) leaves, the whole register state the release half left
+    // behind, not just the one bit the wait itself watched. A load is
+    // not attempted from an unverified state; the guard (armed since
+    // before the release) is what turns this throw into Failed + a
+    // "failed" mark.
+    MagazineSensor sensor_after = read_magazine_sensor(dev);
+    std::uint8_t reg01_now = dev->interface->read_register(REG_0x01);
+    std::uint8_t reg3b = dev->interface->read_register(0x3B);
+    std::uint8_t reg3c = dev->interface->read_register(0x3C);
+    bool regs_ok = effective_ejected ? (reg3b != 0xFF && reg3c != 0xFF)
+                                     : (reg3b == 0x00 && reg3c == 0x00);
+    if (reg01_now != 0x22 || !sensor_after.present() || !sensor_after.idle_class() || !regs_ok) {
+        const char* left_by = effective_ejected ? "the eject leaves it in" : "the jog leaves it in";
+        const char* regs_expected = effective_ejected ? "neither 0x3b nor 0x3c reading 0xff"
+                                                       : "0x00/0x00";
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the scanner is not in the state %s (reg 0x01 = 0x%02x, "
+                            "reg 0x101 = 0x%02x, regs 0x3b/0x3c = 0x%02x/0x%02x; expected 0x22, "
+                            "the loader sensor present in the idle class, and %s). A load "
+                            "is not attempted from an unverified state. Power-cycle the "
+                            "scanner, then press Load film. Nothing further was written.",
+                            left_by, reg01_now, sensor_after.status, reg3b, reg3c, regs_expected);
+    }
+
+    if (effective_ejected) {
+        // Nothing has replayed the device-open table since the eject: a
+        // next-strip load, no jog, no reinsert prompt, mirroring the
+        // driver's own --next-strip. Also reached by an Ejected-origin
+        // retry (6): the same reasoning applies whether this is the
+        // first wait after the eject or a second one after a timeout.
+        RunResult open_result;
+        run_magazine_program(dev, "open", open_result);
+        dev->interface->test_checkpoint("gl126_magazine_after_next_strip_open");
+    }
+
+    RunResult load_result;
+    std::size_t failed_op = static_cast<std::size_t>(-1);
+    try {
+        run_magazine_program(dev, "load", load_result, &failed_op);
+    } catch (const SaneException& e) {
+        // Name the step that did not complete, that much is known, and
+        // it is the diagnosis the log needs. Say nothing about the
+        // cause: a timeout at this op has more than one possible cause,
+        // including ones where something is actually stuck, so a
+        // reassurance ("nothing is stuck, try again") would be
+        // unverified, and a retry prompt would invite another motor
+        // command on a transport whose state is unknown.
+        //
+        // The underlying exception already carries the evidence, the op
+        // index and the first and last values actually polled, so the
+        // signature can be read from the log rather than asserted here.
+        const OpProgram* prog = magazine_program("load");
+        const char* step = "";
+        if (prog != nullptr) {
+            if (failed_op == masked_poll_op_index(*prog, 0)) {
+                step = " (the engaging feed's completion)";
+            } else if (failed_op == masked_poll_op_index(*prog, 1)) {
+                step = " (the prescan traverse's completion)";
+            }
+        }
+        /* The inner message already carries the op index, the values
+           actually polled, and "read the log before anything else is
+           attempted"; this one adds the step in human terms and the
+           consequence, and does not repeat it. */
+        throw SaneException(e.status(),
+                            "gl126: the magazine load did not reach the state it must "
+                            "reach%s, so the transport state is now unknown. %s",
+                            step, e.what());
+    }
+
+    dev->interface->test_checkpoint("gl126_magazine_after_load");
+
+    // The traverse's own completion was checked by the program; read the
+    // status word once more and require it still, exactly as the driver's
+    // load_magazine() does before it calls the magazine loaded.
+    MagazineSensor after = read_magazine_sensor(dev);
+    if ((after.status & kMagazineStatusMask) != (0xDC & kMagazineStatusMask)) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: the magazine load did not complete: reg 0x101 reads "
+                            "0x%02x, expected the vendor capture's completion 0xdc under "
+                            "mask 0x%02x. The transport state is unknown and the magazine "
+                            "may not be latched. Nothing further was written and no recovery "
+                            "was attempted; power-cycle the scanner.",
+                            after.status, kMagazineStatusMask);
+    }
+
+    guard.succeeded();
+    set_magazine_state(dev, MagazineState::Loaded);
+    set_magazine_wait_saw_clear(dev, false);
+    set_magazine_wait_needs_open(dev, false);
+    /* A "loaded" mark, not a cleared one: load_document()
+       (magazine_check_scan_allowed(), below) needs to see it from a
+       separate process (`scanimage -n --load-film` exits right after
+       this returns; the scan that uses the magazine is a later
+       invocation). Cleared by eject, by any failure, and, like every
+       mark, ignored when the device key does not match or reg 0x01
+       reads cold (magazine_check_scan_allowed(), magazine_check_status_impl()). */
+    write_magazine_mark(dev, gl126::MagazineMarkKind::Loaded);
+    DBG(DBG_info, "gl126: magazine loaded (reg 0x101 = 0x%02x)\n", after.status);
+}
+
+/** load_document(): a pure checker, called from genesys_start_scan
+    before calibration for GL126 as well as sheet-fed models. It never
+    runs LOAD, and never moves the magazine: the "Load film" button
+    (magazine_load_film_impl(), above) is the only thing that does that.
+
+    It performs exactly one device read, reg 0x01, and only to catch a
+    power cycle that happened since Load film/Eject film last ran: a
+    Loaded/Released/Ejected/Failed claim, in-process or on a mark,
+    cannot be trusted to survive one (the same principle
+    magazine_load_film_impl()'s own start-of-call check and Check
+    status's cold row already apply). The status-line get
+    (magazine_state_text()) does not do this: it stays free of hardware
+    reads by design, so only this hook and Check status ever read
+    reg 0x01 outside of a button press.
+
+      Cold, something was pending (state or mark)               -> refuse
+          INVAL "press Load film", state -> Unknown, mark cleared as
+          stale (the claim is gone, not "still true but paused").
+      Cold, nothing was pending                                  -> falls
+          through to the same warning as "Unknown, no mark" below,
+          keeps the documented CLI division working for an operator who
+          has not touched Load film at all.
+      Loaded (in-process, or a "loaded" mark for this device)  -> proceed.
+      Released or Ejected (in-process, or their marks)         -> refuse
+          SANE_STATUS_NO_DOCS, read-only, mark kept (the state is still
+          true; the operator just has not pressed Load film yet, or the
+          wait it started has not finished).
+      Failed (in-process, or a "failed" mark)                   -> refuse
+          INVAL, mark kept (only a cold read clears a Failed mark).
+      Unknown, no mark                                          -> proceed
+          with today's warning, nothing here can produce the 0xfc
+          failure any more, since nothing here runs a motor sequence at
+          all. */
+void magazine_check_scan_allowed(Genesys_Device* dev)
+{
+    DBG_HELPER(dbg);
+    MagazineState state = magazine_state_of(dev);
+
+    std::uint8_t reg01 = dev->interface->read_register(REG_0x01);
+    if (reg01 == 0x00) {
+        gl126::MagazineMarkKind stale_kind = gl126::MagazineMarkKind::Released;
+        std::string stale_key;
+        bool had_mark = gl126::magazine_mark_read(&stale_kind, &stale_key) &&
+                        stale_key == magazine_device_key(dev);
+        bool had_state = state != MagazineState::Unknown;
+        if (had_mark || had_state) {
+            if (had_state) {
+                set_magazine_state(dev, MagazineState::Unknown);
+            }
+            clear_magazine_mark("cold: load_document");
+            throw SaneException(SANE_STATUS_INVAL,
+                                "gl126: the scanner was power-cycled since, press Load film. "
+                                "Nothing was written.");
+        }
+        // Cold with nothing pending: fall through to the trailing
+        // warning below, unchanged.
+    } else {
+        if (state == MagazineState::Failed) {
+            throw SaneException(SANE_STATUS_INVAL,
+                                "gl126: the magazine sequence failed earlier in this session, so "
+                                "the transport state is unknown and a scan is not started on top "
+                                "of it. Power-cycle the scanner. Nothing was written.");
+        }
+        if (state == MagazineState::Loaded) {
+            return;
+        }
+        if (state == MagazineState::Released || state == MagazineState::Ejected) {
+            throw SaneException(SANE_STATUS_NO_DOCS,
+                                "gl126: the magazine is not loaded, press Load film first. "
+                                "Nothing was written.");
+        }
+
+        // Unknown: consult the cross-process mark.
+        gl126::MagazineMarkKind marked_kind = gl126::MagazineMarkKind::Released;
+        std::string marked_key;
+        if (gl126::magazine_mark_read(&marked_kind, &marked_key)) {
+            if (marked_key != magazine_device_key(dev)) {
+                // Another unit, or the same one under a pre-power-cycle
+                // address: not ours, and never will be.
+                DBG(DBG_info, "gl126: magazine mark names %s, this device is %s, ignored\n",
+                    marked_key.c_str(), magazine_device_key(dev).c_str());
+                clear_magazine_mark("foreign device");
+            } else if (marked_kind == gl126::MagazineMarkKind::Loaded) {
+                return;   // a Load film press in another process finished
+            } else if (marked_kind == gl126::MagazineMarkKind::Failed) {
+                throw SaneException(SANE_STATUS_INVAL,
+                                    "gl126: the magazine sequence failed earlier, power-cycle "
+                                    "the scanner, then press Load film. Nothing was written.");
+            } else {
+                throw SaneException(SANE_STATUS_NO_DOCS,
+                                    "gl126: the magazine is not loaded, press Load film first. "
+                                    "Nothing was written.");
+            }
+        }
+    }
+
+    DBG(DBG_info, "gl126: no magazine state known in this session; if nothing is "
+        "loaded this scan will deliver an unusable image\n");
+}
+
+/** Shared tail of every path that reaches state Ejected: write the
+    cross-process "ejected" mark, logging rather than failing the session
+    if it cannot be written, exactly the Released mark's own best-effort
+    contract, since a frontend that stays open (digiKam) still has the
+    in-process record. */
+void write_ejected_mark(Genesys_Device* dev)
+{
+    write_magazine_mark(dev, gl126::MagazineMarkKind::Ejected);
+}
+
+/** The "Eject film" button, and eject_document(). */
+void magazine_eject_impl(Genesys_Device* dev)
+{
+    DBG_HELPER(dbg);
+    MagazineState state = magazine_state_of(dev);
+    if (state == MagazineState::Failed) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the magazine sequence failed earlier in this session. "
+                            "Power-cycle the scanner. Nothing was written.");
+    }
+    if (state == MagazineState::Unknown) {
+        // (5) A "failed" mark from an earlier process (or an earlier,
+        // since-cleared moment in this process, the mark is the only
+        // thing that can still say so once state has moved on) refuses
+        // here too, the cross-process counterpart of the in-process
+        // Failed refusal just above.
+        gl126::MagazineMarkKind marked_kind = gl126::MagazineMarkKind::Released;
+        std::string marked_key;
+        if (gl126::magazine_mark_read(&marked_kind, &marked_key) &&
+            marked_key == magazine_device_key(dev) &&
+            marked_kind == gl126::MagazineMarkKind::Failed)
+        {
+            throw SaneException(SANE_STATUS_INVAL,
+                                "gl126: the magazine sequence failed earlier (in an earlier "
+                                "process); the transport state is unknown. Power-cycle the "
+                                "scanner. Nothing was written.");
+        }
+    }
+    if (state == MagazineState::Released) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the magazine is already loose, the jog Load film ran "
+                            "is the vendor's eject. Take it out of the slot. Nothing was "
+                            "written.");
+    }
+
+    // A scan pass that is armed or streaming owns the transport.
+    auto pass = scan_pass().find(dev);
+    if (pass != scan_pass().end() &&
+        (pass->second.state() == ScanPassState::Armed ||
+         pass->second.state() == ScanPassState::Streaming))
+    {
+        throw SaneException(SANE_STATUS_DEVICE_BUSY,
+                            "gl126: a scan pass is %s; the magazine is not ejected from "
+                            "under it. Nothing was written.",
+                            scan_pass_state_name(pass->second.state()));
+    }
+
+    std::uint8_t reg01 = check_start_state(dev);
+    if (reg01 == 0x00) {
+        // The driver runs cold_init() first here; this backend does not.
+        // On a cold unit the jog is the vendor's own release and is the
+        // one path verified from that state, so the operator is sent
+        // there instead of bringing up a second cold motor path.
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the scanner is cold (reg 0x01 = 0x00, never homed). "
+                            "Press Load film, its jog is the vendor's own release and "
+                            "frees the magazine. Nothing was written.");
+    }
+
+    MagazineSensor sensor = read_magazine_sensor(dev);
+    if (!sensor.present()) {
+        DBG(DBG_info, "gl126: no magazine detected (loader sensor clear), nothing to do\n");
+        set_magazine_state(dev, MagazineState::Ejected);
+        write_ejected_mark(dev);
+        return;
+    }
+
+    std::uint8_t reg3b = dev->interface->read_register(0x3B);
+    std::uint8_t reg3c = dev->interface->read_register(0x3C);
+    if (reg3b == 0xFF && reg3c == 0xFF) {
+        // The driver's UnejectableStateError: its eject stalled 2/2 from
+        // the base-table-only state and no vendor flow ejects from it.
+        // Two register reads, no write.
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: eject refused, regs 0x3b/0x3c read 0xff/0xff (the "
+                            "scan-session base table with no scan phase after it). The "
+                            "driver's eject stalled from this state and no vendor flow "
+                            "ejects from it. Power-cycle the scanner, then press Load film. "
+                            "Nothing was written.");
+    }
+
+    MagazineFailGuard guard(dev);
+    guard.arm();
+
+    RunResult eject_result;
+    run_magazine_program(dev, "eject", eject_result);
+    dev->interface->test_checkpoint("gl126_magazine_after_eject");
+
+    guard.succeeded();
+    set_magazine_state(dev, MagazineState::Ejected);
+    /* An eject marks "ejected", not "no mark", so a second process
+       (`scanimage --eject-film=yes`, then a plain scan) knows a
+       next-strip load is pending, the same cross-process need the
+       Released mark was written for. */
+    write_ejected_mark(dev);
+    DBG(DBG_info, "gl126: magazine ejected. Swap the strip, push the magazine in to the "
+        "mechanical stop, then press Load film (Scan itself no longer loads).\n");
+}
+
+/** The "Check status" button: allowed to read the hardware, reg 0x01,
+    the loader sensor (reg 0x101) and regs 0x3b/0x3c, though the table
+    below only branches on the first two; 0x3b/0x3c are read and logged
+    for the diagnostic record, not because any row here needs them (the
+    Ejected-kind preconditions that do use them live in the "Load film"
+    path, above). Updates the status line (via
+    magazine_check_override_map(), consulted first by
+    magazine_state_text()) with what the hardware says, reconciling but
+    never fabricating: hardware evidence alone can never promote
+    anything to Loaded (the sensor cannot tell "loaded" from "loose in
+    the slot", an honest limit that still holds). Only the cold row is a
+    real MagazineState transition; every other row is a read-only
+    snapshot. */
+void magazine_check_status_impl(Genesys_Device* dev)
+{
+    DBG_HELPER(dbg);
+    std::uint8_t reg01 = dev->interface->read_register(REG_0x01);
+    MagazineSensor sensor = read_magazine_sensor(dev);
+    std::uint8_t reg3b = dev->interface->read_register(0x3B);
+    std::uint8_t reg3c = dev->interface->read_register(0x3C);
+    DBG(DBG_info, "gl126: check status: reg 0x01 = 0x%02x, reg 0x101 = 0x%02x, regs 0x3b/"
+        "0x3c = 0x%02x/0x%02x\n", reg01, sensor.status, reg3b, reg3c);
+
+    if (reg01 == 0x00) {
+        // The one row that is a real transition: a power cycle happened, so
+        // whatever this process believed is stale, including a "failed"
+        // mark (see 5: only a cold reg 0x01 read, here or at Load film's
+        // own start, clears one).
+        set_magazine_state(dev, MagazineState::Unknown);
+        clear_magazine_mark("check status: cold");
+        set_magazine_wait_saw_clear(dev, false);
+        set_magazine_wait_needs_open(dev, false);
+        magazine_check_override_map()[dev] = kMagazineCold;
+        DBG(DBG_info, "gl126: check status: cold, state reset to Unknown, marks cleared\n");
+        return;
+    }
+    if (!sensor.present()) {
+        magazine_check_override_map()[dev] = kMagazineNoMagazine;
+        return;
+    }
+
+    // (5) A Failed claim (in-process, or a matching "failed" mark) is
+    // reported as such rather than being reinterpreted from the
+    // register state: the transport's state is exactly what a failure
+    // leaves unknown, so this is a status report, not a fresh
+    // diagnosis.
+    bool failed = (magazine_state_of(dev) == MagazineState::Failed);
+    if (!failed) {
+        gl126::MagazineMarkKind marked_kind = gl126::MagazineMarkKind::Released;
+        std::string marked_key;
+        if (gl126::magazine_mark_read(&marked_kind, &marked_key) &&
+            marked_key == magazine_device_key(dev) &&
+            marked_kind == gl126::MagazineMarkKind::Failed)
+        {
+            failed = true;
+        }
+    }
+    if (failed) {
+        magazine_check_override_map()[dev] = kMagazineFailed;
+        return;
+    }
+
+    // (3) reg 0x101's DONE/idle class (0xf0-shaped) is not required to
+    // report Loaded: right after LOAD completes, or during calibration,
+    // the status byte is 0xdc/0xd8-shaped (seen on hardware), neither of
+    // which is the idle class, and a magazine that really is loaded must
+    // never be reported as "unknown state -- power-cycle" because of
+    // that. reg 0x01 == 0x22 and the sensor present are enough, together
+    // with Loaded already being established (in-process or a matching
+    // "loaded" mark), hardware evidence alone still never promotes
+    // anything to Loaded (the sensor cannot tell "loaded" from "loose in
+    // the slot"). "unknown state -- power-cycle, Load film" is now
+    // reserved for reg 0x01 outside {0x22, 0x00}, never reg 0x01 ==
+    // 0x22, whatever reg 0x101 reads.
+    bool loaded = (magazine_state_of(dev) == MagazineState::Loaded);
+    if (!loaded) {
+        gl126::MagazineMarkKind marked_kind = gl126::MagazineMarkKind::Released;
+        std::string marked_key;
+        if (gl126::magazine_mark_read(&marked_kind, &marked_key) &&
+            marked_key == magazine_device_key(dev) &&
+            marked_kind == gl126::MagazineMarkKind::Loaded)
+        {
+            loaded = true;
+        }
+    }
+    if (reg01 == 0x22) {
+        magazine_check_override_map()[dev] = loaded ? kMagazineLoaded : kMagazinePresentNotLoaded;
+        return;
+    }
+    magazine_check_override_map()[dev] = kMagazineUnknownHw;
+}
+
+/** A hook that has not been brought up against the hardware yet.
+
+    These are enabled one at a time, in the documented order
+    (boot/status -> offset -> gain -> shading -> position -> scan -> park
+    -> eject). Until then the backend says so rather than issuing a motor
+    command derived from a table it has never executed. */
+[[noreturn]] void not_brought_up(const char* hook)
+{
+    throw SaneException(SANE_STATUS_UNSUPPORTED,
+                        "gl126: %s is not brought up against the hardware yet. "
+                        "The backend refuses rather than moving the motor from "
+                        "an unverified sequence.", hook);
+}
+
+} // namespace
+
+/* ------------------------------------------------------------------ hooks */
+
+/* The vendor does not home between frames; the scan pass is the move.
+   Homing here would add a mechanical move the vendor never makes. */
+bool CommandSetGl126::needs_home_before_init_regs_for_scan(Genesys_Device* /*dev*/) const
+{
+    return false;
+}
+
+/* sane_open writes nothing, like the driver's Scanner.open() and like
+   the vendor's app open. The reference capture (a vendor open against a
+   latched magazine: the vendor writes its OPEN table and jogs, never
+   the base table) puts the base table at scan start, per frame; the
+   driver writes it in scan(), not at open. Writing it at open, tried
+   once, left the unit in the base-table-only state (transient in every
+   verified flow, the AFE_BASE phase overwrites it 0.1 s later in
+   scan()), and the driver's eject stalled twice from it. So: at open,
+   read the start state and stop. The base table is written by the
+   scan-session hooks when they are brought up. */
+void CommandSetGl126::asic_boot(Genesys_Device* dev, bool cold) const
+{
+    DBG_HELPER(dbg);
+    std::uint8_t state = check_start_state(dev);
+    DBG(DBG_info, "asic_boot: reg 0x01 = 0x%02x (%s), nothing written\n", state,
+        cold ? "core asked for cold" : "warm");
+}
+
+void CommandSetGl126::init(Genesys_Device* dev) const
+{
+    DBG_HELPER(dbg);
+    std::uint8_t state = check_start_state(dev);
+    DBG(DBG_info, "init: reg 0x01 = 0x%02x (%s), nothing written\n", state,
+        state == 0x00 ? "cold, never homed" : "idle-homed");
+    /* A failed or parked pass belongs to the previous open. The hardware
+       check above is the gate for starting over (after a power cycle the
+       unit reads 0x22 or 0x00 again); the bookkeeping follows it. */
+    scan_pass().erase(dev);
+    cal_stage().erase(dev);
+}
+
+/* Pure computation: the ScanSession the core sizes its image pipeline
+   from. Nothing here reaches the wire, and nothing here positions the
+   transport, frame positioning is FEEDL from the captured tables (the
+   driver's own geometry model), not the core's scanner_move. The start
+   offsets are kept in the same units the gl124 template uses so the
+   core's bookkeeping stays consistent; the scan hook, when it is brought
+   up, must pin `pixels`/`lines` to the profile's captured geometry
+   rather than trust these values. */
+ScanSession CommandSetGl126::calculate_scan_session(const Genesys_Device* dev,
+                                                    const Genesys_Sensor& sensor,
+                                                    const Genesys_Settings& settings) const
+{
+    DBG_HELPER(dbg);
+    debug_dump(DBG_info, settings);
+
+    float move = dev->model->y_offset + settings.tl_y;
+    move = static_cast<float>((move * settings.yres) / MM_PER_INCH);
+
+    float start = dev->model->x_offset + settings.tl_x;
+    start = static_cast<float>((start * settings.xres) / MM_PER_INCH);
+
+    ScanSession session;
+    session.params.xres = settings.xres;
+    session.params.yres = settings.yres;
+    session.params.startx = static_cast<unsigned>(start);
+    session.params.starty = static_cast<unsigned>(move);
+    session.params.pixels = settings.pixels;
+    session.params.requested_pixels = settings.requested_pixels;
+    session.params.lines = settings.lines;
+    session.params.depth = settings.depth;
+    session.params.channels = settings.get_channels();
+    session.params.scan_method = settings.scan_method;
+    session.params.scan_mode = settings.scan_mode;
+    session.params.color_filter = settings.color_filter;
+
+    /* The frame is scanned as captured, whatever the frontend's window:
+       the vendor's scan pass delivers the full 3762 x 5137 px, RGB16LE,
+       pixel-interleaved. The colour line shift is undone on the host by
+       the core's pipeline, exactly as the driver's align_channels()
+       does: `params.lines` is what the frontend receives (5137 - 24 =
+       5113), and the core's `output_line_count` (lines +
+       max_color_shift_lines) is the wire's 5137, the count begin_scan()
+       writes and the scan pass expects. Pinning the geometry here also
+       makes sane_get_parameters report the delivered size. */
+    bool ir = settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED;
+    const Profile* profile = find_profile(settings.xres, ir);
+    /* The vendor's visible pass is always the full 3-channel RGB16 capture.
+       A request maps to that capture when it is colour, IR, or a host-side
+       gray request: the model declares HOST_SIDE_GRAY, so a Gray scan with
+       colour filter NONE is scanned as RGB and reduced to gray on the host
+       (compute_session() expands channels 1->3 for that case, low.cpp). The
+       option-init default genesys applies before the frontend chooses (mode
+       GRAY, colour filter GREEN) is not such a capture: report its raw
+       window for parameter queries without pinning the profile geometry or
+       enforcing the colour-shift invariant here. An actual single-channel
+       gray request (a colour filter other than NONE) is likewise not a
+       capture this backend performs; it is refused before any device I/O by
+       the preflight at the top of offset_calibration(), so this
+       parameter-only path stays tolerant and never reaches the wire. */
+    bool host_side_gray = has_flag(dev->model->flags, ModelFlag::HOST_SIDE_GRAY) &&
+                          settings.get_channels() == 1 &&
+                          settings.color_filter == ColorFilter::NONE;
+    bool is_capture = ir || settings.get_channels() == 3 || host_side_gray;
+    bool pinned = profile != nullptr && is_capture;
+    /* sane_get_parameters can run before the frontend has chosen a valid
+       frame (settings.frame defaults to 1); default to frame 1 for
+       parameter reporting only, begin_scan does its own, non-defaulting,
+       1-kFrameMax check before any write. */
+    unsigned frame = (settings.frame >= 1 && settings.frame <= kFrameMax) ? settings.frame : 1;
+    FrameGeometry geo;
+    if (pinned) {
+        /* This pin generalises to every captured profile: the dual-light
+           ones (600/1200/2400/7200 dpi, and 3600 dpi with IR) stream IR
+           and visible lines alternately at the full sensor width; the
+           host keeps one line in two. The ledger (frames[]) makes the
+           geometry frame-dependent, so frame_geometry() takes the
+           frame. */
+        geo = frame_geometry(*profile, frame);
+        /* The raw read window is geo.width (the full sensor width the wire
+           delivers): params.pixels drives compute_session's output_line_
+           bytes_raw, the USB read size and the chunk bookkeeping, all of
+           which must stay byte-identical to the captured transfer. The
+           delivered width is geo.delivered_width (== geo.width for every
+           profile but the anisotropic dpi2400, where it is 3504): setting
+           requested_pixels to it makes the core's own final pipeline node
+           push an ImagePipelineNodeScaleRows(delivered_width), the
+           existing host row scaling, so the frontend receives square
+           pixels while nothing on the raw path changes.
+           sane_get_parameters reports pipeline.get_output_width(), i.e.
+           delivered_width. */
+        session.params.pixels = geo.width;
+        session.params.requested_pixels = geo.delivered_width;
+        session.params.lines = geo.delivered_lines;
+        session.params.startx = 0;
+        session.params.starty = 0;
+    }
+    /* As gl124: these come from the device's current settings, which the
+       core keeps valid from sane_open on. */
+    session.params.contrast_adjustment = dev->settings.contrast;
+    session.params.brightness_adjustment = dev->settings.brightness;
+    /* No pixel stagger (the sensor is a single line per colour); the colour
+       line shift is not ignored, for the infrared image either:
+       compute_session() takes it from the model's ld_shift and
+       build_image_pipeline() inserts the ComponentShiftLines node. An
+       earlier version assumed the IR pass had one line per position
+       (R = G = B) and cropped it instead of shifting; the first
+       full-width IR image showed the three channels of an IR line
+       staggered by exactly the colour shift (R 12 IR lines before G, B
+       12 after at 3600 dpi, the three CCD rows each see the IR light
+       from their own position), every dust speck a triplet in the
+       channel mean. So the IR image is aligned like the visible one;
+       the delivered line count is unchanged (the crop was the shift's
+       width). */
+    session.params.flags = ScanFlag::IGNORE_STAGGER_OFFSET;
+
+    compute_session(dev, session, sensor);
+    if (pinned) {
+        unsigned expect_shift = geo.shift_lines;
+        if (session.max_color_shift_lines != expect_shift ||
+            session.output_line_count != geo.delivered_lines + expect_shift ||
+            session.color_shift_lines_g * 2 != geo.shift_lines)
+        {
+            /* The model's ld_shift, the motor's base_ydpi and the profile's
+               geometry must agree, or the wire count would differ from the
+               captured one. Pure computation: nothing has been written. */
+            throw SaneException(SANE_STATUS_INVAL,
+                                "gl126: colour shift %u lines and %u output lines do not match "
+                                "profile %s (%u + %u). Nothing was written.",
+                                session.max_color_shift_lines, session.output_line_count,
+                                profile->name, geo.delivered_lines, expect_shift);
+        }
+        /* The USB source reads every raw line the vendor read: for the plain
+           profile the whole register value (5137, its last 8 lines the chunk
+           the driver calls a drain); for a dual profile both passes
+           (chunk_count * lines_per_chunk, e.g. 10544 of ir3600's 10622 --
+           the vendor cancelled the 660th descriptor). The pipeline's nodes
+           bring that down to params.lines. */
+        session.optical_line_count = geo.read_lines;
+        session.output_total_bytes_raw =
+            static_cast<std::size_t>(session.output_line_bytes_raw) * geo.read_lines;
+        session.gl126_keep_parity = geo.dual ? (ir ? 0u : 1u) : 2u;
+        // one image request = one captured chunk; the last one is the
+        // remainder when the line count is not a multiple of the chunk
+        session.buffer_size_read = profile->chunk_len;
+    }
+
+    return session;
+}
+
+/* No register set is built here: the scan registers are the captured
+   phases begin_scan() runs. What the core needs from this hook is the
+   session bookkeeping gl124 does at the end of its version, the image
+   pipeline and the byte count sane_read delivers. Nothing reaches the
+   wire. */
+void CommandSetGl126::init_regs_for_scan_session(Genesys_Device* dev,
+                                                 const Genesys_Sensor& /*sensor*/,
+                                                 Genesys_Register_Set* /*reg*/,
+                                                 const ScanSession& session) const
+{
+    DBG_HELPER(dbg);
+    bool ir = dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED;
+    const Profile* profile = find_profile(dev->settings.xres, ir);
+    // Same defaulting rule as calculate_scan_session() above (settings.frame
+    // may not yet be a chosen frame when this core path runs early).
+    unsigned frame = (dev->settings.frame >= 1 && dev->settings.frame <= kFrameMax)
+        ? dev->settings.frame : 1;
+    FrameGeometry geo;
+    if (profile != nullptr) {
+        geo = frame_geometry(*profile, frame);
+    }
+    if (profile == nullptr || session.params.pixels != geo.width ||
+        session.optical_line_count != geo.read_lines ||
+        session.params.lines != geo.delivered_lines ||
+        session.params.channels != 3 || session.params.depth != 16)
+    {
+        /* Any session but the captured frame comes from a core path that is
+           not the vendor's (a scanner_move, a core calibration pass): refuse
+           before the bookkeeping so nothing downstream acts on it. */
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: session %u x %u px (%u raw lines), %u ch, %u bit is not the "
+                            "captured frame; the backend scans only that. Nothing was written.",
+                            session.params.pixels, session.params.lines,
+                            session.output_line_count, session.params.channels,
+                            session.params.depth);
+    }
+    dev->session = session;
+    setup_image_pipeline(*dev, session);
+    dev->read_active = true;
+    dev->total_bytes_read = 0;
+    /* What the frontend receives: the raw lines less the colour shift the
+       pipeline consumes (the node needs raw line k + 24 for output line k,
+       so the last raw chunk is still read in full). */
+    dev->total_bytes_to_read = static_cast<std::size_t>(session.output_line_bytes_requested) *
+                               static_cast<std::size_t>(session.params.lines);
+    DBG(DBG_info, "gl126: scan session %s: %u x %u px delivered from %u raw lines (%s), %u B "
+        "per chunk, %zu B to the frontend\n", profile->name,
+        session.params.pixels, session.params.lines, session.optical_line_count,
+        geo.dual ? (ir ? "the IR lines" : "the visible lines") : "all",
+        static_cast<unsigned>(session.buffer_size_read), dev->total_bytes_to_read);
+}
+
+void CommandSetGl126::init_regs_for_warmup(Genesys_Device* /*dev*/,
+                                           const Genesys_Sensor& /*sensor*/,
+                                           Genesys_Register_Set* /*regs*/) const
+{
+    DBG_HELPER(dbg);
+    not_brought_up("init_regs_for_warmup");
+}
+
+void CommandSetGl126::init_regs_for_shading(Genesys_Device* /*dev*/,
+                                            const Genesys_Sensor& /*sensor*/,
+                                            Genesys_Register_Set& /*regs*/) const
+{
+    DBG_HELPER(dbg);
+    not_brought_up("init_regs_for_shading");
+}
+
+/* Offset calibration: the driver's initialize() + CAL_DARK_A/CAL_DARK_B,
+   then its own offset_codes(). This is the first hook in a sane_start
+   that writes, so it also carries the session preamble: the base table
+   and AFE base values (verified byte-exact on hardware), then the PREP
+   and AFE_BASE phases as op programs. The computed AFE offsets land in
+   dev->frontend under their AFE addresses 5/6/7, where the shading hook
+   picks them up. `regs` is the core's GL124-style register set and is
+   not consulted: the values come from the captured tables. */
+void CommandSetGl126::offset_calibration(Genesys_Device* dev,
+                                         const Genesys_Sensor& /*sensor*/,
+                                         Genesys_Register_Set& /*regs*/) const
+{
+    DBG_HELPER(dbg);
+
+    // Everything this scan request can be refused for, refused before any
+    // device I/O at all (validate_scan_request(), above).
+    const Profile* profile = validate_scan_request(dev);
+
+    // Only the idle-homed state is accepted. A cold unit (0x00) is
+    // brought up by the magazine load flow, which is not a hook.
+    std::uint8_t state = check_start_state(dev);
+    if (state != 0x22) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: offset calibration needs the idle-homed state "
+                            "(reg 0x01 = 0x22), read 0x%02x. A cold unit is brought up by "
+                            "the magazine load flow, not by the backend. "
+                            "Nothing was written.", state);
+    }
+
+    DBG(DBG_info, "gl126: offset calibration, profile %s frame %u\n", profile->name,
+        dev->settings.frame);
+
+    // Base table + AFE base values, as the driver's initialize() writes
+    // them (verified byte-exact on hardware).
+    write_table(dev, BASE_INIT, BASE_INIT_COUNT);
+    write_afe_base(dev);
+
+    // The pre-scan phases.
+    RunResult prep, afe_base;
+    run_phase_program(dev, *profile, "prep", prep);
+    run_phase_program(dev, *profile, "afe_base", afe_base);
+
+    // The dark bracket, one buffer each.
+    RunResult dark_a, dark_b;
+    run_phase_program(dev, *profile, "cal_dark_a", dark_a);
+    run_phase_program(dev, *profile, "cal_dark_b", dark_b);
+    if (dark_a.buffers.size() != 1 || dark_b.buffers.size() != 1) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: expected one dark buffer per phase, got %zu and %zu",
+                            dark_a.buffers.size(), dark_b.buffers.size());
+    }
+    const std::vector<std::uint8_t>& a = dark_a.buffers[0];
+    const std::vector<std::uint8_t>& b = dark_b.buffers[0];
+    if (dark_is_residual(b.data(), b.size())) {
+        // Seen on hardware: the unit returned a repeated block instead of a
+        // measurement. The driver substitutes an earlier healthy dark_b in a
+        // batch; a single sane_start has none, so this fails closed.
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: dark_b is residual data, not a measurement; no "
+                            "healthy dark_b to substitute. Nothing further was "
+                            "written.");
+    }
+
+    // The two-point bracket -> AFE offset codes.
+    OffsetResult r = offset_codes(a.data(), a.size(), b.data(), b.size());
+    static const char* const ch_names[3] = { "R", "G", "B" };
+    for (unsigned ch = 0; ch < 3; ch++) {
+        DBG(DBG_info, "gl126: offset %s: dark_a mean %.1f, dark_b mean %.1f, slope %.2f, "
+            "code 0x%04x%s\n", ch_names[ch], r.mean_a[ch], r.mean_b[ch], r.slope[ch],
+            r.code[ch], r.fallback[ch] ? " (fallback: slope below 1 count/code)" : "");
+        dev->frontend.regs.set_value(static_cast<std::uint16_t>(0x05 + ch), r.code[ch]);
+    }
+    cal_stage()[dev] = CalStage::OffsetDone;
+}
+
+/* Gain calibration: the driver's _gain_with_warmup() (CAL_WHITE,
+   repeated while the lamp is not ready) + gain_codes(), then
+   CAL_GAIN_CHECK_A/B replayed for fidelity. Runs on the state offset
+   calibration leaves in the same sane_start; `regs` and `dpi` are the
+   core's GL124 notions and are not consulted. The gain codes land in
+   dev->frontend under their AFE addresses 2/3/4. */
+void CommandSetGl126::coarse_gain_calibration(Genesys_Device* dev,
+                                              const Genesys_Sensor& /*sensor*/,
+                                              Genesys_Register_Set& /*regs*/,
+                                              int /*dpi*/) const
+{
+    DBG_HELPER(dbg);
+
+    auto stage = cal_stage().find(dev);
+    if (stage == cal_stage().end() || stage->second != CalStage::OffsetDone) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: gain calibration needs the offset calibration of the "
+                            "same sane_start before it (the white line is measured on the "
+                            "state that leaves). Nothing was written.");
+    }
+    cal_stage().erase(stage);   // single use: a later sane_start starts over
+
+    bool ir = dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED;
+    const Profile* profile = find_profile(dev->settings.xres, ir);
+    if (profile == nullptr) {
+        throw SaneException(SANE_STATUS_INVAL, "gl126: no captured profile for %u dpi%s",
+                            dev->settings.xres, ir ? " with IR" : "");
+    }
+
+    // The white line, with the driver's lamp-warmup retry.
+    WarmupRecord rec;
+    WarmupPolicy policy;
+    std::uint8_t codes[3] = { 0, 0, 0 };
+    const bool dual = profile->lines_per_chunk != 0;
+    auto measure = [&]() {
+        RunResult white;
+        run_phase_program(dev, *profile, "cal_white", white);
+        std::vector<std::uint8_t> buf = joined_buffers(white);
+        if (buf.empty() || buf.size() % 6 != 0) {
+            throw SaneException(SANE_STATUS_IO_ERROR,
+                                "gl126: malformed white line (%zu bytes). Nothing further "
+                                "was written.", buf.size());
+        }
+        if (dual) {
+            /* Two lines, IR first: the gain (one AFE register set) is
+               computed from the visible line only, as the driver's
+               _scan_dual() does, the IR line's flat, bright values would
+               skew the peak. */
+            if (buf.size() % 12 != 0) {
+                throw SaneException(SANE_STATUS_IO_ERROR,
+                                    "gl126: dual-light white measurement is %zu bytes, not two "
+                                    "lines. Nothing further was written.", buf.size());
+            }
+            buf.erase(buf.begin(), buf.begin() + static_cast<std::ptrdiff_t>(buf.size() / 2));
+        }
+        return buf;
+    };
+    auto sleep_s = [](double s) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long>(s * 1000.0)));
+    };
+    auto now_s = []() {
+        auto t = std::chrono::steady_clock::now().time_since_epoch();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(t).count() / 1000.0;
+    };
+    WarmupOutcome outcome;
+    try {
+        outcome = gain_with_warmup(measure, sleep_s, now_s, policy, rec, codes);
+    } catch (const std::invalid_argument& e) {
+        throw SaneException(SANE_STATUS_IO_ERROR, "gl126: white line rejected: %s", e.what());
+    }
+    for (std::size_t i = 0; i < rec.peak_history.size(); i++) {
+        DBG(DBG_info, "gl126: white measurement %zu: peaks R %.1f G %.1f B %.1f -> gain "
+            "0x%02x 0x%02x 0x%02x\n", i + 1, rec.peak_history[i][0], rec.peak_history[i][1],
+            rec.peak_history[i][2], rec.gain_history[i][0], rec.gain_history[i][1],
+            rec.gain_history[i][2]);
+    }
+    if (outcome == WarmupOutcome::Saturated) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: white line saturated at gain 0 (implausible AFE state) "
+                            "after %u measurement(s). Nothing further was written.",
+                            rec.attempts);
+    }
+    if (outcome == WarmupOutcome::Exhausted) {
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: lamp did not reach a stable usable level after %u "
+                            "white-line measurement(s) in %.0f s (budget %.0f s). No scan "
+                            "was made and no motor command was sent; run the magazine load "
+                            "flow first (it gives the lamp about a minute).",
+                            rec.attempts, rec.elapsed_s, policy.budget_s);
+    }
+    DBG(DBG_info, "gl126: gain codes R 0x%02x G 0x%02x B 0x%02x after %u measurement(s), "
+        "%.1f s\n", codes[0], codes[1], codes[2], rec.attempts, rec.elapsed_s);
+
+    // The dark bracket at the computed gain, replayed for fidelity;
+    // the driver discards these buffers, the means are logged as evidence.
+    std::map<std::string, std::uint8_t> values;
+    values["gain_r"] = codes[0];
+    values["gain_g"] = codes[1];
+    values["gain_b"] = codes[2];
+    RunResult check_a, check_b;
+    run_phase_program(dev, *profile, "cal_gain_check_a", check_a, &values);
+    run_phase_program(dev, *profile, "cal_gain_check_b", check_b);
+    log_dark_means("gain check A (offset 0x80)", joined_buffers(check_a));
+    log_dark_means("gain check B (offset 0xff)", joined_buffers(check_b));
+
+    for (unsigned ch = 0; ch < 3; ch++) {
+        dev->frontend.regs.set_value(static_cast<std::uint16_t>(0x02 + ch), codes[ch]);
+    }
+
+    // Shading calibration follows here, on the gain checks' state: the
+    // model sets DISABLE_SHADING_CALIBRATION, so the core never runs a
+    // shading pass of its own.
+    run_shading_calibration(dev, *profile);
+}
+
+/* The lamp is warmed by the gain phase's own retry loop, not by a
+   separate LED calibration pass; the vendor has no equivalent step. */
+SensorExposure CommandSetGl126::led_calibration(Genesys_Device* /*dev*/,
+                                                const Genesys_Sensor& /*sensor*/,
+                                                Genesys_Register_Set& /*regs*/) const
+{
+    DBG_HELPER(dbg);
+    return SensorExposure{};
+}
+
+/* The absolute POSITION move to the frame with its FEEDL-scaled
+   completion wait, then the scan pass's setup through the execute pulse
+   and the vendor's settle reads. The image itself is pulled chunk by
+   chunk through read_image_chunk_usb() as the core's pipeline asks for
+   it. Requires the calibration of the same sane_start (the mark shading
+   calibration leaves), consumed here. */
+void CommandSetGl126::begin_scan(Genesys_Device* dev, const Genesys_Sensor& /*sensor*/,
+                                 Genesys_Register_Set* /*regs*/, bool /*start_motor*/) const
+{
+    DBG_HELPER(dbg);
+
+    auto stage = cal_stage().find(dev);
+    if (stage == cal_stage().end() || stage->second != CalStage::ShadingDone) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: the scan pass needs the calibration of the same sane_start "
+                            "before it (the vendor calibrates every frame). Nothing was written.");
+    }
+    cal_stage().erase(stage);
+
+    ScanPass& pass = scan_pass()[dev];
+    if (pass.state() != ScanPassState::Idle && pass.state() != ScanPassState::Parked) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: a scan pass is %s; no new pass from that state. Nothing "
+                            "was written; power-cycle the scanner and reopen it.",
+                            scan_pass_state_name(pass.state()));
+    }
+
+    bool ir = dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED;
+    const Profile* profile = find_profile(dev->settings.xres, ir);
+    if (profile == nullptr) {
+        throw SaneException(SANE_STATUS_UNSUPPORTED,
+                            "gl126: no captured profile for %u dpi%s. Nothing was written.",
+                            dev->settings.xres, ir ? " with IR" : "");
+    }
+    if (dev->session.params.channels != 3 || dev->session.params.depth != 16) {
+        throw SaneException(SANE_STATUS_UNSUPPORTED,
+                            "gl126: the scan pass delivers 16-bit colour only (%u channels, "
+                            "%u bit requested). Nothing was written.",
+                            dev->session.params.channels, dev->session.params.depth);
+    }
+
+    // POSITION to the frame, matching the driver's own scan(frame=N):
+    // the same program with the frame's absolute FEEDL and the
+    // FEEDL-scaled budget. The option's range is 1-6, the six-aperture
+    // strip holder (kFrameMax, gl126.h); the check here is the backend's
+    // own, in case the value arrives otherwise.
+    unsigned frame = dev->settings.frame;
+    if (frame < 1 || frame > kFrameMax) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: frame %u is outside 1-%u. Nothing was written.",
+                            frame, kFrameMax);
+    }
+    unsigned feedl = feedl_for_frame(frame, *profile);
+    std::map<std::string, std::uint8_t> values;
+    values["feedl_hi"] = static_cast<std::uint8_t>((feedl >> 16) & 0xff);
+    values["feedl_mid"] = static_cast<std::uint8_t>((feedl >> 8) & 0xff);
+    values["feedl_lo"] = static_cast<std::uint8_t>(feedl & 0xff);
+    RunPolicy position_policy;
+    position_policy.masked_timeout_ms = position_timeout_ms(feedl);
+    DBG(DBG_info, "gl126: positioning to frame %u (FEEDL %u), completion budget %u ms\n",
+        frame, feedl, position_policy.masked_timeout_ms);
+    RunResult position;
+    run_phase_program(dev, *profile, "position", position, &values, nullptr, &position_policy);
+
+    // The scan pass's setup, with this frame's line-count register
+    // value from the ledger (profile.frames[frame-1].line_register, via
+    // frame_geometry -> geo.wire_lines; plain carries the 8-line drain,
+    // dual the interleaved wire count). The frontend receives
+    // params.lines; the raw lines read are session.optical_line_count.
+    FrameGeometry geo = frame_geometry(*profile, frame);
+    unsigned lines = geo.wire_lines;
+    values.clear();
+    values["lines_top"] = static_cast<std::uint8_t>((lines >> 16) & 0xff);
+    values["lines_hi"] = static_cast<std::uint8_t>((lines >> 8) & 0xff);
+    values["lines_lo"] = static_cast<std::uint8_t>(lines & 0xff);
+    RunResult setup;
+    run_phase_program(dev, *profile, "scan_setup", setup, &values);
+    std::size_t expected = dev->session.output_total_bytes_raw;
+    /* The tail the core's pipeline will not pull (the IR crop at the far
+       end left the last chunk unrequested, seen on hardware); end_scan
+       reads it before PARK so the wire sees every chunk, as the driver
+       reads them. Every profile now ends in the colour-shift tail,
+       which the core does read, so this is 0 for all of them, kept as
+       the safety net for any node that stops short of the wire's
+       end. */
+    std::size_t tail = unconsumed_tail_bytes(geo.read_lines, 0u,
+                                             dev->session.output_line_bytes_raw,
+                                             profile->chunk_len);
+    if (!pass.arm(expected, tail)) {
+        // Unreachable after the check above; kept so the state machine, not
+        // this function, is the authority.
+        throw SaneException(SANE_STATUS_INVAL, "gl126: scan pass could not be armed (%s)",
+                            scan_pass_state_name(pass.state()));
+    }
+    dev->parking = false;
+    DBG(DBG_info, "gl126: scan pass started (%s), line register %u, %u raw lines to read, %zu "
+        "raw bytes expected; the image follows chunk by chunk\n", profile->name, lines,
+        geo.read_lines, expected);
+    if (tail > 0) {
+        DBG(DBG_info, "gl126: the pipeline leaves the last %zu raw bytes (%zu chunk(s)) "
+            "unrequested; end_scan drains them before PARK\n", tail,
+            (tail + profile->chunk_len - 1) / profile->chunk_len);
+    }
+}
+
+/* Read the raw tail the pipeline never requested, through the same
+   per-chunk sequence as every other chunk, so the pass reaches Complete
+   before the PARK decision. Only from drain_pending() (Streaming, short by
+   exactly the armed tail); a chunk failure marks the pass Failed and throws
+   as it does mid-image. */
+static void drain_scan_tail(Genesys_Device* dev, ScanPass& pass, std::size_t chunk_len)
+{
+    DBG(DBG_info, "gl126: draining the %zu raw bytes the pipeline did not request, then "
+        "PARK\n", pass.bytes_expected() - pass.bytes_read());
+    std::vector<std::uint8_t> buf(chunk_len);
+    while (pass.state() == ScanPassState::Streaming) {
+        std::size_t remaining = pass.bytes_expected() - pass.bytes_read();
+        std::size_t n = std::min(chunk_len, remaining);
+        read_image_chunk_usb(dev, buf.data(), n);
+    }
+}
+
+/* PARK, matching the driver's own park_semantic(): the vendor's
+   teardown writes in order, real read-modify-writes, Wait A (reg 0x35
+   bit 0x40 after the carriage-return write), one idle round, Wait B
+   (the status word in the park-complete class). Marks the device as
+   parked so the core's cancel path does not run it a second time. */
+void CommandSetGl126::end_scan(Genesys_Device* dev, Genesys_Register_Set* /*regs*/,
+                               bool /*check_stop*/) const
+{
+    DBG_HELPER(dbg);
+    /* The core calls end_scan from sane_cancel after any failed sane_start
+       (including one that never reached begin_scan), after a failed or
+       cancelled read, and again on close. PARK is defined from the end of
+       a complete scan pass and nowhere else (seen on hardware: running it
+       from the post-shading state left its Wait B never completing; a
+       half-read pass has never been parked from). The state machine
+       decides; every refusal writes nothing. */
+    auto it = scan_pass().find(dev);
+    if (it != scan_pass().end() && it->second.drain_pending()) {
+        bool ir_tail = dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED;
+        const Profile* tail_profile = find_profile(dev->settings.xres, ir_tail);
+        if (tail_profile == nullptr) {
+            it->second.fail();
+            throw SaneException(SANE_STATUS_INVAL, "gl126: no captured profile for %u dpi "
+                                "while draining the scan tail; nothing written",
+                                dev->settings.xres);
+        }
+        drain_scan_tail(dev, it->second, tail_profile->chunk_len);
+    }
+    ParkDecision decision = (it == scan_pass().end()) ? ParkDecision::NoPass
+                                                      : it->second.park_decision();
+    switch (decision) {
+        case ParkDecision::Run:
+            break;
+        case ParkDecision::NoPass:
+            DBG(DBG_info, "gl126: end_scan: no scan pass was started, nothing written\n");
+            return;
+        case ParkDecision::AlreadyParked:
+            DBG(DBG_info, "gl126: end_scan: already parked, nothing to do\n");
+            return;
+        case ParkDecision::Failed:
+            DBG(DBG_info, "gl126: end_scan: the scan pass failed earlier; nothing written, "
+                "the scanner needs a power cycle\n");
+            return;
+        case ParkDecision::AbortedPass:
+            throw SaneException(SANE_STATUS_IO_ERROR,
+                                "gl126: scan pass aborted after %zu of %zu raw bytes; PARK is "
+                                "only defined after a complete pass, so nothing was written. "
+                                "Power-cycle the scanner; no recovery is attempted.",
+                                it->second.bytes_read(), it->second.bytes_expected());
+    }
+    bool ir = dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED;
+    const Profile* profile = find_profile(dev->settings.xres, ir);
+    if (profile == nullptr) {
+        throw SaneException(SANE_STATUS_INVAL, "gl126: no captured profile for %u dpi",
+                            dev->settings.xres);
+    }
+    RunPolicy park_policy;
+    park_policy.masked_timeout_ms = 15000;   // the driver's _PARK_WAIT_TIMEOUT
+    RunResult park;
+    try {
+        run_phase_program(dev, *profile, "park", park, nullptr, nullptr, &park_policy);
+    } catch (...) {
+        /* A PARK that did not reach its completion wait leaves the transport
+           where it is; a second attempt has never been run and is not made. */
+        it->second.fail();
+        throw;
+    }
+    it->second.parked();
+    dev->parking = true;
+    DBG(DBG_info, "gl126: parked (%zu waits recorded)\n", park.polls.size());
+}
+
+void CommandSetGl126::move_back_home(Genesys_Device* /*dev*/, bool /*wait_until_home*/) const
+{
+    DBG_HELPER(dbg);
+    /* home() is the scan pass on this chip, and is only meaningful right
+       after a cold init. Calling it from the scan flow would run a
+       scan-length move at an unexpected moment. */
+    not_brought_up("move_back_home");
+}
+
+void CommandSetGl126::wait_for_motor_stop(Genesys_Device* /*dev*/) const
+{
+    DBG_HELPER(dbg);
+    /* The vendor has no such wait: every motor move in its flow ends with
+       its own completion poll (POSITION's W3, PARK's Wait A/B), which the
+       hooks run explicitly. Nothing to do here. */
+}
+
+/* Called from genesys_start_scan, before calibration, for GL126 as
+   well as for sheet-fed models. A pure checker: it never runs LOAD, and
+   never touches the hardware at all. The "Load film" button is the
+   only thing that loads the magazine now. */
+void CommandSetGl126::load_document(Genesys_Device* dev) const
+{
+    DBG_HELPER(dbg);
+    magazine_check_scan_allowed(dev);
+}
+
+void CommandSetGl126::eject_document(Genesys_Device* dev) const
+{
+    DBG_HELPER(dbg);
+    magazine_eject_impl(dev);
+}
+
+void CommandSetGl126::detect_document_end(Genesys_Device* /*dev*/) const
+{
+    DBG_HELPER(dbg);
+    /* Frames are addressed by number, not by an end-of-document sensor. */
+}
+
+void CommandSetGl126::update_hardware_sensors(struct Genesys_Scanner* /*s*/) const
+{
+    DBG_HELPER(dbg);
+    /* The loader sensor bit is only reliable before the base table is
+       written, so it is read in the load flow rather than polled here. */
+}
+
+void CommandSetGl126::update_home_sensor_gpio(Genesys_Device& /*dev*/) const
+{
+    DBG_HELPER(dbg);
+}
+
+void CommandSetGl126::send_shading_data(Genesys_Device* /*dev*/,
+                                        const Genesys_Sensor& /*sensor*/,
+                                        std::uint8_t* /*data*/, int /*size*/) const
+{
+    DBG_HELPER(dbg);
+    /* has_send_shading_data() is false: the shading upload is part of the
+       calibration phases, in the vendor's own format. */
+}
+
+void CommandSetGl126::send_gamma_table(Genesys_Device* /*dev*/,
+                                       const Genesys_Sensor& /*sensor*/) const
+{
+    DBG_HELPER(dbg);
+    /* The driver delivers linear data; gamma belongs to the frontend. */
+}
+
+void CommandSetGl126::set_fe(Genesys_Device* /*dev*/, const Genesys_Sensor& /*sensor*/,
+                             std::uint8_t /*set*/) const
+{
+    DBG_HELPER(dbg);
+    /* The AFE is programmed from the phase tables (regs 0x5d/0x5e), not
+       through a separate front-end entry point. */
+}
+
+void CommandSetGl126::set_powersaving(Genesys_Device* /*dev*/, int /*delay*/) const
+{
+    DBG_HELPER(dbg);
+}
+
+void CommandSetGl126::save_power(Genesys_Device* /*dev*/, bool /*enable*/) const
+{
+    DBG_HELPER(dbg);
+    /* The unit leaves the USB bus a few minutes after a session releases
+       it and only a power cycle brings it back, so there is nothing safe
+       to do here. */
+}
+
+void push_dual_light_nodes(const ScanSession& session, ImagePipelineStack& pipeline)
+{
+    if (session.gl126_keep_parity > 1) {
+        return;   // the plain profile: every line is the image
+    }
+    pipeline.push_node<ImagePipelineNodeGl126KeepParity>(session.gl126_keep_parity);
+    /* No IR crop here any more: the core's ComponentShiftLines node
+       aligns the infrared channels like the visible ones and takes the
+       same number of lines off the ends as the crop did. */
+}
+
+/* The entry points genesys.cpp's option handlers call: the three
+   buttons and the one line of text that tells the operator where the
+   magazine is believed to be. Declared in gl126.h; the work is in the
+   anonymous namespace above. */
+void magazine_load_film(Genesys_Device* dev)
+{
+    magazine_load_film_impl(dev);
+}
+
+void magazine_eject(Genesys_Device* dev)
+{
+    magazine_eject_impl(dev);
+}
+
+void magazine_check_status(Genesys_Device* dev)
+{
+    magazine_check_status_impl(dev);
+}
+
+/* The possible values of the "magazine" status line: the constants
+   themselves are declared early in the file now (next to
+   magazine_state_name()), so magazine_check_status_impl() (defined in
+   the same unnamed namespace, well before this point) can use them too.
+
+   Exposed as a list so genesys.cpp can give the option a
+   SANE_CONSTRAINT_STRING_LIST: a constrained string draws as a plain
+   combo showing its current value, instead of an edit box with Add and
+   Remove buttons beside it. All twelve values are listed, not only the
+   seven the plain state machine returns, so that the Check status
+   button's four extra observations and the retry wording are valid GET
+   results for this option's own constraint too. */
+const char* const* magazine_state_values()
+{
+    static const char* const values[] = {
+        kMagazineUnknown, kMagazinePending, kMagazineEjectedPending, kMagazineReleased,
+        kMagazineReleasedNoClear, kMagazineLoaded, kMagazineEjected, kMagazineFailed,
+        kMagazineCold, kMagazineNoMagazine, kMagazinePresentNotLoaded, kMagazineUnknownHw,
+        nullptr,
+    };
+    return values;
+}
+
+std::string magazine_state_text(const Genesys_Device* dev)
+{
+    /* "Check status" is allowed to read the hardware and report what it
+       found without that necessarily being a real MagazineState
+       transition (e.g. "no magazine in the slot" while the in-process
+       state may still be, say, Loaded from before a magazine was pulled
+       out without telling the backend). Its snapshot takes priority
+       here and is invalidated by set_magazine_state() the moment
+       anything real happens, so it can never go stale. */
+    auto override_it = magazine_check_override_map().find(dev);
+    if (override_it != magazine_check_override_map().end()) {
+        return override_it->second;
+    }
+
+    switch (magazine_state_of(dev)) {
+    case MagazineState::Released:
+        /* Which of the two Released texts depends on whether the wait
+           that put us here ever saw the sensor clear, the same flag
+           that decides whether the next "Load film" press must jog
+           again. */
+        return magazine_wait_saw_clear(dev) ? kMagazineReleased : kMagazineReleasedNoClear;
+    case MagazineState::Loaded:   return kMagazineLoaded;
+    case MagazineState::Ejected:  return kMagazineEjected;
+    case MagazineState::Failed:   return kMagazineFailed;
+    case MagazineState::Unknown:  break;
+    }
+    /* Unknown in this process is not the whole truth: a release, an eject
+       or a completed load written by an earlier one survives on disk,
+       and `scanimage` reaches us in a fresh process every invocation.
+       Seen on hardware: a frontend restarted between the release and
+       the scan, and the status line said "unknown" while a load was
+       genuinely pending. Consult the mark, the same way
+       load_document() does, and mirror its kind in the text so the
+       line agrees with what a scan will actually do.
+
+       The loader sensor is deliberately not read here: an option query
+       should not put a register read on the wire, and that bit reports
+       presence rather than whether the film is fed, that is exactly
+       what the Check status button is for. */
+    gl126::MagazineMarkKind marked_kind = gl126::MagazineMarkKind::Released;
+    std::string marked_key;
+    if (gl126::magazine_mark_read(&marked_kind, &marked_key) &&
+        marked_key == magazine_device_key(dev))
+    {
+        switch (marked_kind) {
+        case gl126::MagazineMarkKind::Ejected:  return kMagazineEjectedPending;
+        case gl126::MagazineMarkKind::Loaded:   return kMagazineLoaded;
+        case gl126::MagazineMarkKind::Released: return kMagazinePending;
+        case gl126::MagazineMarkKind::Failed:   return kMagazineFailed;
+        }
+    }
+    return kMagazineUnknown;
+}
+
+void read_image_chunk_usb(Genesys_Device* dev, std::uint8_t* data, std::size_t size)
+{
+    DBG_HELPER_ARGS(dbg, "%zu bytes", size);
+    auto it = scan_pass().find(dev);
+    bool first = false;
+    if (it == scan_pass().end() || !it->second.chunk_begin(&first)) {
+        throw SaneException(SANE_STATUS_INVAL,
+                            "gl126: image chunk requested with no scan pass streaming (%s). "
+                            "Nothing was written.",
+                            it == scan_pass().end() ? "Idle"
+                                                    : scan_pass_state_name(it->second.state()));
+    }
+    UsbWire wire(dev);
+    try {
+        read_image_chunk(wire, data, size, first);
+    } catch (const OpsError& e) {
+        it->second.fail();
+        throw SaneException(SANE_STATUS_IO_ERROR,
+                            "gl126: image chunk of %zu bytes failed (%s) after %zu of %zu raw "
+                            "bytes. Nothing further was written; power-cycle the scanner, no "
+                            "recovery is attempted.",
+                            size, e.what(), it->second.bytes_read(),
+                            it->second.bytes_expected());
+    }
+    it->second.chunk_done(size);
+    if (it->second.state() == ScanPassState::Complete) {
+        DBG(DBG_info, "gl126: scan pass complete, %zu raw bytes read\n",
+            it->second.bytes_read());
+    }
+}
+
+} // namespace gl126
+} // namespace genesys

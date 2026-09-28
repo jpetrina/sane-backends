@@ -118,6 +118,7 @@ std::ostream& operator<<(std::ostream& out, ModelId id)
         case ModelId::PANASONIC_KV_SS080: out << "PANASONIC_KV_SS080"; break;
         case ModelId::PENTAX_DSMOBILE_600: out << "PENTAX_DSMOBILE_600"; break;
         case ModelId::PLUSTEK_OPTICBOOK_3800: out << "PLUSTEK_OPTICBOOK_3800"; break;
+        case ModelId::PLUSTEK_OPTICFILM_135I: out << "PLUSTEK_OPTICFILM_135I"; break;
         case ModelId::PLUSTEK_OPTICFILM_7200: out << "PLUSTEK_OPTICFILM_7200"; break;
         case ModelId::PLUSTEK_OPTICFILM_7200I: out << "PLUSTEK_OPTICFILM_7200I"; break;
         case ModelId::PLUSTEK_OPTICFILM_7300: out << "PLUSTEK_OPTICFILM_7300"; break;
@@ -171,6 +172,7 @@ std::ostream& operator<<(std::ostream& out, SensorId id)
         case SensorId::CCD_PLUSTEK_OPTICBOOK_3800: out << "CCD_PLUSTEK_OPTICBOOK_3800"; break;
         case SensorId::CCD_PLUSTEK_OPTICFILM_7200: out << "CCD_PLUSTEK_OPTICFILM_7200"; break;
         case SensorId::CCD_PLUSTEK_OPTICFILM_7200I: out << "CCD_PLUSTEK_OPTICFILM_7200I"; break;
+        case SensorId::CCD_PLUSTEK_OPTICFILM_135I: out << "CCD_PLUSTEK_OPTICFILM_135I"; break;
         case SensorId::CCD_PLUSTEK_OPTICFILM_7300: out << "CCD_PLUSTEK_OPTICFILM_7300"; break;
         case SensorId::CCD_PLUSTEK_OPTICFILM_7400_V1: out << "CCD_PLUSTEK_OPTICFILM_7400_V1"; break;
         case SensorId::CCD_PLUSTEK_OPTICFILM_7400_V2: out << "CCD_PLUSTEK_OPTICFILM_7400_V2"; break;

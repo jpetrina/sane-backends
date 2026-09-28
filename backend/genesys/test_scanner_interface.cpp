@@ -34,6 +34,26 @@ TestScannerInterface::TestScannerInterface(Genesys_Device* dev, std::uint16_t ve
     // initialize status registers
     if (dev_->model->asic_type == AsicType::GL124) {
         write_register(0x101, 0x00);
+    } else if (dev_->model->asic_type == AsicType::GL126) {
+        // GL126 (OpticFilm 135i): its status address is 0x101 like GL124's,
+        // and its init()/offset_calibration read reg 0x01 directly (the
+        // idle-homed check). Seed both so the backend can be driven in
+        // test mode; 0x01 = 0x00 reads as "cold, never homed", which
+        // makes offset_calibration stop early (before the lamp-warmup
+        // loop), enough to observe that calibration was entered.
+        write_register(0x01, 0x00);
+        write_register(0x101, 0x00);
+        // Regs 0x3b/0x3c: the magazine flow reads these unconditionally,
+        // the Load film / Check status hooks as preconditions/
+        // diagnostics, "eject" as a refusal check, and
+        // RegisterCache::get() throws for an address that was never
+        // written, unlike real hardware, which always answers a
+        // register read with something. Seeded to 0x00/0x00 (the state
+        // a device-open table leaves) so test-mode scenarios that only
+        // care about reg 0x01/0x101 do not have to seed these too just
+        // to avoid that mock-only throw.
+        write_register(0x3B, 0x00);
+        write_register(0x3C, 0x00);
     } else {
         write_register(0x41, 0x00);
     }
@@ -90,11 +110,13 @@ std::uint8_t TestScannerInterface::read_register(std::uint16_t address)
 void TestScannerInterface::write_register(std::uint16_t address, std::uint8_t value)
 {
     cached_regs_.update(address, value);
+    ++cache_write_count_;
 }
 
 void TestScannerInterface::write_registers(const Genesys_Register_Set& regs)
 {
     cached_regs_.update(regs);
+    ++cache_write_count_;
 }
 
 
@@ -102,6 +124,7 @@ void TestScannerInterface::write_0x8c(std::uint8_t index, std::uint8_t value)
 {
     (void) index;
     (void) value;
+    ++cache_write_count_;
 }
 
 void TestScannerInterface::bulk_read_data(std::uint8_t addr, std::uint8_t* data, std::size_t size)
@@ -115,6 +138,7 @@ void TestScannerInterface::bulk_write_data(std::uint8_t addr, std::uint8_t* data
     (void) addr;
     (void) data;
     (void) size;
+    ++cache_write_count_;
 }
 
 void TestScannerInterface::write_buffer(std::uint8_t type, std::uint32_t addr, std::uint8_t* data,
@@ -124,6 +148,7 @@ void TestScannerInterface::write_buffer(std::uint8_t type, std::uint32_t addr, s
     (void) addr;
     (void) data;
     (void) size;
+    ++cache_write_count_;
 }
 
 void TestScannerInterface::write_gamma(std::uint8_t type, std::uint32_t addr, std::uint8_t* data,
@@ -133,6 +158,7 @@ void TestScannerInterface::write_gamma(std::uint8_t type, std::uint32_t addr, st
     (void) addr;
     (void) data;
     (void) size;
+    ++cache_write_count_;
 }
 
 void TestScannerInterface::write_ahb(std::uint32_t addr, std::uint32_t size, std::uint8_t* data)
@@ -140,6 +166,7 @@ void TestScannerInterface::write_ahb(std::uint32_t addr, std::uint32_t size, std
     (void) addr;
     (void) size;
     (void) data;
+    ++cache_write_count_;
 }
 
 std::uint16_t TestScannerInterface::read_fe_register(std::uint8_t address)
@@ -150,6 +177,7 @@ std::uint16_t TestScannerInterface::read_fe_register(std::uint8_t address)
 void TestScannerInterface::write_fe_register(std::uint8_t address, std::uint16_t value)
 {
     cached_fe_regs_.update(address, value);
+    ++cache_write_count_;
 }
 
 IUsbDevice& TestScannerInterface::get_usb_device()
