@@ -17,6 +17,12 @@
 :status :basic
 :comment "Has a Primax USB ID"
 
+:model "OpticFilm 135i"
+:interface "USB"
+:usbid "0x07b3" "0x1436"
+:status :untested
+:comment "GL126; backend skeleton, hardware bring-up in progress"
+
 :model "OpticFilm 7200"
 :interface "USB"
 :usbid "0x07b3" "0x0807"

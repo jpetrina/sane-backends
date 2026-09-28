@@ -2311,6 +2311,119 @@ void genesys_init_usb_device_tables()
 
 
 
+    /* Plustek OpticFilm 135i (GL126).
+
+       The GL126 command set drives the chip from register tables
+       generated from USB captures of the vendor driver (gl126_tables.cpp),
+       so the adc/gpio/motor tables the core looks up by id are never
+       consulted by any GL126 hook: the ids below are the OpticFilm 7200's
+       only because the model needs valid entries to register. Nothing
+       reaches the wire from those tables.
+
+       Geometry is the 35 mm frame as the driver scans it: a 36 x 24 mm
+       image area on a strip fed through the magazine. */
+    model = Genesys_Model();
+    model.name = "plustek-opticfilm-135i";
+    model.vendor = "PLUSTEK";
+    model.model = "OpticFilm 135i";
+    model.model_id = ModelId::PLUSTEK_OPTICFILM_135I;
+    model.asic_type = AsicType::GL126;
+
+    /* Every resolution is captured with the dual-light (IR + visible) pass
+       except 3600 dpi, which also has the vendor's visible-only pass; the
+       IR method delivers the IR lines of the same dual pass as a separate
+       scan.
+
+       This array's own order has no effect on anything:
+       MethodResolutions::get_resolutions() (device.cpp) unconditionally
+       re-sorts descending and deduplicates whatever is here before any
+       caller sees it, so listing it ascending (which was tried first)
+       changed nothing. Left in the upstream convention (highest first)
+       for that reason; the actual fix, GL126's word list reversed to
+       ascending for the frontend combo only, lives where the ordering
+       is real, genesys.cpp's set_resolution_option_values(). */
+    model.resolutions = {
+        {
+            { ScanMethod::TRANSPARENCY, ScanMethod::TRANSPARENCY_INFRARED },
+            { 7200, 3600, 2400, 1200, 600 },
+            { 7200, 3600, 2400, 1200, 600 },
+        }
+    };
+
+    model.bpp_gray_values = { 16 };
+    model.bpp_color_values = { 16 };
+    model.default_method = ScanMethod::TRANSPARENCY;
+
+    model.x_offset = 0.0;
+    model.y_offset = 0.0;
+    /* The captured frame: 3762 px across the sensor window and 5137 lines
+       along the transport at 3600 dpi (26.54 x 36.24 mm). The scan hook
+       pins the session to these regardless of the requested window. */
+    model.x_size = 26.5447;
+    model.y_size = 36.2447;
+
+    model.y_offset_calib_white = 0.0;
+    model.y_size_calib_mm = 0.0;
+    model.x_offset_calib_black = 0.0;
+    model.x_size_calib_mm = 36.0;
+
+    model.x_offset_ta = 0.0;
+    model.y_offset_ta = 0.0;
+    model.x_size_ta = 36.0;
+    model.y_size_ta = 24.0;
+
+    model.y_offset_sensor_to_ta = 0.0;
+    model.y_offset_calib_black_ta = 0.0;
+    model.y_offset_calib_white_ta = 0.0;
+    model.y_size_calib_ta_mm = 0.0;
+
+    model.post_scan = 0.0;
+    model.eject_feed = 0.0;
+
+    /* Colour-line shift at the motor's base 3600 dpi: in the raw stream a
+       feature appears in R 24 lines after B, in G 12 lines after B,
+       matching the driver's own align_channels(), whose output the
+       core's ComponentShiftLines node reproduces exactly: output line k
+       = R[k+24], G[k+12], B[k]; verified offline on captured images. */
+    model.ld_shift_r = 24;
+    model.ld_shift_g = 12;
+    model.ld_shift_b = 0;
+
+    model.line_mode_color_order = ColorOrder::RGB;
+
+    model.is_cis = false;
+    /* Not sheetfed: that path ejects after every scan and reloads before
+       calibration, which breaks scanning several frames of one strip on
+       one load. The magazine is handled through the load-film /
+       eject-film options instead. */
+    model.is_sheetfed = false;
+
+    model.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_135I;
+    /* Never consulted by the GL126 hooks, see the note above. */
+    model.adc_id = AdcId::PLUSTEK_OPTICFILM_7200;
+    model.gpio_id = GpioId::PLUSTEK_OPTICFILM_7200;
+    model.motor_id = MotorId::PLUSTEK_OPTICFILM_7200;
+
+    /* No ModelFlag::WARMUP: the core's warm-up moves the head to the
+       calibration area and runs a lamp warm-up before every scan, neither
+       of which the vendor does on this unit. The lamp warm-up that exists
+       is the retry inside the gain calibration.
+       DISABLE_SHADING_CALIBRATION: the shading tables are measured and
+       uploaded by the backend's own calibration hook, in the vendor's
+       format; the core's shading pass, repark and coefficient upload are
+       never used. */
+    /* HOST_SIDE_GRAY: the vendor's scan pass is always 3-channel; a gray
+       request is scanned in colour and merged on the host by the core's
+       pipeline, so the hooks see one and the same session (seen on
+       hardware: a gray default request was refused by the frame
+       check). */
+    model.flags = ModelFlag::DISABLE_SHADING_CALIBRATION |
+                  ModelFlag::HOST_SIDE_GRAY;
+
+    model.search_lines = 200;
+    s_usb_devices->emplace_back(0x07b3, 0x1436, model);
+
+
     model = Genesys_Model();
     model.name = "plustek-opticfilm-7200";
     model.vendor = "PLUSTEK";

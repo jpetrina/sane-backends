@@ -3355,6 +3355,58 @@ void genesys_init_sensor_tables()
     }
 
 
+    /* Plustek OpticFilm 135i (GL126). The GL126 command set drives the
+       chip from register tables generated from USB captures
+       (gl126_tables.cpp), so the per-sensor register and calibration
+       fields the core uses for other chips are not consulted; what the
+       core does read from here is the resolution list, the scan method
+       and the channel count. The rest is left at its defaults and marked
+       as such rather than copied from another sensor. */
+    sensor = Genesys_Sensor();
+    sensor.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_135I; // gl126
+    sensor.full_resolution = 7200;
+    sensor.optical_resolution = 7200;
+    sensor.register_dpihw = 3600; // not used by the GL126 hooks
+    sensor.black_pixels = 0;      // calibration is table-driven in gl126.cpp
+    sensor.dummy_pixel = 0;
+    sensor.fau_gain_white_ref = 0;
+    sensor.gain_white_ref = 0;
+    sensor.exposure = { 0x0000, 0x0000, 0x0000 };
+    /* Not consumed by the GL126 hooks: the captured tables carry the
+       per-channel exposure block (regs 0xe0-0xf7, DPI-independent). The
+       core still needs a non-negative value here to seed its exposure
+       option; 0x3ffb is the end of that captured block. */
+    sensor.exposure_lperiod = 0x3ffb;
+    sensor.gamma = { 1.0f, 1.0f, 1.0f };
+    {
+        struct CustomSensorSettings
+        {
+            ValueFilterAny<unsigned> resolutions;
+            unsigned register_dpiset;
+        };
+
+        CustomSensorSettings custom_settings[] = {
+            { { 600 }, 600 },
+            { { 1200 }, 1200 },
+            { { 2400 }, 2400 },
+            { { 3600 }, 3600 },
+            { { 7200 }, 7200 },
+        };
+
+        for (const CustomSensorSettings& setting : custom_settings) {
+            for (ScanMethod method : { ScanMethod::TRANSPARENCY,
+                                       ScanMethod::TRANSPARENCY_INFRARED }) {
+                sensor.resolutions = setting.resolutions;
+                sensor.method = method;
+                sensor.shading_resolution = setting.resolutions.values().front();
+                sensor.register_dpiset = setting.register_dpiset;
+                sensor.pixel_count_ratio = Ratio{1, 1};
+                sensor.output_pixel_offset = 0;
+                s_sensors->push_back(sensor);
+            }
+        }
+    }
+
     sensor = Genesys_Sensor();
     sensor.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_7300; // gl843
     sensor.full_resolution = 7200;
