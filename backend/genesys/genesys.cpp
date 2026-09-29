@@ -38,6 +38,9 @@
 #define DEBUG_NOT_STATIC
 
 #include "genesys.h"
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
 #include "gl124_registers.h"
 #include "gl841_registers.h"
 #include "gl842_registers.h"
@@ -66,6 +69,17 @@
 #endif
 
 namespace genesys {
+
+// OpticBook 4800: the shading pass runs in the scan's own window and read-out
+// mode, with a lamp-off dark pass; this used to be limited to the full CCD
+// clock, OB4800_CALIB_LEGACY=1 restores that limit for A/B comparison.
+static bool ob4800_scan_window_calibration(const Genesys_Sensor& sensor, unsigned resolution)
+{
+    if (std::getenv("OB4800_CALIB_LEGACY") != nullptr) {
+        return resolution == sensor.full_resolution;
+    }
+    return true;
+}
 
 // Data that we allocate to back SANE_Device objects in s_sane_devices
 struct SANE_Device_Data
@@ -878,6 +892,14 @@ void scanner_move_to_ta(Genesys_Device& dev)
 void scanner_move_back_home(Genesys_Device& dev, bool wait_until_home)
 {
     DBG_HELPER_ARGS(dbg, "wait_until_home = %d", wait_until_home);
+
+    if (dev.model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800) {
+        // Never leave the carriage moving: on this chip the motor is stopped at
+        // the home sensor only in the waiting branch below, and a command issued
+        // by the next scan while the carriage is still travelling home drives
+        // it into the stop.
+        wait_until_home = true;
+    }
 
     switch (dev.model->asic_type) {
         case AsicType::GL841:
@@ -2298,7 +2320,9 @@ static void genesys_shading_calibration_impl(Genesys_Device* dev, const Genesys_
     if (is_dark) {
         // wait some time to let lamp to get dark
         dev->interface->sleep_ms(200);
-    } else if (has_flag(dev->model->flags, ModelFlag::DARK_CALIBRATION)) {
+    } else if (has_flag(dev->model->flags, ModelFlag::DARK_CALIBRATION) ||
+               (dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 &&
+                ob4800_scan_window_calibration(sensor, dev->calib_session.params.xres))) {
         // make sure lamp is bright again
         // FIXME: what about scanners that take a long time to warm the lamp?
         dev->interface->sleep_ms(500);
@@ -2315,8 +2339,27 @@ static void genesys_shading_calibration_impl(Genesys_Device* dev, const Genesys_
         return;
     }
 
-    sanei_genesys_read_data_from_scanner(dev, reinterpret_cast<std::uint8_t*>(calibration_data.data()),
-                                         size);
+    if (dev->calib_session.params.depth == 8) {
+        // 8 bit calibration scan (OpticBook 4800): read bytes, widen to 16 bit
+        std::vector<std::uint8_t> raw8(size / 2);
+        // 'size' allows for one extra line from the chip. In the
+        // single-channel (gray) session the chip delivers exactly
+        // output_line_bytes * lines, so waiting for the extra line times out;
+        // read what the chip actually sends. The averaging below only uses
+        // params.lines lines, the unread tail stays zero and unused.
+        std::size_t to_read = raw8.size();
+        if (dev->total_bytes_to_read > 0 &&
+            dev->total_bytes_to_read < to_read) {
+            to_read = dev->total_bytes_to_read;
+        }
+        sanei_genesys_read_data_from_scanner(dev, raw8.data(), to_read);
+        for (std::size_t i = 0; i < raw8.size(); ++i) {
+            calibration_data[i] = static_cast<std::uint16_t>((raw8[i] << 8) | raw8[i]);
+        }
+    } else {
+        sanei_genesys_read_data_from_scanner(dev, reinterpret_cast<std::uint8_t*>(calibration_data.data()),
+                                             size);
+    }
 
     dev->cmd_set->end_scan(dev, &local_reg, true);
 
@@ -3190,6 +3233,7 @@ static void compute_shifted_coefficients(Genesys_Device * dev,
   }
 }
 
+
 static void genesys_send_shading_coefficient(Genesys_Device* dev, const Genesys_Sensor& sensor)
 {
     DBG_HELPER(dbg);
@@ -3407,6 +3451,234 @@ static void genesys_send_shading_coefficient(Genesys_Device* dev, const Genesys_
                             coeff,
                             target_code);
       break;
+    case SensorId::CCD_PLUSTEK_OPTICBOOK_4800:
+        // averages are channel-interleaved; compute_coefficients produces the
+        // chip's own record layout: dark, gain for R, G, B per pixel (12 bytes).
+        // White target, one value for all CCD clocking groups: with the white
+        // reference rebased onto the measured dark level the groups agree to
+        // within ~2% (white paper comes out at ~195-199 after the 1.7 gamma).
+        // OB4800_SHADING_TARGET overrides it for tuning.
+        target_code = 0xa400;
+        {
+            // Sanity check: a failed calibration pass (lamp not lit yet, USB
+            // hiccup, scanner still waking up) yields near-black "white" data.
+            // The coefficients then saturate and every scan comes out black —
+            // and the result would be cached, so it would keep happening.
+            // Refuse such a calibration instead; the next run calibrates anew.
+            unsigned n = std::min<std::size_t>(dev->white_average_data.size(),
+                                               pixels_per_line * 3);
+            if (n > 300) {
+                std::vector<std::uint16_t> mid(dev->white_average_data.begin() + n / 3,
+                                               dev->white_average_data.begin() + 2 * n / 3);
+                std::nth_element(mid.begin(), mid.begin() + mid.size() / 2, mid.end());
+                unsigned median = mid[mid.size() / 2];
+                if (median < target_code / 5) {
+                    throw SaneException(SANE_STATUS_INVAL,
+                        "OpticBook 4800: shading calibration failed, the white reference reads "
+                        "%u (expected at least %u). The lamp may not have been lit or the "
+                        "scanner was not ready; power-cycle the scanner and try again.",
+                        median, target_code / 5);
+                }
+            }
+        }
+        if (const char* e = std::getenv("OB4800_SHADING_TARGET")) {
+            unsigned t = static_cast<unsigned>(std::strtoul(e, nullptr, 0));
+            if (t >= 0x1000 && t <= 0xffff) {
+                target_code = t;
+            }
+        }
+        {
+            // White reference on the glass plane: the calibration strip under
+            // the frame sees the lamp ripple at a different contrast than the
+            // document does. If a reference file for this pixel pitch exists,
+            // it replaces the strip; OB4800_WHITE_REF_SAVE=1 creates it from
+            // the current calibration (run with OB4800_CALIB_Y_MM pointing at
+            // a white sheet on the glass).
+            std::string path;
+            if (const char* home = std::getenv("HOME")) {
+                path = std::string(home) + "/.sane/opticbook4800-white-" +
+                       std::to_string(sensor.shading_resolution) +
+                       (dev->calib_session.params.channels == 1 ? "-gray" : "") +
+                       ".dat";
+            }
+            // OB4800: a single-channel shading pass (gray scan) is spread to
+            // three identical channels here, before the white reference and
+            // the coefficient computation, which both expect 3 channels.
+            if (dev->white_average_data.size() == pixels_per_line) {
+                std::vector<std::uint16_t> w3(pixels_per_line * 3);
+                std::vector<std::uint16_t> d3(pixels_per_line * 3, 0);
+                for (unsigned i = 0; i < pixels_per_line; i++) {
+                    std::uint16_t wv = dev->white_average_data[i];
+                    std::uint16_t dv = i < dev->dark_average_data.size()
+                                           ? dev->dark_average_data[i] : 0;
+                    for (unsigned c = 0; c < 3; c++) {
+                        w3[i * 3 + c] = wv;
+                        d3[i * 3 + c] = dv;
+                    }
+                }
+                dev->white_average_data = w3;
+                dev->dark_average_data = d3;
+                DBG(DBG_info, "%s: OB4800 single-channel shading pass spread to "
+                    "3 channels (%u px)\n", __func__, pixels_per_line);
+            }
+            unsigned n = pixels_per_line * 3;
+            if (!path.empty() && std::getenv("OB4800_WHITE_REF_SAVE")) {
+                std::ofstream f(path, std::ios::binary);
+                f << "OB4800WREF2 " << pixels_per_line << " 3 "
+                  << dev->calib_session.params.startx << "\n";
+                for (unsigned i = 0; i < n && i < dev->white_average_data.size(); i++) {
+                    std::uint16_t v = dev->white_average_data[i];
+                    f.put(static_cast<char>(v & 0xff));
+                    f.put(static_cast<char>(v >> 8));
+                }
+                DBG(DBG_info, "%s: white reference saved to %s\n", __func__, path.c_str());
+            } else if (!path.empty()) {
+                std::ifstream f(path, std::ios::binary);
+                std::string magic; unsigned fp = 0, fc = 0, fs = 0;
+                bool hdr_ok = false;
+                if (f && (f >> magic >> fp >> fc)) {
+                    if (magic == "OB4800WREF") {
+                        hdr_ok = (fc == 3);            // v1: window starts at sensor pixel 0
+                    } else if (magic == "OB4800WREF2" && (f >> fs)) {
+                        hdr_ok = (fc == 3);            // v2: header carries the window start
+                    }
+                }
+                // average data are laid out from sensor pixel 0 (zeros below the
+                // window start) and so is the file; pixels_per_line already includes
+                // the window start. The file must have valid data from a start no
+                // later than the current one and be at least as long as the window.
+                unsigned cur_sx = dev->calib_session.params.startx;
+                if (hdr_ok && !(fs <= cur_sx && fp >= pixels_per_line)) {
+                    DBG(DBG_info, "%s: white reference %s (start %u, %u px) does not cover "
+                        "the window (start %u, %u px), ignoring it\n", __func__,
+                        path.c_str(), fs, fp, cur_sx, pixels_per_line);
+                    hdr_ok = false;
+                }
+                if (hdr_ok)
+                {
+                    f.get(); // newline
+                    std::vector<char> full(static_cast<std::size_t>(fp) * 3 * 2);
+                    std::vector<char> buf(n * 2);
+                    bool read_ok = static_cast<bool>(f.read(full.data(), full.size()));
+                    if (read_ok) {
+                        std::copy(full.begin(), full.begin() + buf.size(), buf.begin());
+                    }
+                    if (read_ok) {
+                        if (dev->white_average_data.size() < n) {
+                            dev->white_average_data.resize(n);
+                        }
+                        // OB4800: the file holds raw white including its own dark
+                        // pedestal, while shading coefficients are computed against
+                        // the dark level of the current pass (dummy columns 5..36).
+                        // Rebase the reference so that the denominator stays
+                        // white_file - dark_file instead of white_file - dark_live.
+                        const unsigned nch = 3;
+                        double dlive[3] = { 0, 0, 0 }, dfile[3] = { 0, 0, 0 };
+                        bool rebase = (std::getenv("OB4800_WREF_NODARK") == nullptr) &&
+                                      n >= 37 * nch &&
+                                      dev->white_average_data.size() >= 37 * nch;
+                        if (rebase) {
+                            for (unsigned c = 0; c < nch; c++) {
+                                double sl = 0, sf = 0;
+                                for (unsigned x = 5; x < 37; x++) {
+                                    unsigned k = x * nch + c;
+                                    sl += dev->white_average_data[k];
+                                    sf += static_cast<unsigned char>(buf[2 * k]) |
+                                          (static_cast<unsigned char>(buf[2 * k + 1]) << 8);
+                                }
+                                dlive[c] = sl / 32.0;
+                                dfile[c] = sf / 32.0;
+                            }
+                            DBG(DBG_info, "%s: white ref rebase, dark file %.0f/%.0f/%.0f "
+                                "live %.0f/%.0f/%.0f\n", __func__,
+                                dfile[0], dfile[1], dfile[2],
+                                dlive[0], dlive[1], dlive[2]);
+                        }
+                        // At the full CCD clock the live pass runs in the scan's own
+                        // window and sees the narrow CCD/dust defects pixel for pixel,
+                        // while the chip delivers a reference captured with another
+                        // width shifted by a few pixels against it. So use the reference
+                        // only for the smooth part — the lamp ripple difference between
+                        // the strip under the frame and the glass plane — and keep the
+                        // fine structure of the live pass:
+                        //   white = dark + (live - dark) * S(file - dark) / S(live - dark)
+                        // with S a ~2.5 mm moving average. A few pixels of misalignment
+                        // do not matter to the smooth part, so the reference no longer
+                        // depends on the width it was captured with.
+                        bool ratio_mode = ob4800_scan_window_calibration(sensor, sensor.shading_resolution) &&
+                                          (std::getenv("OB4800_WREF_REPLACE") == nullptr) &&
+                                          (n / nch > cur_sx + 256);
+                        if (ratio_mode) {
+                            unsigned px = n / nch;
+                            unsigned x0 = cur_sx, x1 = px;
+                            unsigned W = std::max(32u, sensor.shading_resolution / 10);
+                            std::vector<double> live(n), filev(n);
+                            for (unsigned i = 0; i < n; i++) {
+                                live[i] = dev->white_average_data[i];
+                                double v = static_cast<unsigned char>(buf[2*i]) |
+                                           (static_cast<unsigned char>(buf[2*i+1]) << 8);
+                                if (rebase) {
+                                    v += dlive[i % nch] - dfile[i % nch];
+                                }
+                                filev[i] = v;
+                            }
+                            for (unsigned c = 0; c < nch; c++) {
+                                std::vector<double> pl(x1 - x0 + 1, 0.0), pf(x1 - x0 + 1, 0.0);
+                                for (unsigned x = x0; x < x1; x++) {
+                                    unsigned k = x * nch + c;
+                                    pl[x - x0 + 1] = pl[x - x0] + std::max(0.0, live[k] - dlive[c]);
+                                    pf[x - x0 + 1] = pf[x - x0] + std::max(0.0, filev[k] - dlive[c]);
+                                }
+                                for (unsigned x = x0; x < x1; x++) {
+                                    unsigned a = (x >= x0 + W) ? x - W : x0;
+                                    unsigned b = std::min(x1, x + W + 1);
+                                    double sl = pl[b - x0] - pl[a - x0];
+                                    double sf = pf[b - x0] - pf[a - x0];
+                                    double r = (sl > 1.0) ? sf / sl : 1.0;
+                                    if (r < 0.5) { r = 0.5; }
+                                    if (r > 2.0) { r = 2.0; }
+                                    unsigned k = x * nch + c;
+                                    double v = dlive[c] + std::max(0.0, live[k] - dlive[c]) * r;
+                                    if (v > 65535) { v = 65535; }
+                                    dev->white_average_data[k] = static_cast<std::uint16_t>(v + 0.5);
+                                }
+                            }
+                            DBG(DBG_info, "%s: white reference applied as a smooth ratio "
+                                "(window %u..%u, W=%u)\n", __func__, x0, x1, W);
+                        } else {
+                            for (unsigned i = 0; i < n; i++) {
+                                double v = static_cast<unsigned char>(buf[2*i]) |
+                                           (static_cast<unsigned char>(buf[2*i+1]) << 8);
+                                if (rebase) {
+                                    v += dlive[i % nch] - dfile[i % nch];
+                                }
+                                if (v < 0) { v = 0; }
+                                if (v > 65535) { v = 65535; }
+                                dev->white_average_data[i] = static_cast<std::uint16_t>(v + 0.5);
+                            }
+                        }
+                        DBG(DBG_info, "%s: white reference loaded from %s\n", __func__,
+                            path.c_str());
+                    }
+                }
+            }
+        }
+        length = pixels_per_line * 12;
+        shading_data.clear();
+        shading_data.resize(length, 0);
+        compute_coefficients(dev, shading_data.data(), pixels_per_line, 3,
+                             ColorOrder::RGB, 0, coeff, target_code);
+        if (pixels_per_line > 1000) {
+            unsigned x = 1000 * 3 + 1;   // pixel 1000, channel G
+            const std::uint8_t* r = shading_data.data() + 1000 * 12 + 4;
+            DBG(DBG_info, "%s: OB4800 px1000 G: white=%u dark=%u target=0x%x coeff=0x%x "
+                          "-> record dark=%u gain=%u (avg sizes %zu/%zu)\n", __func__,
+                x < dev->white_average_data.size() ? dev->white_average_data[x] : 0,
+                x < dev->dark_average_data.size() ? dev->dark_average_data[x] : 0,
+                target_code, coeff, r[0] | (r[1] << 8), r[2] | (r[3] << 8),
+                dev->white_average_data.size(), dev->dark_average_data.size());
+        }
+        break;
     case SensorId::CIS_CANON_LIDE_700F:
     case SensorId::CIS_CANON_LIDE_100:
     case SensorId::CIS_CANON_LIDE_200:
@@ -3675,7 +3947,19 @@ static void genesys_flatbed_calibration(Genesys_Device* dev, Genesys_Sensor& sen
             DBG(DBG_proc, "%s : genesys_dark_shading_calibration local_reg ", __func__);
             debug_dump(DBG_proc, local_reg);
 
-            if (has_flag(dev->model->flags, ModelFlag::DARK_CALIBRATION)) {
+            // OB4800: at the full CCD clock the shading window equals the scan
+            // window and starts inside the lit area, so there are no covered CCD
+            // pixels to take the dark level from (dummy-pixel dark comes out as 0
+            // and black scans as ~16% grey). Measure it with a lamp-off pass in
+            // the same window; the motor does not run for that pass, so it adds
+            // no carriage travel.
+            // same rule as gl846 init_regs_for_shading; calib_session is not set
+            // yet at this point (init_regs_for_shading runs inside the pass)
+            bool ob4800_dark_pass = dev->model->model_id == ModelId::PLUSTEK_OPTICBOOK_4800 &&
+                                    std::getenv("OB4800_NO_DARK_PASS") == nullptr &&
+                                    std::getenv("OB4800_CALIB_3CH") == nullptr &&
+                                    ob4800_scan_window_calibration(sensor, sensor.shading_resolution);
+            if (has_flag(dev->model->flags, ModelFlag::DARK_CALIBRATION) || ob4800_dark_pass) {
                 dev->interface->record_progress_message("genesys_dark_shading_calibration");
                 genesys_dark_shading_calibration(dev, sensor, local_reg);
                 genesys_repark_sensor_before_shading(dev);
@@ -3686,7 +3970,7 @@ static void genesys_flatbed_calibration(Genesys_Device* dev, Genesys_Sensor& sen
 
             genesys_repark_sensor_after_white_shading(dev);
 
-            if (!has_flag(dev->model->flags, ModelFlag::DARK_CALIBRATION)) {
+            if (!has_flag(dev->model->flags, ModelFlag::DARK_CALIBRATION) && !ob4800_dark_pass) {
                 if (has_flag(dev->model->flags, ModelFlag::USE_CONSTANT_FOR_DARK_CALIBRATION)) {
                     genesys_dark_shading_by_constant(*dev);
                 } else {

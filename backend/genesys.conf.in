@@ -167,5 +167,8 @@ usb 0x1803 0x162e
 # Plustek OpticBook 3800
 usb 0x07b3 0x1300
 
+# Plustek OpticBook 4800
+usb 0x07b3 0x1301
+
 # Plustek OpticFilm 7600i
 usb 0x07b3 0x0c3b

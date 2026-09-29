@@ -607,6 +607,18 @@ void genesys_init_motor_tables()
 
 
     motor = Genesys_Motor();
+    motor.id = MotorId::PLUSTEK_OPTICBOOK_4800;
+    motor.base_ydpi = 1200;
+    motor.profiles.push_back({MotorSlope::create_from_steps(21551, 875, 292),
+                              StepType::HALF, 3500});
+    motor.profiles.push_back({MotorSlope::create_from_steps(21551, 875, 292),
+                              StepType::HALF, 5500});
+    motor.profiles.push_back({MotorSlope::create_from_steps(21551, 875, 292),
+                              StepType::HALF, 11000});
+    s_motors->push_back(std::move(motor));
+
+
+    motor = Genesys_Motor();
     motor.id = MotorId::CANON_LIDE_80;
     motor.base_ydpi = 2400;
     motor.profiles.push_back({MotorSlope::create_from_steps(9560, 1912, 31), StepType::FULL, 0});

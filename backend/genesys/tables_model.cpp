@@ -2865,6 +2865,64 @@ void genesys_init_usb_device_tables()
 
 
     model = Genesys_Model();
+    model.name = "plustek-opticbook-4800";
+    model.vendor = "PLUSTEK";
+    model.model = "OpticBook 4800";
+    model.model_id = ModelId::PLUSTEK_OPTICBOOK_4800;
+    model.asic_type = AsicType::GL845;
+
+    model.resolutions = {
+        {
+            { ScanMethod::FLATBED },
+            { 1200, 600, 300, 200, 150, 100, 75 },
+            { 1200, 600, 300, 200, 150, 100, 75 },
+        }
+    };
+
+    model.bpp_gray_values = { 8, 16 };
+    model.bpp_color_values = { 8, 16 };
+
+    model.x_offset = 3.88;
+    model.y_offset = 34.0;
+    // width to the end of the CCD line (10200 px = 215.9 mm from the sensor
+    // origin, i.e. 212.75 mm of frame after the 1200/1195 pitch correction);
+    // anything wider only adds empty columns on the right
+    model.x_size = 212.0;   // 33 px before the end of the CCD line: a read-out window
+                          // reaching the last pixels comes back shifted at the full clock
+    model.y_size = 298.0;
+
+    model.y_offset_calib_white = 24.0;
+    model.y_size_calib_mm = 4.0;
+    model.x_offset_calib_black = 0.0;
+    model.x_size_calib_mm = 215.9;
+
+    model.post_scan = 0.0;
+    model.eject_feed = 0.0;
+
+    model.ld_shift_r = 0;
+    model.ld_shift_g = 24;
+    model.ld_shift_b = 48;
+
+    model.line_mode_color_order = ColorOrder::RGB;
+
+    model.is_cis = false;
+    model.is_sheetfed = false;
+    model.sensor_id = SensorId::CCD_PLUSTEK_OPTICBOOK_4800;
+    model.adc_id = AdcId::PLUSTEK_OPTICBOOK_4800;
+    model.gpio_id = GpioId::PLUSTEK_OPTICBOOK_4800;
+    model.motor_id = MotorId::PLUSTEK_OPTICBOOK_4800;
+    model.flags = ModelFlag::CUSTOM_GAMMA |
+                  ModelFlag::SHADING_REPARK |
+                  ModelFlag::DISABLE_ADC_CALIBRATION |
+                  ModelFlag::DISABLE_EXPOSURE_CALIBRATION;
+
+    model.buttons = GENESYS_HAS_NO_BUTTONS;  // TODO there are 4 buttons to support
+    model.search_lines = 100;
+
+    s_usb_devices->emplace_back(0x07b3, 0x1301, model);
+
+
+    model = Genesys_Model();
     model.name = "canon-image-formula-101";
     model.vendor = "Canon";
     model.model = "Image Formula 101";

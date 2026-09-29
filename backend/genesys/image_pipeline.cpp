@@ -24,6 +24,7 @@
 #include "image.h"
 #include "low.h"
 #include <cmath>
+#include <cstring>
 #include <numeric>
 
 namespace genesys {
@@ -641,6 +642,79 @@ ImagePipelineNodeExtract::ImagePipelineNodeExtract(ImagePipelineNode& source,
 }
 
 ImagePipelineNodeExtract::~ImagePipelineNodeExtract() {}
+
+ImagePipelineNodeResampleLines::ImagePipelineNodeResampleLines(ImagePipelineNode& source,
+                                                               std::size_t height) :
+    source_(source),
+    height_{height},
+    source_height_{source.get_height()}
+{
+    cached_line_.resize(source_.get_row_bytes());
+    accum_.resize(get_width() * get_pixel_channels(get_format()));
+}
+
+bool ImagePipelineNodeResampleLines::get_next_row_data(std::uint8_t* out_data)
+{
+    auto format = get_format();
+    auto channels = get_pixel_channels(format);
+    auto width = get_width();
+
+    // source lines belonging to this output line: [consumed_, target)
+    std::size_t target = ((out_row_ + 1) * source_height_) / height_;
+    if (target <= consumed_ && out_row_ > 0) {
+        // stretching: no new source line for this output line, repeat the last
+        out_row_++;
+        std::memcpy(out_data, cached_line_.data(), get_row_bytes());
+        return true;
+    }
+    if (target <= consumed_) {
+        target = consumed_ + 1;
+    }
+    std::fill(accum_.begin(), accum_.end(), 0);
+
+    bool got_data = true;
+    std::size_t taken = 0;
+    while (consumed_ < target) {
+        if (!source_.get_next_row_data(cached_line_.data())) {
+            got_data = false;
+            break;
+        }
+        consumed_++;
+        taken++;
+        for (std::size_t x = 0; x < width; x++) {
+            for (unsigned c = 0; c < channels; c++) {
+                accum_[x * channels + c] += get_raw_channel_from_row(cached_line_.data(), x, c,
+                                                                     format);
+            }
+        }
+    }
+    out_row_++;
+    if (taken == 0) {
+        return false;
+    }
+    for (std::size_t x = 0; x < width; x++) {
+        for (unsigned c = 0; c < channels; c++) {
+            set_raw_channel_to_row(out_data, x, c, accum_[x * channels + c] / taken, format);
+        }
+    }
+    return got_data;
+}
+
+ImagePipelineNodeCropColumns::ImagePipelineNodeCropColumns(ImagePipelineNode& source,
+                                                           std::size_t width) :
+    source_(source),
+    width_{std::min(width, source.get_width())}
+{
+    cached_line_.resize(source_.get_row_bytes());
+}
+
+bool ImagePipelineNodeCropColumns::get_next_row_data(std::uint8_t* out_data)
+{
+    bool got_data = source_.get_next_row_data(cached_line_.data());
+    // formats used here are byte aligned per pixel, so the row prefix is the crop
+    std::memcpy(out_data, cached_line_.data(), get_row_bytes());
+    return got_data;
+}
 
 ImagePipelineNodeScaleRows::ImagePipelineNodeScaleRows(ImagePipelineNode& source,
                                                        std::size_t width) :
