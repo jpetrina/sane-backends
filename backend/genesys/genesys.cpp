@@ -5126,11 +5126,12 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_FORCE_BLACK_CALIBRATION].unit = SANE_UNIT_NONE;
   s->opt[OPT_FORCE_BLACK_CALIBRATION].size = 0;
   s->opt[OPT_FORCE_BLACK_CALIBRATION].constraint_type = SANE_CONSTRAINT_NONE;
-  if (model->asic_type == AsicType::GL848)
+  if (model->asic_type == AsicType::GL848) {
     s->opt[OPT_FORCE_BLACK_CALIBRATION].cap =
       SANE_CAP_SOFT_DETECT | SANE_CAP_SOFT_SELECT | SANE_CAP_ADVANCED;
-  else
+  } else {
     s->opt[OPT_FORCE_BLACK_CALIBRATION].cap = SANE_CAP_INACTIVE;
+  }
 
     // ignore offsets option
     s->opt[OPT_IGNORE_OFFSETS].name = "ignore-internal-offsets";
