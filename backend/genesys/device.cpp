@@ -196,6 +196,7 @@ std::ostream& operator<<(std::ostream& out, const Genesys_Device& dev)
         << "    file_name: " << dev.file_name << '\n'
         << "    calib_file: " << dev.calib_file << '\n'
         << "    force_calibration: " << dev.force_calibration << '\n'
+        << "    force_black_calibration: " << dev.force_black_calibration << '\n'
         << "    ignore_offsets: " << dev.ignore_offsets << '\n'
         << "    model: (not printed)\n"
         << "    reg: " << format_indent_braced_list(4, dev.reg) << '\n'

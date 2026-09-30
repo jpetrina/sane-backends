@@ -614,6 +614,10 @@ private:
 };
 
 // Per-column white reference: value' = value * target / ref[x].
+// With an optional per-column black reference: value' = (value - black[x])
+// * target / max(1, ref[x] - black[x]) -- a proper 2-point (gain+offset)
+// correction. black defaults to empty (or all-zero) vectors, which reduces
+// to the original gain-only formula unchanged.
 class ImagePipelineNodeFlatField : public ImagePipelineNode
 {
 public:
@@ -621,6 +625,15 @@ public:
                                std::vector<std::uint16_t> ref_r,
                                std::vector<std::uint16_t> ref_g,
                                std::vector<std::uint16_t> ref_b,
+                               std::uint16_t target);
+
+    ImagePipelineNodeFlatField(ImagePipelineNode& source,
+                               std::vector<std::uint16_t> ref_r,
+                               std::vector<std::uint16_t> ref_g,
+                               std::vector<std::uint16_t> ref_b,
+                               std::vector<std::uint16_t> black_r,
+                               std::vector<std::uint16_t> black_g,
+                               std::vector<std::uint16_t> black_b,
                                std::uint16_t target);
 
     std::size_t get_width() const override { return source_.get_width(); }
@@ -634,6 +647,7 @@ public:
 private:
     ImagePipelineNode& source_;
     std::vector<std::uint16_t> ref_[3];
+    std::vector<std::uint16_t> black_[3];
     std::uint16_t target_ = 1;
 };
 

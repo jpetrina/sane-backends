@@ -278,6 +278,20 @@ void genesys_init_gpo_tables()
     s_gpo->push_back(gpo);
 
 
+    // HP Scanjet 300 (GL848+).
+    // ponytail: cloned from ScanJet 200; vendor driver never touches
+    // the GPIO bank on this chip family.
+    gpo = Genesys_Gpo();
+    gpo.id = GpioId::HP_SCANJET_300;
+    gpo.regs = {
+        { 0x6c, 0x00 },
+        { 0x6d, 0x00 },
+        { 0x6e, 0x00 },
+        { 0x6f, 0x00 },
+    };
+    s_gpo->push_back(gpo);
+
+
     gpo = Genesys_Gpo();
     gpo.id = GpioId::CANON_LIDE_110;
     gpo.regs = {

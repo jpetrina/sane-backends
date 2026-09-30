@@ -2891,6 +2891,94 @@ void genesys_init_usb_device_tables()
     s_usb_devices->emplace_back(0x03f0, 0x1c05, model);
 
 
+    // -------------------------------------------------------------------
+    // HP Scanjet 300 (Genesys GL848+)
+    //
+    // Parameters cloned from ScanJet 200 (same GL848+ flatbed family, same
+    // issue tracker report). Confirmed working for scanning (flat-field
+    // calibrated via --force-calibration, see hp_shading_min_white in
+    // gl848.cpp -- this unit's CIS/lamp reads dimmer than ScanJet 200's,
+    // so the white-sheet floor is lower for this model specifically).
+    //
+    // Known gaps vs. the real hardware (per HP's spec sheet):
+    //  - Optical resolution is native 4800x4800 dpi; this model only
+    //    exposes up to 2400 because the GL848 exposure/motor tables in
+    //    gl848_scan_tables.h are static captures at 300/600/1200/2400 from
+    //    ScanJet 200's trace, with no 4800 entry. Faking a 4800 option via
+    //    host-side upsample of the 2400 pass would not add real detail, so
+    //    it's left off rather than advertised.
+    //  - The scanner has 4 physical buttons (Scan/Copy/Scan-to-Email/
+    //    Scan-to-PDF, per HP's spec sheet) reported via the USB interrupt
+    //    endpoint (0x83) seen in its device descriptor. No GL848 code path
+    //    here reads that endpoint or knows the button-to-bit mapping, so
+    //    model.buttons stays GENESYS_HAS_NO_BUTTONS until a real trace of
+    //    a button press exists -- guessing a GPIO mapping risks silently
+    //    wrong button state.
+    //
+    // Host-side flat-field files:
+    // ~/.sane/hewlett-packard-scanjet-300-shading-{300,600,1200,2400}.bin
+    // -------------------------------------------------------------------
+    model = Genesys_Model();
+    model.name = "hewlett-packard-scanjet-300";
+    model.vendor = "Hewlett Packard";
+    model.model = "ScanJet 300";
+    model.model_id = ModelId::HP_SCANJET_300;
+    model.asic_type = AsicType::GL848;
+
+    model.resolutions = {
+        {
+            { ScanMethod::FLATBED },
+            { 2400, 1200, 600, 300, 200, 150, 100, 75 },
+            { 2400, 1200, 600, 300, 200, 150, 100, 75 },
+        }
+    };
+
+    model.bpp_gray_values = { 8, 16 };
+    model.bpp_color_values = { 8, 16 };
+
+    model.x_offset = 4.0;
+    model.y_offset = 0.0;
+    model.x_size = 210.0;
+    model.y_size = 297.0;
+
+    model.y_offset_calib_white = 0.0;
+    model.y_size_calib_mm = 4.0;
+    model.x_offset_calib_black = 0.0;
+    model.x_size_calib_mm = 210.0;
+
+    model.post_scan = 0;
+    model.eject_feed = 0;
+
+    model.ld_shift_r = 0;
+    model.ld_shift_g = 0;
+    model.ld_shift_b = 0;
+
+    model.line_mode_color_order = ColorOrder::RGB;
+
+    model.is_cis = true;
+    model.is_sheetfed = false;
+    model.sensor_id = SensorId::CIS_HP_SCANJET_300;
+    model.adc_id = AdcId::HP_SCANJET_300;
+    model.gpio_id = GpioId::HP_SCANJET_300;
+    model.motor_id = MotorId::HP_SCANJET_300;
+
+    model.flags = ModelFlag::GAMMA_14BIT |
+                  ModelFlag::CUSTOM_GAMMA |
+                  ModelFlag::DISABLE_ADC_CALIBRATION |
+                  ModelFlag::DISABLE_EXPOSURE_CALIBRATION |
+                  ModelFlag::DISABLE_SHADING_CALIBRATION |
+                  ModelFlag::SWAP_16BIT_DATA;
+
+    // Real hardware has 4 buttons (Scan/Copy/Email/PDF) -- see comment
+    // above the model block. Not GENESYS_HAS_NO_BUTTONS because there
+    // truly are none; it's because this backend doesn't decode them yet.
+    model.buttons = GENESYS_HAS_NO_BUTTONS;
+    model.search_lines = 100;
+
+    // USB VID/PID reported by the device: 03f0:1d05.
+    s_usb_devices->emplace_back(0x03f0, 0x1d05, model);
+
+
     model = Genesys_Model();
     model.name = "plustek-opticbook-3800";
     model.vendor = "PLUSTEK";

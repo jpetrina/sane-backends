@@ -51,6 +51,40 @@ const UsbDeviceEntry* find_scanjet_200()
     return nullptr;
 }
 
+const UsbDeviceEntry* find_scanjet_300()
+{
+    ensure_gl848_tables();
+    for (const auto& usb_dev : *s_usb_devices) {
+        if (usb_dev.vendor_id() == 0x03f0 && usb_dev.product_id() == 0x1d05) {
+            return &usb_dev;
+        }
+    }
+    return nullptr;
+}
+
+void test_gl848_scanjet_300_device()
+{
+    const UsbDeviceEntry* found = find_scanjet_300();
+    ASSERT_TRUE(found != nullptr);
+    if (found == nullptr) {
+        return;
+    }
+
+    ASSERT_EQ(std::string(found->model().name),
+              std::string("hewlett-packard-scanjet-300"));
+    ASSERT_TRUE(found->model().asic_type == AsicType::GL848);
+    ASSERT_TRUE(found->model().model_id == ModelId::HP_SCANJET_300);
+    ASSERT_TRUE(found->model().sensor_id == SensorId::CIS_HP_SCANJET_300);
+    ASSERT_TRUE(found->model().motor_id == MotorId::HP_SCANJET_300);
+    ASSERT_TRUE(found->model().is_cis);
+    ASSERT_FALSE(found->model().is_sheetfed);
+
+    // Params cloned from ScanJet 200 without vendor traces -- but
+    // confirmed working for basic scanning (see gl848.cpp model-specific
+    // shading floor). Buttons and native 4800dpi remain unimplemented.
+    ASSERT_FALSE(has_flag(found->model().flags, ModelFlag::UNTESTED));
+}
+
 void test_gl848_host_shading_path()
 {
     ASSERT_EQ(gl848::host_shading_path("/home/u/.sane/hewlett-packard-scanjet-200.cal", 300),
@@ -249,6 +283,7 @@ void test_gl848()
 {
     test_gl848_host_shading_path();
     test_gl848_usb_device_and_command_set();
+    test_gl848_scanjet_300_device();
     test_gl848_optical_pass_selection();
     test_gl848_pass_geometry();
     test_gl848_sensor_and_motor_tables();

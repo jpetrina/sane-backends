@@ -275,7 +275,25 @@ struct HpShading {
     unsigned dpi = 0;
     unsigned width = 0;
     std::uint16_t target = 0;
+    // Which model this reading was measured against -- the acceptance
+    // floor below is per-model (sensors on the same GL848+ family don't
+    // all reach the same brightness). Defaults to HP_SCANJET_200 so the
+    // hardcoded scanjet200-app fallback files keep their original,
+    // known-good threshold regardless of which device is running.
+    ModelId model_id = ModelId::HP_SCANJET_200;
     std::array<std::vector<std::uint16_t>, 3> reference;
+    // Per-column dark/offset reference (from a black sheet, via
+    // --force-black-calibration). Empty when not yet measured -- flat-field
+    // then falls back to gain-only correction (pre-existing behavior).
+    std::array<std::vector<std::uint16_t>, 3> black_reference;
+
+    bool has_black() const
+    {
+        return width > 0 &&
+               black_reference[0].size() == width &&
+               black_reference[1].size() == width &&
+               black_reference[2].size() == width;
+    }
 
     bool valid() const
     {
@@ -291,14 +309,35 @@ const unsigned kHpShadingDpis[] = { 300, 600, 1200, 2400 };
 // 300/600/1200: a white sheet sits around 42300, a printed page ~22000.
 // 2400: with the CIS LED GPIOs armed the same sheet is also ~40000;
 // without them the pass integrates about half as much light (~23000).
-std::uint16_t hp_shading_min_white(unsigned dpi)
+//
+// ponytail: HP_SCANJET_300 numbers are a guess, not a vendor-driver capture.
+// This unit's CIS/lamp never reads above ~27000 at 300/600/1200 dpi (vs.
+// ScanJet 200's ~42300) with tables cloned from ScanJet 200 -- real exposure
+// or gain registers likely differ between the two sensors. Floor set to
+// ~80% of the observed ceiling, scaled to 2400dpi with the same ratio
+// ScanJet 200 uses. Replace with real numbers once a Windows USB trace of
+// this specific model exists.
+std::uint16_t hp_shading_min_white(unsigned dpi, ModelId model_id)
 {
+    if (model_id == ModelId::HP_SCANJET_300) {
+        return dpi >= 2400 ? 12000 : 22000;
+    }
     return dpi >= 2400 ? 18000 : 32000;
+}
+
+// Ceiling for accepting a row as "dark enough" during a black-reference
+// capture. No dedicated vendor-verified black target exists for any model
+// yet -- half the white floor is a simple derived guess, not a measured
+// constant. Loosen or tighten if --force-black-calibration rejects a
+// genuinely black sheet, or accepts a merely grey one.
+std::uint16_t hp_shading_max_black(unsigned dpi, ModelId model_id)
+{
+    return static_cast<std::uint16_t>(hp_shading_min_white(dpi, model_id) / 2);
 }
 
 bool hp_shading_is_white_sheet(const HpShading& shading)
 {
-    return shading.valid() && shading.target >= hp_shading_min_white(shading.dpi);
+    return shading.valid() && shading.target >= hp_shading_min_white(shading.dpi, shading.model_id);
 }
 
 // Max black as a fraction of the white target. 10% left 300 dpi a little
@@ -361,8 +400,12 @@ void hp_shading_cache_clear()
 
 bool hp_shading_load(const std::string& path, HpShading& out)
 {
-    // SJSH is this backend's host-side shading file (not a vendor blob):
-    // 4-byte magic, little-endian width and target, then three uint16 planes.
+    // SJSH is the original host-side shading file: 4-byte magic,
+    // little-endian width and target, then three uint16 white planes.
+    // SJS2 adds an optional black/offset block after that: 1-byte
+    // has_black flag, then (if set) three more uint16 planes. Old SJSH
+    // files still load fine, just without black_reference (gain-only
+    // correction, same as before this format existed).
     if (path.empty()) {
         return false;
     }
@@ -372,7 +415,8 @@ bool hp_shading_load(const std::string& path, HpShading& out)
     }
     char magic[4] = {};
     in.read(magic, 4);
-    if (!in || std::memcmp(magic, "SJSH", 4) != 0) {
+    const bool is_v2 = std::memcmp(magic, "SJS2", 4) == 0;
+    if (!in || (!is_v2 && std::memcmp(magic, "SJSH", 4) != 0)) {
         return false;
     }
     std::uint16_t width = 0;
@@ -393,6 +437,22 @@ bool hp_shading_load(const std::string& path, HpShading& out)
     if (!in) {
         return false;
     }
+    if (is_v2) {
+        char has_black = 0;
+        in.read(&has_black, 1);
+        if (in && has_black != 0) {
+            for (unsigned c = 0; c < 3; ++c) {
+                s.black_reference[c].resize(width);
+                in.read(reinterpret_cast<char*>(s.black_reference[c].data()),
+                        static_cast<std::streamsize>(width * 2));
+            }
+            if (!in) {
+                for (unsigned c = 0; c < 3; ++c) {
+                    s.black_reference[c].clear();
+                }
+            }
+        }
+    }
     out = std::move(s);
     return out.valid();
 }
@@ -412,13 +472,21 @@ void hp_shading_save(const std::string& path, const HpShading& shading)
         DBG(DBG_error, "hp_shading_save: cannot write %s\n", path.c_str());
         return;
     }
-    out.write("SJSH", 4);
+    out.write("SJS2", 4);
     const std::uint16_t width = static_cast<std::uint16_t>(shading.width);
     out.write(reinterpret_cast<const char*>(&width), 2);
     out.write(reinterpret_cast<const char*>(&shading.target), 2);
     for (unsigned c = 0; c < 3; ++c) {
         out.write(reinterpret_cast<const char*>(shading.reference[c].data()),
                   static_cast<std::streamsize>(shading.width * 2));
+    }
+    const char has_black = shading.has_black() ? 1 : 0;
+    out.write(&has_black, 1);
+    if (has_black) {
+        for (unsigned c = 0; c < 3; ++c) {
+            out.write(reinterpret_cast<const char*>(shading.black_reference[c].data()),
+                      static_cast<std::streamsize>(shading.width * 2));
+        }
     }
 }
 
@@ -450,7 +518,7 @@ HpShading hp_measure_shading(Genesys_Device* dev, const HpOpticalMode& mode)
     const unsigned samples = mode.samples_per_line;
     const unsigned x0 = samples * 15 / 100;
     const unsigned x1 = std::max(x0 + 1, samples * 85 / 100);
-    const std::uint16_t min_white = hp_shading_min_white(mode.dpi);
+    const std::uint16_t min_white = hp_shading_min_white(mode.dpi, dev->model->model_id);
 
     Genesys_Register_Set regs = dev->initial_regs;
     for (std::uint16_t addr : { std::uint16_t{0x31}, std::uint16_t{0x34}, std::uint16_t{0x39} }) {
@@ -543,6 +611,7 @@ HpShading hp_measure_shading(Genesys_Device* dev, const HpOpticalMode& mode)
 
     HpShading shading;
     shading.dpi = mode.dpi;
+    shading.model_id = dev->model->model_id;
     shading.width = samples;
     for (unsigned c = 0; c < 3; ++c) {
         shading.reference[c].resize(samples);
@@ -563,9 +632,127 @@ HpShading hp_measure_shading(Genesys_Device* dev, const HpOpticalMode& mode)
         static_cast<unsigned long long>(skipped_dark), gmin, gmax);
     if (!hp_shading_is_white_sheet(shading)) {
         throw SaneException("not a white sheet (target=%u, need >= %u) - keep the previous profile",
-                            shading.target, hp_shading_min_white(mode.dpi));
+                            shading.target, hp_shading_min_white(mode.dpi, dev->model->model_id));
     }
     return shading;
+}
+
+// Second calibration point: per-column dark/offset reference, captured the
+// same way as hp_measure_shading but with a black/dark sheet on the bed
+// instead of white, and validating darkness instead of brightness. Fills
+// shading.black_reference in place -- shading must already carry a valid
+// white reference (width/dpi/target) from hp_measure_shading or a loaded
+// file; this never touches shading.reference or shading.target.
+void hp_measure_black_shading(Genesys_Device* dev, const HpOpticalMode& mode, HpShading& shading)
+{
+    const unsigned mm = 20u;
+    const unsigned rgb_rows = std::max(240u, (mode.dpi * mm + 12u) / 25u);
+    const unsigned cis_lines = rgb_rows * 3;
+    DBG(DBG_info, "hp_measure_black_shading: capturing black reference at %u dpi "
+        "(%u RGB rows, %u mm)\n", mode.dpi, rgb_rows, mm);
+    const unsigned samples = mode.samples_per_line;
+    const unsigned x0 = samples * 15 / 100;
+    const unsigned x1 = std::max(x0 + 1, samples * 85 / 100);
+    const std::uint16_t max_black = hp_shading_max_black(mode.dpi, dev->model->model_id);
+
+    Genesys_Register_Set regs = dev->initial_regs;
+    for (std::uint16_t addr : { std::uint16_t{0x31}, std::uint16_t{0x34}, std::uint16_t{0x39} }) {
+        if (!regs.has_reg(addr)) {
+            regs.init_reg(addr, 0x00);
+        }
+    }
+    apply_scan_regs_for_mode(&regs, mode.dpi);
+    regs.set24(REG_LINCNT, cis_lines);
+    regs.set24(REG_FEEDL, mode.feed_lines);
+    send_hp_slope_tables(dev, mode.dpi);
+    if (regs.has_reg(REG_0x01)) {
+        regs.set8(REG_0x01, static_cast<std::uint8_t>(regs.get8(REG_0x01) & ~REG_0x01_SCAN));
+    }
+
+    dev->interface->write_registers(regs);
+    hp_arm_motor(dev, &regs);
+    dev->interface->write_register(REG_0x0D, REG_0x0D_CLRLNCNT);
+    dev->interface->write_register(REG_0x0D, REG_0x0D_CLRMCNT);
+
+    const std::uint8_t scan_01 = static_cast<std::uint8_t>(
+        REG_0x01_CISSET | REG_0x01_DOGENB | REG_0x01_SCAN);
+    dev->interface->write_register(REG_0x01, scan_01);
+    scanner_start_action(*dev, true);
+    if (!wait_for_cis_data(dev, 30000)) {
+        hp_park_and_wait(dev, 10000);
+        throw SaneException(SANE_STATUS_IO_ERROR, "black shading capture: CIS did not start");
+    }
+
+    auto read_usb = [dev](std::size_t size, std::uint8_t* data)
+    {
+        dev->interface->bulk_read_data(0x45, data, size);
+        return true;
+    };
+
+    const std::size_t usb_row = static_cast<std::size_t>(samples) * 2;
+    ImagePipelineStack pipeline;
+    auto& src = pipeline.push_first_node<ImagePipelineNodeBufferedCallableSource>(
+        samples, cis_lines, PixelFormat::I16,
+        static_cast<std::size_t>(align_multiple_ceil(usb_row * 32, 2)), read_usb);
+    src.set_last_read_multiple(2);
+    pipeline.push_node<ImagePipelineNodeSwap16BitEndian>();
+    pipeline.push_node<ImagePipelineNodeMergeMonoLinesToColor>(ColorOrder::RGB);
+
+    std::array<std::vector<std::uint64_t>, 3> sums;
+    for (unsigned c = 0; c < 3; ++c) {
+        sums[c].assign(samples, 0);
+    }
+    std::uint64_t count = 0;
+    std::uint64_t skipped_bright = 0;
+    std::uint16_t darkest = 65535;
+    std::vector<std::uint8_t> row(pipeline.get_output_row_bytes());
+    const unsigned first = rgb_rows * 15 / 100;
+    const unsigned last = rgb_rows * 85 / 100;
+    for (unsigned y = 0; y < rgb_rows; ++y) {
+        pipeline.get_next_row_data(row.data());
+        if (y < first || y >= last || (y % 3) != 0) {
+            continue;
+        }
+        std::uint64_t centre = 0;
+        for (unsigned x = x0; x < x1; ++x) {
+            centre += get_raw_channel_from_row(row.data(), x, 1, PixelFormat::RGB161616);
+        }
+        const std::uint16_t grow = static_cast<std::uint16_t>(centre / (x1 - x0));
+        if (grow < darkest) {
+            darkest = grow;
+        }
+        if (grow > max_black) {
+            skipped_bright++;
+            continue;
+        }
+        for (unsigned x = 0; x < samples; ++x) {
+            for (unsigned c = 0; c < 3; ++c) {
+                sums[c][x] += get_raw_channel_from_row(row.data(), x, c, PixelFormat::RGB161616);
+            }
+        }
+        count++;
+    }
+
+    hp_park_and_wait(dev, 60000);
+    dev->set_head_pos_zero(ScanHeadId::PRIMARY);
+
+    if (count < 30) {
+        throw SaneException("not a black sheet (dark rows=%llu, bright rows=%llu, "
+                            "darkest=%u, need <= %u) - keep the previous profile",
+                            static_cast<unsigned long long>(count),
+                            static_cast<unsigned long long>(skipped_bright),
+                            darkest, max_black);
+    }
+
+    for (unsigned c = 0; c < 3; ++c) {
+        shading.black_reference[c].assign(samples, 0);
+        for (unsigned x = 0; x < samples; ++x) {
+            shading.black_reference[c][x] = static_cast<std::uint16_t>(
+                std::min<std::uint64_t>(65535, sums[c][x] / count));
+        }
+    }
+    DBG(DBG_info, "hp_measure_black_shading: count=%llu skipped_bright=%llu darkest=%u\n",
+        static_cast<unsigned long long>(count), static_cast<unsigned long long>(skipped_bright), darkest);
 }
 
 HpShading hp_ensure_shading(Genesys_Device* dev, const HpOpticalMode& mode)
@@ -575,79 +762,111 @@ HpShading hp_ensure_shading(Genesys_Device* dev, const HpOpticalMode& mode)
     }
 
     const std::string sane_path = hp_shading_path_sane(dev, mode.dpi);
-    const bool force = (dev != nullptr && dev->force_calibration != 0);
-
-    if (!force && !sane_path.empty()) {
-        auto cached = g_hp_shading_cache.find(sane_path);
-        if (cached != g_hp_shading_cache.end() && hp_shading_is_white_sheet(cached->second)) {
-            return cached->second;
-        }
-    }
+    const bool force_white = (dev != nullptr && dev->force_calibration != 0);
+    const bool force_black = (dev != nullptr && dev->force_black_calibration != 0);
 
     HpShading shading;
-    if (!force) {
-        if (hp_shading_load(sane_path, shading)) {
+    bool have_white = false;
+    bool should_persist = false;
+
+    if (!force_white) {
+        if (!sane_path.empty()) {
+            auto cached = g_hp_shading_cache.find(sane_path);
+            if (cached != g_hp_shading_cache.end() && hp_shading_is_white_sheet(cached->second)) {
+                shading = cached->second;
+                have_white = true;
+            }
+        }
+        if (!have_white && hp_shading_load(sane_path, shading)) {
             shading.dpi = mode.dpi;
+            shading.model_id = dev->model->model_id;
             if (hp_shading_is_white_sheet(shading)) {
-                g_hp_shading_cache[sane_path] = shading;
-                DBG(DBG_info, "hp_ensure_shading: loaded %s target=%u\n",
-                    sane_path.c_str(), shading.target);
-                return shading;
-            }
-            DBG(DBG_warn, "hp_ensure_shading: ignoring dark profile %s target=%u "
-                "(need a blank white sheet, target>=%u)\n",
-                sane_path.c_str(), shading.target, hp_shading_min_white(mode.dpi));
-        }
-        const std::string fallbacks[] = {
-            hp_shading_legacy_path(mode.dpi),
-            hp_shading_companion_path(mode.dpi),
-        };
-        for (const std::string& fallback : fallbacks) {
-            if (hp_try_white_profile(fallback, mode.dpi, shading)) {
-                hp_shading_save(sane_path, shading);
-                g_hp_shading_cache[sane_path] = shading;
-                DBG(DBG_info, "hp_ensure_shading: loaded %s target=%u\n",
-                    fallback.c_str(), shading.target);
-                return shading;
+                have_white = true;
+                DBG(DBG_info, "hp_ensure_shading: loaded %s target=%u has_black=%d\n",
+                    sane_path.c_str(), shading.target, shading.has_black());
+            } else {
+                DBG(DBG_warn, "hp_ensure_shading: ignoring dark profile %s target=%u "
+                    "(need a blank white sheet, target>=%u)\n",
+                    sane_path.c_str(), shading.target, hp_shading_min_white(mode.dpi, dev->model->model_id));
+                shading = HpShading{};
             }
         }
-        DBG(DBG_info, "hp_ensure_shading: no profile for %u dpi — scan without flat-field "
-                      "(use --force-calibration with a white sheet)\n", mode.dpi);
-        return HpShading{};
+        if (!have_white) {
+            const std::string fallbacks[] = {
+                hp_shading_legacy_path(mode.dpi),
+                hp_shading_companion_path(mode.dpi),
+            };
+            for (const std::string& fallback : fallbacks) {
+                if (hp_try_white_profile(fallback, mode.dpi, shading)) {
+                    have_white = true;
+                    should_persist = true;
+                    DBG(DBG_info, "hp_ensure_shading: loaded %s target=%u\n",
+                        fallback.c_str(), shading.target);
+                    break;
+                }
+            }
+        }
+        if (!have_white) {
+            DBG(DBG_info, "hp_ensure_shading: no profile for %u dpi — scan without flat-field "
+                          "(use --force-calibration with a white sheet)\n", mode.dpi);
+        }
+    } else {
+        try {
+            DBG(DBG_info, "hp_ensure_shading: force-calibration at %u dpi — scanning the white sheet\n",
+                mode.dpi);
+            shading = hp_measure_shading(dev, mode);
+            have_white = true;
+            should_persist = true;
+            DBG(DBG_info, "hp_ensure_shading: measured white target=%u\n", shading.target);
+        } catch (const std::exception& e) {
+            DBG(DBG_warn, "hp_ensure_shading: white measure failed: %s\n", e.what());
+            const std::string keep[] = {
+                sane_path,
+                hp_shading_legacy_path(mode.dpi),
+                hp_shading_companion_path(mode.dpi),
+            };
+            for (const std::string& path : keep) {
+                if (hp_try_white_profile(path, mode.dpi, shading)) {
+                    have_white = true;
+                    should_persist = true;
+                    DBG(DBG_info, "hp_ensure_shading: keeping %s target=%u\n",
+                        path.c_str(), shading.target);
+                    break;
+                }
+            }
+        }
+        if (dev != nullptr) {
+            dev->force_calibration = 0;
+        }
     }
 
-    try {
-        DBG(DBG_info, "hp_ensure_shading: force-calibration at %u dpi — scanning the white sheet\n",
-            mode.dpi);
-        shading = hp_measure_shading(dev, mode);
-        hp_shading_save(sane_path, shading);
-        g_hp_shading_cache[sane_path] = shading;
-        if (dev != nullptr) {
-            dev->force_calibration = 0;
-        }
-        DBG(DBG_info, "hp_ensure_shading: measured and saved %s target=%u\n",
-            sane_path.c_str(), shading.target);
-        return shading;
-    } catch (const std::exception& e) {
-        DBG(DBG_warn, "hp_ensure_shading: measure failed: %s\n", e.what());
-        if (dev != nullptr) {
-            dev->force_calibration = 0;
-        }
-        const std::string keep[] = {
-            sane_path,
-            hp_shading_legacy_path(mode.dpi),
-            hp_shading_companion_path(mode.dpi),
-        };
-        HpShading previous;
-        for (const std::string& path : keep) {
-            if (hp_try_white_profile(path, mode.dpi, previous)) {
-                hp_shading_save(sane_path, previous);
-                g_hp_shading_cache[sane_path] = previous;
-                DBG(DBG_info, "hp_ensure_shading: keeping %s target=%u\n",
-                    path.c_str(), previous.target);
-                return previous;
+    if (force_black) {
+        if (have_white) {
+            try {
+                DBG(DBG_info, "hp_ensure_shading: force-black-calibration at %u dpi — "
+                              "scanning the black sheet\n", mode.dpi);
+                hp_measure_black_shading(dev, mode, shading);
+                should_persist = true;
+                DBG(DBG_info, "hp_ensure_shading: measured black reference for %u dpi\n", mode.dpi);
+            } catch (const std::exception& e) {
+                DBG(DBG_warn, "hp_ensure_shading: black measure failed: %s\n", e.what());
             }
+        } else {
+            DBG(DBG_warn, "hp_ensure_shading: force-black-calibration requested but no white "
+                          "reference yet for %u dpi — run --force-calibration with a white sheet "
+                          "first\n", mode.dpi);
         }
+        if (dev != nullptr) {
+            dev->force_black_calibration = 0;
+        }
+    }
+
+    if (have_white) {
+        if (should_persist) {
+            hp_shading_save(sane_path, shading);
+        }
+        g_hp_shading_cache[sane_path] = shading;
+        return shading;
     }
 
     return HpShading{};
@@ -745,11 +964,18 @@ void setup_hp_scanjet_pipeline(Genesys_Device& dev, const ScanSession& session,
     pipeline.push_node<ImagePipelineNodeSwap16BitEndian>();
     pipeline.push_node<ImagePipelineNodeMergeMonoLinesToColor>(ColorOrder::RGB);
     if (shading != nullptr && shading->valid() && shading->width == samples) {
-        DBG(DBG_info, "hp_pipeline: flat-field %u dpi width=%u target=%u\n",
-            geom.mode.dpi, shading->width, shading->target);
-        pipeline.push_node<ImagePipelineNodeFlatField>(
-            shading->reference[0], shading->reference[1], shading->reference[2],
-            shading->target);
+        DBG(DBG_info, "hp_pipeline: flat-field %u dpi width=%u target=%u has_black=%d\n",
+            geom.mode.dpi, shading->width, shading->target, shading->has_black());
+        if (shading->has_black()) {
+            pipeline.push_node<ImagePipelineNodeFlatField>(
+                shading->reference[0], shading->reference[1], shading->reference[2],
+                shading->black_reference[0], shading->black_reference[1], shading->black_reference[2],
+                shading->target);
+        } else {
+            pipeline.push_node<ImagePipelineNodeFlatField>(
+                shading->reference[0], shading->reference[1], shading->reference[2],
+                shading->target);
+        }
     } else if (shading != nullptr && shading->valid()) {
         DBG(DBG_warn, "hp_pipeline: shading width %u != CIS %u — skipping flat-field\n",
             shading->width, samples);

@@ -1128,6 +1128,25 @@ ImagePipelineNodeFlatField::ImagePipelineNodeFlatField(ImagePipelineNode& source
     ref_[2] = std::move(ref_b);
 }
 
+ImagePipelineNodeFlatField::ImagePipelineNodeFlatField(ImagePipelineNode& source,
+                                                       std::vector<std::uint16_t> ref_r,
+                                                       std::vector<std::uint16_t> ref_g,
+                                                       std::vector<std::uint16_t> ref_b,
+                                                       std::vector<std::uint16_t> black_r,
+                                                       std::vector<std::uint16_t> black_g,
+                                                       std::vector<std::uint16_t> black_b,
+                                                       std::uint16_t target) :
+    source_(source),
+    target_{target == 0 ? std::uint16_t{1} : target}
+{
+    ref_[0] = std::move(ref_r);
+    ref_[1] = std::move(ref_g);
+    ref_[2] = std::move(ref_b);
+    black_[0] = std::move(black_r);
+    black_[1] = std::move(black_g);
+    black_[2] = std::move(black_b);
+}
+
 bool ImagePipelineNodeFlatField::get_next_row_data(std::uint8_t* out_data)
 {
     bool got_data = source_.get_next_row_data(out_data);
@@ -1145,7 +1164,14 @@ bool ImagePipelineNodeFlatField::get_next_row_data(std::uint8_t* out_data)
                 continue;
             }
             std::uint32_t value = get_raw_channel_from_row(out_data, x, c, format);
-            value = std::min<std::uint32_t>(65535, value * target_ / ref);
+            if (x < black_[c].size()) {
+                const std::uint32_t black = black_[c][x];
+                const std::uint32_t span = ref > black ? (ref - black) : 1;
+                value = value > black ? value - black : 0;
+                value = std::min<std::uint32_t>(65535, value * target_ / span);
+            } else {
+                value = std::min<std::uint32_t>(65535, value * target_ / ref);
+            }
             set_raw_channel_to_row(out_data, x, c, static_cast<std::uint16_t>(value), format);
         }
     }

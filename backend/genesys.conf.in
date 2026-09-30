@@ -164,6 +164,9 @@ usb 0x03f0 0x4705
 # Hewlett Packard ScanJet 200 (GL848+)
 usb 0x03f0 0x1c05
 
+# Hewlett Packard ScanJet 300 (GL848+)
+usb 0x03f0 0x1d05
+
 # Canon Image Formula 101
 usb 0x1803 0x162e
 

@@ -751,6 +751,49 @@ void test_node_flat_field_rgb16()
     ASSERT_EQ(read_le(out_data, 5), 1000u);
 }
 
+void test_node_flat_field_black_offset_rgb16()
+{
+    using Data = std::vector<std::uint8_t>;
+
+    auto le = [](std::uint16_t v) -> Data {
+        return { static_cast<std::uint8_t>(v & 0xff),
+                 static_cast<std::uint8_t>((v >> 8) & 0xff) };
+    };
+
+    Data in_data;
+    // Single green pixel; column 0 has a black offset of 500 and a white
+    // reference of 1500 -> span 1000. Raw 1000 sits mid-span, so with
+    // target=2000 the corrected value should land at the midpoint (1000).
+    const std::uint16_t pixels[][3] = {
+        { 0, 1000, 0 },
+    };
+    for (const auto& p : pixels) {
+        for (unsigned c = 0; c < 3; ++c) {
+            auto bytes = le(p[c]);
+            in_data.insert(in_data.end(), bytes.begin(), bytes.end());
+        }
+    }
+
+    ImagePipelineStack stack;
+    stack.push_first_node<ImagePipelineNodeArraySource>(1, 1, PixelFormat::RGB161616,
+                                                        std::move(in_data));
+    stack.push_node<ImagePipelineNodeFlatField>(
+        std::vector<std::uint16_t>{ 2000 },  // white ref (unused, R stays 0)
+        std::vector<std::uint16_t>{ 1500 },  // white ref (G)
+        std::vector<std::uint16_t>{ 2000 },  // white ref (unused, B stays 0)
+        std::vector<std::uint16_t>{ 0 },     // black ref (R)
+        std::vector<std::uint16_t>{ 500 },   // black ref (G)
+        std::vector<std::uint16_t>{ 0 },     // black ref (B)
+        2000);
+
+    auto out_data = stack.get_all_data();
+    auto read_le = [](const Data& d, std::size_t i) {
+        return static_cast<std::uint16_t>(d[i * 2] | (d[i * 2 + 1] << 8));
+    };
+    // (1000 - 500) * 2000 / (1500 - 500) == 1000
+    ASSERT_EQ(read_le(out_data, 1), 1000u);
+}
+
 
 void test_node_split_mono_lines()
 {
@@ -1198,6 +1241,7 @@ void test_image_pipeline()
     test_node_auto_levels_calibrated_i16();
     test_node_auto_levels_calibrated_floor_i16();
     test_node_flat_field_rgb16();
+    test_node_flat_field_black_offset_rgb16();
     test_node_split_mono_lines();
     test_node_component_shift_lines();
     test_node_pixel_shift_columns_no_switch();

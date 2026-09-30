@@ -257,6 +257,17 @@ void genesys_init_motor_tables()
     s_motors->push_back(std::move(motor));
 
 
+    // HP Scanjet 300 (GL848+).
+    // ponytail: cloned from ScanJet 200; slope tables are chip-global
+    // (asic_boot), this profile only supplies base_ydpi for geometry.
+    motor = Genesys_Motor();
+    motor.id = MotorId::HP_SCANJET_300;
+    motor.base_ydpi = 2400;
+    motor.profiles.push_back({MotorSlope::create_from_steps(16249, 2179, 59),
+                              StepType::EIGHTH, 0});
+    s_motors->push_back(std::move(motor));
+
+
     motor = Genesys_Motor();
     motor.id = MotorId::CANON_LIDE_700;
     motor.base_ydpi = 1200;

@@ -122,7 +122,7 @@ void genesys_init_memory_layout_tables()
     // and FEEDL). Registers 0xd0..0xd2 configure the slope-table DRAM
     // area; 0xe0..0xef, 0xf0..0xf7 configure the three colour frame slots.
     ml = MemoryLayout();
-    ml.models = { ModelId::HP_SCANJET_200 };
+    ml.models = { ModelId::HP_SCANJET_200, ModelId::HP_SCANJET_300 };
     ml.regs = {
         { 0xd0, 0x0a }, { 0xd1, 0x1f }, { 0xd2, 0x34 },
         { 0xe0, 0x01 }, { 0xe1, 0x4c }, { 0xe2, 0x08 }, { 0xe3, 0x25 },

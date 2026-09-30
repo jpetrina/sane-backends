@@ -5113,6 +5113,25 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_FORCE_CALIBRATION].cap =
     SANE_CAP_SOFT_DETECT | SANE_CAP_SOFT_SELECT | SANE_CAP_ADVANCED;
 
+  /* GL848 HP models only: force re-measuring the black/dark reference used
+     for 2-point (gain+offset) flat-field correction -- see gl848.cpp. Place
+     a black/dark sheet on the bed first; run force-calibration (white
+     sheet) at least once before this. Inactive on every other chip. */
+  s->opt[OPT_FORCE_BLACK_CALIBRATION].name = "force-black-calibration";
+  s->opt[OPT_FORCE_BLACK_CALIBRATION].title = SANE_I18N("Force black calibration");
+  s->opt[OPT_FORCE_BLACK_CALIBRATION].desc = SANE_I18N(
+      "Measure a per-column black/dark reference from a black sheet on the bed "
+      "(GL848 HP models only; run force-calibration with a white sheet first)");
+  s->opt[OPT_FORCE_BLACK_CALIBRATION].type = SANE_TYPE_BUTTON;
+  s->opt[OPT_FORCE_BLACK_CALIBRATION].unit = SANE_UNIT_NONE;
+  s->opt[OPT_FORCE_BLACK_CALIBRATION].size = 0;
+  s->opt[OPT_FORCE_BLACK_CALIBRATION].constraint_type = SANE_CONSTRAINT_NONE;
+  if (model->asic_type == AsicType::GL848)
+    s->opt[OPT_FORCE_BLACK_CALIBRATION].cap =
+      SANE_CAP_SOFT_DETECT | SANE_CAP_SOFT_SELECT | SANE_CAP_ADVANCED;
+  else
+    s->opt[OPT_FORCE_BLACK_CALIBRATION].cap = SANE_CAP_INACTIVE;
+
     // ignore offsets option
     s->opt[OPT_IGNORE_OFFSETS].name = "ignore-internal-offsets";
     s->opt[OPT_IGNORE_OFFSETS].title = SANE_I18N("Ignore internal offsets");
@@ -6200,6 +6219,14 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
             dev->force_calibration = 1;
             dev->calibration_cache.clear();
             dev->calib_file.clear();
+
+            // signals that sensors will have to be read again
+            *myinfo |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;
+            break;
+        }
+
+        case OPT_FORCE_BLACK_CALIBRATION: {
+            dev->force_black_calibration = 1;
 
             // signals that sensors will have to be read again
             *myinfo |= SANE_INFO_RELOAD_PARAMS | SANE_INFO_RELOAD_OPTIONS;

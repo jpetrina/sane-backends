@@ -115,6 +115,7 @@ std::ostream& operator<<(std::ostream& out, ModelId id)
         case ModelId::HP_SCANJET_G4050: out << "HP_SCANJET_G4050"; break;
         case ModelId::HP_SCANJET_N6310: out << "HP_SCANJET_N6310"; break;
         case ModelId::HP_SCANJET_200: out << "HP_SCANJET_200"; break;
+        case ModelId::HP_SCANJET_300: out << "HP_SCANJET_300"; break;
         case ModelId::MEDION_MD5345: out << "MEDION_MD5345"; break;
         case ModelId::PANASONIC_KV_SS080: out << "PANASONIC_KV_SS080"; break;
         case ModelId::PENTAX_DSMOBILE_600: out << "PENTAX_DSMOBILE_600"; break;
@@ -194,6 +195,7 @@ std::ostream& operator<<(std::ostream& out, SensorId id)
         case SensorId::CIS_CANON_LIDE_220: out << "CIS_CANON_LIDE_220"; break;
         case SensorId::CIS_CANON_LIDE_700F: out << "CIS_CANON_LIDE_700F"; break;
         case SensorId::CIS_HP_SCANJET_200: out << "CIS_HP_SCANJET_200"; break;
+        case SensorId::CIS_HP_SCANJET_300: out << "CIS_HP_SCANJET_300"; break;
         case SensorId::CIS_XP200: out << "CIS_XP200"; break;
         default:
             out << static_cast<unsigned>(id); break;
@@ -219,6 +221,7 @@ std::ostream& operator<<(std::ostream& out, AdcId id)
         case AdcId::CANON_8600F: out << "CANON_8600F"; break;
         case AdcId::G4050: out << "G4050"; break;
         case AdcId::HP_SCANJET_200: out << "HP_SCANJET_200"; break;
+        case AdcId::HP_SCANJET_300: out << "HP_SCANJET_300"; break;
         case AdcId::IMG101: out << "IMG101"; break;
         case AdcId::KVSS080: out << "KVSS080"; break;
         case AdcId::PLUSTEK_OPTICBOOK_3800: out << "PLUSTEK_OPTICBOOK_3800"; break;
@@ -269,6 +272,7 @@ std::ostream& operator<<(std::ostream& out, GpioId id)
         case GpioId::HP3670: out << "HP3670"; break;
         case GpioId::HP_N6310: out << "HP_N6310"; break;
         case GpioId::HP_SCANJET_200: out << "HP_SCANJET_200"; break;
+        case GpioId::HP_SCANJET_300: out << "HP_SCANJET_300"; break;
         case GpioId::IMG101: out << "IMG101"; break;
         case GpioId::KVSS080: out << "KVSS080"; break;
         case GpioId::MD_5345: out << "MD_5345"; break;
@@ -314,6 +318,7 @@ std::ostream& operator<<(std::ostream& out, MotorId id)
         case MotorId::HP2400: out << "HP2400"; break;
         case MotorId::HP3670: out << "HP3670"; break;
         case MotorId::HP_SCANJET_200: out << "HP_SCANJET_200"; break;
+        case MotorId::HP_SCANJET_300: out << "HP_SCANJET_300"; break;
         case MotorId::IMG101: out << "IMG101"; break;
         case MotorId::KVSS080: out << "KVSS080"; break;
         case MotorId::MD_5345: out << "MD_5345"; break;

@@ -366,6 +366,26 @@ void genesys_init_frontend_tables()
     s_frontends->push_back(fe);
 
 
+    // HP Scanjet 300 (GL848+).
+    // ponytail: cloned from ScanJet 200; vendor driver never writes
+    // standalone AFE registers on this chip family.
+    fe = Genesys_Frontend();
+    fe.id = AdcId::HP_SCANJET_300;
+    fe.layout = analog_devices;
+    fe.layout.type = FrontendType::ANALOG_DEVICES_GL848;
+    fe.regs = {
+        { 0x00, 0x00 },
+        { 0x01, 0x00 },
+        { 0x02, 0x00 },
+        { 0x03, 0x00 },
+        { 0x04, 0x00 },
+        { 0x05, 0x00 },
+        { 0x06, 0x00 },
+        { 0x07, 0x00 },
+    };
+    s_frontends->push_back(fe);
+
+
     fe = Genesys_Frontend();
     fe.id = AdcId::KVSS080;
     fe.layout = wolfson_layout;
