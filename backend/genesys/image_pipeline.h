@@ -26,6 +26,7 @@
 #include "image_buffer.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <functional>
 #include <memory>
 
@@ -256,6 +257,24 @@ private:
     bool needs_swapping_ = false;
 };
 
+// Reverses pixels left-to-right (CIS contact sensors are typically mirrored).
+class ImagePipelineNodeMirrorRows : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeMirrorRows(ImagePipelineNode& source);
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return source_.get_height(); }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    ImagePipelineNode& source_;
+};
+
 class ImagePipelineNodeInvert : public ImagePipelineNode
 {
 public:
@@ -327,6 +346,9 @@ class ImagePipelineNodeMergeColorToGray : public ImagePipelineNode
 {
 public:
     ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source);
+    // Integer weights, e.g. Rec.601 (77, 150, 29) / 256.
+    ImagePipelineNodeMergeColorToGray(ImagePipelineNode& source,
+                                     unsigned wr, unsigned wg, unsigned wb, unsigned wdiv);
 
     std::size_t get_width() const override { return source_.get_width(); }
     std::size_t get_height() const override { return source_.get_height(); }
@@ -344,6 +366,11 @@ private:
     float ch0_mult_ = 0;
     float ch1_mult_ = 0;
     float ch2_mult_ = 0;
+    unsigned w0_ = 0;
+    unsigned w1_ = 0;
+    unsigned w2_ = 0;
+    unsigned wdiv_ = 0;
+    bool integer_weights_ = false;
 
     std::vector<std::uint8_t> temp_buffer_;
 };
@@ -479,6 +506,149 @@ private:
     std::size_t width_ = 0;
 
     std::vector<std::uint8_t> cached_line_;
+};
+
+// Averages `factor` consecutive source rows into one. Used for host-side Y
+// downsample (SANE ScaleRows only resizes X).
+class ImagePipelineNodeDecimateLines : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeDecimateLines(ImagePipelineNode& source, unsigned factor);
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return height_; }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    ImagePipelineNode& source_;
+    unsigned factor_ = 1;
+    std::size_t height_ = 0;
+    std::vector<std::uint8_t> temp_;
+    std::vector<std::uint32_t> accum_;
+};
+
+// Integer box-filter downsample in X (pairs with DecimateLines).
+class ImagePipelineNodeDecimateColumns : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeDecimateColumns(ImagePipelineNode& source, unsigned factor);
+
+    std::size_t get_width() const override { return width_; }
+    std::size_t get_height() const override { return source_.get_height(); }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    ImagePipelineNode& source_;
+    unsigned factor_ = 1;
+    std::size_t width_ = 0;
+    std::vector<std::uint8_t> temp_;
+};
+
+// Map 8-bit samples below `cutoff` to 0 and the rest to 255 (text / lineart).
+class ImagePipelineNodeThreshold8 : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeThreshold8(ImagePipelineNode& source, std::uint8_t cutoff);
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return source_.get_height(); }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    ImagePipelineNode& source_;
+    std::uint8_t cutoff_ = 180;
+};
+
+// Host-side levels + sRGB. Buffers the 16-bit frame when it fits, then
+// stretches 2%–98% percentiles. Larger frames use a fixed CIS black/white
+// pair so memory stays bounded. The (black, white, adapt_black) form keeps
+// white as the shading target and sets black to min(0.5th percentile,
+// floor). Frames that do not fit in RAM spill to a temp file so 1200/2400
+// get the same adaptive black as 300/600.
+class ImagePipelineNodeAutoLevels : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeAutoLevels(ImagePipelineNode& source);
+    ImagePipelineNodeAutoLevels(ImagePipelineNode& source,
+                                std::uint16_t black, std::uint16_t white);
+    ImagePipelineNodeAutoLevels(ImagePipelineNode& source,
+                                std::uint16_t black, std::uint16_t white,
+                                bool adapt_black);
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return source_.get_height(); }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override;
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    void ensure_lut();
+    void apply_lut_to_row(std::uint8_t* row);
+    static void build_srgb_lut(std::uint16_t black, std::uint16_t white,
+                               std::vector<std::uint16_t>& lut);
+
+    ImagePipelineNode& source_;
+    bool streaming_ = false;
+    bool ready_ = false;
+    bool adapt_black_ = false;
+    std::uint16_t floor_black_ = 0;
+    std::uint16_t white_ = 65535;
+    std::size_t next_row_ = 0;
+    std::vector<std::uint16_t> lut_;
+    std::vector<std::uint8_t> buffer_;
+    std::unique_ptr<std::FILE, int(*)(std::FILE*)> spill_file_{nullptr, &std::fclose};
+};
+
+// Per-column white reference: value' = value * target / ref[x].
+// With an optional per-column black reference: value' = (value - black[x])
+// * target / max(1, ref[x] - black[x]) -- a proper 2-point (gain+offset)
+// correction. black defaults to empty (or all-zero) vectors, which reduces
+// to the original gain-only formula unchanged.
+class ImagePipelineNodeFlatField : public ImagePipelineNode
+{
+public:
+    ImagePipelineNodeFlatField(ImagePipelineNode& source,
+                               std::vector<std::uint16_t> ref_r,
+                               std::vector<std::uint16_t> ref_g,
+                               std::vector<std::uint16_t> ref_b,
+                               std::uint16_t target);
+
+    ImagePipelineNodeFlatField(ImagePipelineNode& source,
+                               std::vector<std::uint16_t> ref_r,
+                               std::vector<std::uint16_t> ref_g,
+                               std::vector<std::uint16_t> ref_b,
+                               std::vector<std::uint16_t> black_r,
+                               std::vector<std::uint16_t> black_g,
+                               std::vector<std::uint16_t> black_b,
+                               std::uint16_t target);
+
+    std::size_t get_width() const override { return source_.get_width(); }
+    std::size_t get_height() const override { return source_.get_height(); }
+    PixelFormat get_format() const override { return source_.get_format(); }
+
+    bool eof() const override { return source_.eof(); }
+
+    bool get_next_row_data(std::uint8_t* out_data) override;
+
+private:
+    ImagePipelineNode& source_;
+    std::vector<std::uint16_t> ref_[3];
+    std::vector<std::uint16_t> black_[3];
+    std::uint16_t target_ = 1;
 };
 
 // A pipeline node that mimics the calibration behavior on Genesys chips

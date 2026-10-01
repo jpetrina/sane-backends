@@ -31,5 +31,6 @@ int main()
     genesys::test_motor();
     genesys::test_row_buffer();
     genesys::test_utilities();
+    genesys::test_gl848();
     return finish_tests();
 }

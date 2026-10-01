@@ -160,6 +160,18 @@
 :status :untested
 :comment "Not supported yet"
 
+:model "ScanJet 200"
+:interface "USB"
+:usbid "0x03f0" "0x1c05"
+:status :basic
+:comment "GL848+ ASIC, tested on one unit. Host-side CIS pipeline and flat-field."
+
+:model "ScanJet 300"
+:interface "USB"
+:usbid "0x03f0" "0x1d05"
+:status :basic
+:comment "GL848+ ASIC, cloned from ScanJet 200 with a model-specific calibration floor. Working: color/gray/lineart scans up to 2400dpi (native optical is 4800dpi, not yet supported). Not working: front-panel buttons (Scan/Copy/Email/PDF)."
+
 ; -----------------------------------------------------------------------------
 
 :mfg "Canon"

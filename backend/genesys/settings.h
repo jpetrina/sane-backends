@@ -42,6 +42,9 @@ struct Genesys_Settings
     float tl_x = 0;
     // y start on scan table in mm
     float tl_y = 0;
+    // scan rectangle size in mm (before pixel rounding)
+    float scan_width_mm = 0;
+    float scan_height_mm = 0;
 
     // number of lines at scan resolution
     unsigned int lines = 0;

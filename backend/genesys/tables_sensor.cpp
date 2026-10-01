@@ -2402,6 +2402,131 @@ void genesys_init_sensor_tables()
         }
     }
 
+    // -------------------------------------------------------------------
+    // HP Scanjet 200 CIS (Genesys GL848+).
+    //
+    // Hardware passes:
+    //   300 dpi  -> 2580 samples/line
+    //   600 dpi  -> 5160 samples/line
+    //   1200 dpi -> 10320 samples/line
+    //   2400 dpi -> 20640 samples/line
+    //
+    // Sensor lookup entries below give SANE a resolution table and a
+    // dummy 0x16..0x5a block. The CIS is actually clocked by the per-mode
+    // overlay in gl848_scan_tables.h (applied in init_regs_for_scan_session).
+    // -------------------------------------------------------------------
+    sensor = Genesys_Sensor();
+    sensor.sensor_id = SensorId::CIS_HP_SCANJET_200;
+    sensor.full_resolution = 2400;
+    sensor.black_pixels = 0;
+    sensor.dummy_pixel = 0;
+    sensor.fau_gain_white_ref = 210;
+    sensor.gain_white_ref = 230;
+    // The HP driver bakes its exposure into the register block written by
+    // asic_boot; SANE still requires a positive per-line period so it can
+    // populate SetupParams. 0x0258 mirrors REG_LPERIOD (0x2C/0x2D) in the
+    // captured 300 dpi register baseline.
+    sensor.exposure_lperiod = 0x0258;
+    sensor.exposure = { 0x0000, 0x0000, 0x0000 };
+    // Sensor timing block from the 300 dpi vendor-driver capture:
+    sensor.custom_regs = {
+        { 0x16, 0x14 }, { 0x17, 0x00 }, { 0x18, 0x00 }, { 0x19, 0x05 },
+        { 0x1a, 0x20 }, { 0x1b, 0x40 }, { 0x1c, 0x08 }, { 0x1d, 0x00 },
+        { 0x52, 0x09 }, { 0x53, 0x03 }, { 0x54, 0x03 }, { 0x55, 0x03 },
+        { 0x56, 0x03 }, { 0x57, 0x03 },
+        { 0x58, 0x59 }, { 0x59, 0x31 }, { 0x5a, 0xc0 },
+    };
+    sensor.gamma = { 1.0f, 1.0f, 1.0f };
+    {
+        struct CustomSensorSettings
+        {
+            ValueFilterAny<unsigned> resolutions;
+            unsigned register_dpihw;
+            unsigned shading_factor;
+            int output_pixel_offset;
+        };
+
+        // shading_factor mirrors what the Windows driver does: 75/100/150 dpi
+        // are integer downsamples of the 300 dpi pass; 200 dpi comes from the
+        // 600 dpi pass; 1200 and 2400 dpi are native.
+        CustomSensorSettings custom_settings[] = {
+            { {   75 },  300, 4, 0 },
+            { {  100 },  300, 3, 0 },
+            { {  150 },  300, 2, 0 },
+            { {  200 },  600, 3, 0 },
+            { {  300 },  300, 1, 0 },
+            { {  600 },  600, 1, 0 },
+            { { 1200 }, 1200, 1, 0 },
+            { { 2400 }, 2400, 1, 0 },
+        };
+
+        for (const CustomSensorSettings& setting : custom_settings) {
+            sensor.resolutions = setting.resolutions;
+            sensor.register_dpiset = setting.resolutions.values()[0];
+            sensor.register_dpihw = setting.register_dpihw;
+            // Hardware always clocks at register_dpihw; user DPI is host downsample.
+            sensor.optical_resolution = setting.register_dpihw;
+            sensor.shading_resolution = setting.register_dpihw;
+            sensor.shading_factor = setting.shading_factor;
+            sensor.output_pixel_offset = setting.output_pixel_offset;
+            s_sensors->push_back(sensor);
+        }
+    }
+
+
+    // HP Scanjet 300 CIS (Genesys GL848+).
+    // ponytail: cloned from ScanJet 200's captured sensor block; no
+    // vendor traces for the 300 yet.
+    sensor = Genesys_Sensor();
+    sensor.sensor_id = SensorId::CIS_HP_SCANJET_300;
+    sensor.full_resolution = 2400;
+    sensor.black_pixels = 0;
+    sensor.dummy_pixel = 0;
+    sensor.fau_gain_white_ref = 210;
+    sensor.gain_white_ref = 230;
+    sensor.exposure_lperiod = 0x0258;
+    sensor.exposure = { 0x0000, 0x0000, 0x0000 };
+    sensor.custom_regs = {
+        { 0x16, 0x14 }, { 0x17, 0x00 }, { 0x18, 0x00 }, { 0x19, 0x05 },
+        { 0x1a, 0x20 }, { 0x1b, 0x40 }, { 0x1c, 0x08 }, { 0x1d, 0x00 },
+        { 0x52, 0x09 }, { 0x53, 0x03 }, { 0x54, 0x03 }, { 0x55, 0x03 },
+        { 0x56, 0x03 }, { 0x57, 0x03 },
+        { 0x58, 0x59 }, { 0x59, 0x31 }, { 0x5a, 0xc0 },
+    };
+    sensor.gamma = { 1.0f, 1.0f, 1.0f };
+    {
+        struct CustomSensorSettings
+        {
+            ValueFilterAny<unsigned> resolutions;
+            unsigned register_dpihw;
+            unsigned shading_factor;
+            int output_pixel_offset;
+        };
+
+        CustomSensorSettings custom_settings[] = {
+            { {   75 },  300, 4, 0 },
+            { {  100 },  300, 3, 0 },
+            { {  150 },  300, 2, 0 },
+            { {  200 },  600, 3, 0 },
+            { {  300 },  300, 1, 0 },
+            { {  600 },  600, 1, 0 },
+            { { 1200 }, 1200, 1, 0 },
+            { { 2400 }, 2400, 1, 0 },
+        };
+
+        for (const CustomSensorSettings& setting : custom_settings) {
+            sensor.resolutions = setting.resolutions;
+            sensor.register_dpiset = setting.resolutions.values()[0];
+            sensor.register_dpihw = setting.register_dpihw;
+            sensor.optical_resolution = setting.register_dpihw;
+            sensor.shading_resolution = setting.register_dpihw;
+            sensor.shading_factor = setting.shading_factor;
+            sensor.output_pixel_offset = setting.output_pixel_offset;
+            s_sensors->push_back(sensor);
+        }
+    }
+
+
     sensor = Genesys_Sensor();
     sensor.sensor_id = SensorId::CIS_CANON_LIDE_110; // gl124
     sensor.full_resolution = 2400;

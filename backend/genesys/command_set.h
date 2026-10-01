@@ -111,6 +111,12 @@ public:
         return true;
     }
 
+    /// Drop host-side calibration files that are not the genesys `.cal` cache.
+    /// Default is a no-op; GL848+ stores per-dpi shading next to `--calibration-file`.
+    virtual void clear_host_side_calibration(Genesys_Device* /*dev*/) const
+    {
+    }
+
     /// calculate an instance of ScanSession for scanning with the given settings
     virtual ScanSession calculate_scan_session(const Genesys_Device* dev,
                                                const Genesys_Sensor& sensor,

@@ -95,6 +95,7 @@ unsigned get_slope_table_max_size(AsicType asic_type)
         case AsicType::GL845:
         case AsicType::GL846:
         case AsicType::GL847:
+        case AsicType::GL848:
         case AsicType::GL124: return 1024;
         default:
             throw SaneException("Unknown asic type");

@@ -175,6 +175,8 @@ enum class ModelId : unsigned
     HP_SCANJET_G4010,
     HP_SCANJET_G4050,
     HP_SCANJET_N6310,
+    HP_SCANJET_200,
+    HP_SCANJET_300,
     MEDION_MD5345,
     PANASONIC_KV_SS080,
     PENTAX_DSMOBILE_600,
@@ -263,6 +265,8 @@ enum class SensorId : unsigned
     CIS_CANON_LIDE_210,
     CIS_CANON_LIDE_220,
     CIS_CANON_LIDE_700F,
+    CIS_HP_SCANJET_200,
+    CIS_HP_SCANJET_300,
     CIS_XP200,
 };
 
@@ -298,6 +302,8 @@ enum class AdcId : unsigned
     CANON_8400F,
     CANON_8600F,
     G4050,
+    HP_SCANJET_200,
+    HP_SCANJET_300,
     IMG101,
     KVSS080,
     PLUSTEK_OPTICBOOK_3800,
@@ -357,6 +363,8 @@ enum class GpioId : unsigned
     HP2400,
     HP3670,
     HP_N6310,
+    HP_SCANJET_200,
+    HP_SCANJET_300,
     IMG101,
     KVSS080,
     MD_5345,
@@ -400,6 +408,8 @@ enum class MotorId : unsigned
     HP2300,
     HP2400,
     HP3670,
+    HP_SCANJET_200,
+    HP_SCANJET_300,
     IMG101,
     KVSS080,
     MD_5345,
@@ -457,6 +467,7 @@ enum class AsicType : unsigned
     GL845,
     GL846,
     GL847,
+    GL848,
     GL124,
 };
 
