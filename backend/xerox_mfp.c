@@ -613,9 +613,11 @@ static void init_options(struct device *dev)
     dev->opt[OPT_JPEG].cap |= SANE_CAP_ADVANCED;
 #ifdef HAVE_LIBJPEG
     dev->compressionEnabled = SANE_TRUE;
-    if (!isSupportedDevice(dev))
-        dev->opt[OPT_JPEG].cap |= SANE_CAP_INACTIVE;
     dev->val[OPT_JPEG].b = SANE_TRUE;
+    if (!isSupportedDevice(dev)) {
+        dev->opt[OPT_JPEG].cap |= SANE_CAP_INACTIVE;
+        dev->val[OPT_JPEG].b = SANE_FALSE;
+    }
 #else
     dev->opt[OPT_JPEG].cap |= SANE_CAP_INACTIVE;
     dev->val[OPT_JPEG].b = SANE_FALSE;
