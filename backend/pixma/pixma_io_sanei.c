@@ -890,12 +890,19 @@ pixma_write (pixma_io_t * io, const void *cmd, unsigned len)
 int
 pixma_read (pixma_io_t * io, void *buf, unsigned size)
 {
+  return pixma_read_with_timeout (io, buf, size, PIXMA_BULKIN_TIMEOUT);
+}
+
+int
+pixma_read_with_timeout (pixma_io_t * io, void *buf, unsigned size,
+                         int timeout)
+{
   size_t count = size;
   int error;
 
   if (io-> interface == INT_BJNP)
     {
-    sanei_bjnp_set_timeout (io->dev, PIXMA_BULKIN_TIMEOUT);
+    sanei_bjnp_set_timeout (io->dev, timeout);
     error = map_error (sanei_bjnp_read_bulk (io->dev, buf, &count));
     }
   else if (io->interface == INT_CANON_HTTP)
@@ -920,7 +927,7 @@ pixma_read (pixma_io_t * io, void *buf, unsigned size)
   else
     {
 #ifdef HAVE_SANEI_USB_SET_TIMEOUT
-      sanei_usb_set_timeout (PIXMA_BULKIN_TIMEOUT);
+      sanei_usb_set_timeout (timeout);
 #endif
       error = map_error (sanei_usb_read_bulk (io->dev, buf, &count));
     }

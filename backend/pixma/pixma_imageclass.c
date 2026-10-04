@@ -390,7 +390,10 @@ read_image_block (pixma_t * s, uint8_t * data, unsigned size)
       	chunksize = size;
       else
       	chunksize = size - (size % MIN_CHUNK_SIZE);
-      error = pixma_read (s->io, data, chunksize);
+      error = pixma_read_with_timeout (s->io, data, chunksize,
+                                       (s->cfg->pid == MF3200_PID
+                                        ? PIXMA_BULKIN_IMAGE_TIMEOUT
+                                        : PIXMA_BULKIN_TIMEOUT));
       if (error < 0)
       	return count;
       count += error;

@@ -56,6 +56,11 @@
 
 /** Timeout for pixma_read() in milliseconds */
 #define PIXMA_BULKIN_TIMEOUT  1000
+/** Timeout for reading image data, in milliseconds.  Only the MF3200 series
+ * uses it: the first image read after a scan starts may wait several seconds
+ * while the unit wakes from Sleep Mode, and a cancelled URB makes it drop the
+ * block it was holding.  Other models keep PIXMA_BULKIN_TIMEOUT. */
+#define PIXMA_BULKIN_IMAGE_TIMEOUT 30000
 /** Timeout for pixma_write() in milliseconds */
 #define PIXMA_BULKOUT_TIMEOUT 1000
 
@@ -155,6 +160,9 @@ int pixma_write (pixma_io_t *, const void *cmd, unsigned len);
  *   - \c PIXMA_ENOMEM
  *  \see #PIXMA_BULKIN_TIMEOUT */
 int pixma_read (pixma_io_t *, void *buf, unsigned size);
+/** Like pixma_read(), but with an explicit timeout in milliseconds. */
+int pixma_read_with_timeout (pixma_io_t *, void *buf, unsigned size,
+                             int timeout);
 
 /** Wait for an interrupt. This function can be interrupted by signals.
  *  \a size should be less than or equal to the maximum packet size.
