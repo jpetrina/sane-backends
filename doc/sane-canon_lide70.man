@@ -90,6 +90,11 @@ where such precision matters. Note that
 .BR xsane (1)
 uses the 75 dpi mode for prescans. The problem is worse on the LiDE 600(F),
 where the offset is five millimeters.
+.PP
+Colors may be represented inaccurately: in particular, white document pages
+can have a tint of red, green, or blue. This problem is usually confined to
+scans made at a particular resolution (especially 600 dpi); try scanning
+at a different resolution if this is bothersome.
 
 .SH "SEE ALSO"
 .BR sane (7),
