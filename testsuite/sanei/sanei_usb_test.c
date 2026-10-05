@@ -137,7 +137,7 @@ create_mock_device (char *devname, device_list_type * device)
   device->method = sanei_usb_method_usbcalls;
 #endif
 #if !defined(HAVE_LIBUSB_LEGACY) && !defined(HAVE_LIBUSB) && !defined(HAVE_USBCALLS)
-  device->method == sanei_usb_method_scanner_driver;
+  device->method = sanei_usb_method_scanner_driver;
 #endif
 }
 

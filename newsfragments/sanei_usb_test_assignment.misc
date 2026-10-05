@@ -1,0 +1,1 @@
+Fix compilation of the USB tests without USB libraries when warnings are treated as errors.
