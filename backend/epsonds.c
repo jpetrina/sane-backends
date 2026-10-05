@@ -3091,7 +3091,8 @@ sane_start(SANE_Handle handle)
 				cmd[pos++] =  LUT[0][count];
 			}
 		}
-		else if (s->params.format == SANE_FRAME_RGB) {
+		else if (s->params.format == SANE_FRAME_RGB &&
+			 !(strcmp(source_list[s->val[OPT_SOURCE].w], STRING_ADFDUPLEX) == 0 && s->hw->lut_id == 7)) {
 			DBG(10, "SANE_FRAME_RGB\n");
 			cmd[pos++] = '#';
 			cmd[pos++] = 'G';
@@ -3148,7 +3149,11 @@ sane_start(SANE_Handle handle)
 
 	}
 	if (!s->hw->has_hardware_lut) { // Set Color Matrix
-		if (s->params.format == SANE_FRAME_RGB && s->hw->lut_id != 0 )/*Color Matrix Target devide and color Scan*/
+		SANE_Bool has_color_matrix_profile =
+			(s->hw->lut_id == 2 || s->hw->lut_id == 4 ||
+			 s->hw->lut_id == 5 || s->hw->lut_id == 6);
+
+		if (s->params.format == SANE_FRAME_RGB && has_color_matrix_profile)/*Color Matrix Target devide and color Scan*/
 		{
 			ColorMatrix matrix;
 
