@@ -72,6 +72,15 @@ if grep -q "bind failed" "$SANED_LOG"; then
     exit 1
 fi
 
+# Test whether a second saned on the same port exits cleanly.
+status=0
+timeout "$READY_TIMEOUT" "$SANED" -l -o -d 128 -e -b 127.0.0.1 >/dev/null 2>&1 || status=$?
+if test "$status" -ne 1; then
+    echo "saned test: second saned on a busy port exited with status $status, expected 1" >&2
+    exit 1
+fi
+
+# Full scanimage test.
 if timeout "$TEST_TIMEOUT" "$SCANIMAGE" -d net:localhost:test -T; then
     :
 else

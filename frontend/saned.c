@@ -3039,6 +3039,7 @@ do_bindings (void)
   struct addrinfo *res;
   struct addrinfo hints;
   int err;
+  struct saned_fd *fd;
 
   DBG (DBG_DBG, "do_bindings: trying to get port for service \"%s\" (getaddrinfo)\n", SANED_SERVICE_NAME);
 
@@ -3070,7 +3071,11 @@ do_bindings (void)
 
   freeaddrinfo (res);
 
-  if (res == NULL)
+  for (fd = saned_fds; fd; fd = fd->next)
+    if (fd->type == SANED_FD_LISTENER)
+      break;
+
+  if (fd == NULL)
     {
       DBG (DBG_ERR, "do_bindings: couldn't bind an address. Exiting.\n");
       bail_out (1);
