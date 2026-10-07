@@ -1400,6 +1400,7 @@ clean:
   return status;
 }
 
+#endif
 const char *ccaps [18] = {"PIXMA_CAP_EASY_RGB",
                           "PIXMA_CAP_GRAY",
                           "PIXMA_CAP_ADF",
@@ -1439,4 +1440,3 @@ const unsigned ucaps [18] = {PIXMA_CAP_EASY_RGB,
                              PIXMA_CAP_GT_4096,
                              0
                       };
-#endif
