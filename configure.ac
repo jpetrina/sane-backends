@@ -717,7 +717,9 @@ SANE_CHECK_BACKENDS
 AC_ARG_ENABLE(pnm-backend,
   AS_HELP_STRING([--enable-pnm-backend],
                  [enable the pnm backend for testing frontends (possible security risk, see PROBLEMS file)]),
-                 [FILTERED_BACKENDS="${FILTERED_BACKENDS} pnm"],
+                 [if test "x$enableval" = "xyes"; then
+                    FILTERED_BACKENDS="${FILTERED_BACKENDS} pnm"
+                  fi],
                  [echo "*** pnm backend not manually selected - disabling"])
 
 BACKENDS="$FILTERED_BACKENDS"
