@@ -245,6 +245,7 @@ attach_bjnp (SANE_String_Const devname,
   return SANE_STATUS_GOOD;
 }
 
+#if HAVE_LIBSNMP
 static const pixma_config_t *
 find_network_config (const char *model,
                      const pixma_config_t *const pixma_devices[])
@@ -314,6 +315,7 @@ attach_canon_http (const char *address, const char *model,
   nscanners++;
   return SANE_STATUS_GOOD;
 }
+#endif
 
 #if HAVE_LIBSNMP
 typedef struct

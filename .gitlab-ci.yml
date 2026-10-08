@@ -7,6 +7,7 @@ variables:
   REGISTRY_HUB: "registry.gitlab.com/sane-project/ci-envs"
   CONFIGURE_MINI: ""
   CONFIGURE_FULL: "--with-usb --with-usb-record-replay --with-avahi --enable-pnm-backend --with-libcurl --with-poppler-glib"
+  CONFIGURE_NONE: "--without-usb --without-usb-record-replay --without-avahi --without-libcurl --without-poppler-glib --without-snmp --without-systemd --without-v4l"
 
 stages:
   - tarball
@@ -90,6 +91,13 @@ debian-12-full:
     reports:
       junit: build/junit_report.xml
     expire_in: 1 day
+
+debian-12-none:
+  image: $REGISTRY_HUB:debian-bookworm-full
+  variables:
+    CONFIGURE_OPTS: "$CONFIGURE_NONE"
+    MAKE_FLAGS: "CFLAGS=-Werror CXXFLAGS=-Werror"
+  <<: *compile_definition
 
 fedora-39-clang:
   image: $REGISTRY_HUB:fedora-39-clang

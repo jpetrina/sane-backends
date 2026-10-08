@@ -1697,6 +1697,7 @@ attach_one_net(const char *dev)
 	return attach(name, SANE_EPSONDS_NET);
 }
 
+#if WITH_AVAHI
 static void found_net_device(const char* device_name, const char* ip)
 {
 	DBG(7, "Found %s: ip = %s\n", device_name, ip);
@@ -1732,6 +1733,7 @@ static void found_net_device(const char* device_name, const char* ip)
 		}
 	}
 }
+#endif
 
 static void
 splitProfileName(const char* input, int* outProductID, char *outProductName, char* outDeviceID, int* outLutID)
