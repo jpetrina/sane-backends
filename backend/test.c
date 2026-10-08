@@ -1559,6 +1559,15 @@ reader_task (void *data)
   memset (&act, 0, sizeof (act));
   sigaction (SIGTERM, &act, 0);
 
+#if defined (SIGPIPE) && defined (USE_PTHREAD)
+  {
+    sigset_t sigset;
+    sigemptyset (&sigset);
+    sigaddset (&sigset, SIGPIPE);
+    pthread_sigmask (SIG_BLOCK, &sigset, NULL);
+  }
+#endif
+
   status = reader_process (test_device, test_device->reader_fds);
   DBG (2, "(child) reader_task: reader_process finished (%s)\n",
        sane_strstatus (status));
