@@ -3598,6 +3598,18 @@ void genesys_init_sensor_tables()
         }
     }
 
+    // 7600i v1: 7500i sensor with stock exposure values
+    {
+        std::vector<Genesys_Sensor> v1_sensors;
+        for (const auto& s : *s_sensors) {
+            if (s.sensor_id == SensorId::CCD_PLUSTEK_OPTICFILM_7500I) {
+                v1_sensors.push_back(s);
+                v1_sensors.back().sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_7600I_V1;
+                v1_sensors.back().exposure_lperiod = 0x36b0;
+            }
+        }
+        s_sensors->insert(s_sensors->end(), v1_sensors.begin(), v1_sensors.end());
+    }
 
     sensor = Genesys_Sensor();
     sensor.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_8200I; // gl845

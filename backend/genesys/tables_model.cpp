@@ -2681,9 +2681,14 @@ void genesys_init_usb_device_tables()
     s_usb_devices->emplace_back(0x07b3, 0x0c13, model);
 
 
-    // same as 7500i
+    // same as 7500i, with full scan area and stock exposure values
     model.name = "plustek-opticfilm-7600i-v1";
     model.model = "OpticFilm 7600i (v1)";
+    model.sensor_id = SensorId::CCD_PLUSTEK_OPTICFILM_7600I_V1;
+    model.x_offset_ta = 0.211667;
+    model.x_size_ta = 36.613833;
+    model.y_size_ta = 24.727;
+    model.x_size_calib_mm = 36.825;
     s_usb_devices->emplace_back(0x07b3, 0x0c3b, 0x0400, model);
 
 
