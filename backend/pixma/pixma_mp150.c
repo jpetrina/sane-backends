@@ -1075,6 +1075,14 @@ handle_interrupt (pixma_t * s, int timeout)
       s->events = PIXMA_EV_BUTTON1 | (buf[0x13] & 0x0f);
     }
   }
+  else if (s->cfg->pid == MP280_PID)
+  /* SCAN button send a packet with buf[4] = 01 when pressed */
+  {
+    if (buf[4] & 1)
+    {
+      s->events = PIXMA_EV_BUTTON1;
+    }
+  }
   else if (s->cfg->pid == LIDE400_PID)
   /* unknown value in buf[4]
    * target in buf[0x13] 01=copy; 02=auto; 03=send; 05=start PDF; 06=finish PDF
