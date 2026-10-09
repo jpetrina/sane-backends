@@ -1211,6 +1211,7 @@ dist_neatnm1000_data_DATA = \
     neatnm1000/nm1000-600gray-out.bin \
     neatnm1000/nm1000-150color-out.bin \
     neatnm1000/nm1000-300color-out.bin
+EXTRA_DIST += neatnm1000/README
 
 libmagicolor_la_SOURCES = magicolor.c magicolor.h
 libmagicolor_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=magicolor $(SNMP_CFLAGS)

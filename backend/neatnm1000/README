@@ -1,0 +1,20 @@
+Neat NM-1000 per-mode init data
+===============================
+
+These files are *measured* USB traffic captured from the vendor's
+Windows driver while scanning on the author's own hardware — not
+firmware extracted from the device, and no vendor binaries. They are
+published under the same license as the SANE project itself.
+
+- nm1000-ctrl-{gray,color}{150,300,600}.json
+  Ordered EP0 vendor control scripts (OUT payloads + IN lengths).
+  Tables 9-11 carry the mode/DPI programming; tables 0-8 are
+  mode-generic init. The backend replays them verbatim.
+
+- nm1000-{150,300,600}{gray,color}-out.bin (+ -long- variant)
+  Host-to-scanner bulk-OUT shading/calibration blocks, split in
+  captured transfer lengths by the MODE_CFG table in neatnm1000.c.
+  Replayed verbatim; expect mild shading error if lamp/paper differ.
+
+Total ~200 KB. Without them the backend reports SANE_STATUS_IO_ERROR
+at scan start (see the missing-data diagnostic in sane_start).
