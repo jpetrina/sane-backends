@@ -1,0 +1,70 @@
+.TH sane\-neatnm1000 5 "@PACKAGEVERSION@" "SANE Scanner Access Now Easy"
+.IX sane\-neatnm1000
+.SH NAME
+sane\-neatnm1000 \- SANE backend for the Neat NM-1000 sheetfed scanner
+.SH DESCRIPTION
+The
+.B sane\-neatnm1000
+library implements a SANE (Scanner Access Now Easy) backend that provides
+access to the Neat NM-1000 Mobile Scanner, a sheetfed portable CIS scanner
+with USB id 0x1f44/0x0001.
+.PP
+Supported resolutions: gray 150/300/600 dpi and color 150/300 dpi.
+Scan length is sheetfed-variable: the backend stops on paper-out plus
+lid-dark, so the image height depends on the fed sheet.
+.PP
+No vendor firmware blob is needed. The init scripts and calibration data
+used by the backend install to
+.IR @DATADIR@/sane/neatnm1000 .
+.SH "DEVICE NAMES"
+This backend expects device names of the form:
+.PP
+.RS
+.I special
+.RE
+.PP
+Where
+.I special
+is the USB device name, e.g.
+.IR libusb:001:002 .
+.SH CONFIGURATION
+The contents of the
+.I neatnm1000.conf
+file is a list of device names and USB ids that correspond to Neat NM-1000
+scanners. Empty lines and lines starting with a hash mark (#) are ignored.
+.PP
+The scanner is normally autodetected by the
+.B "usb vendor_id product_id"
+statement already included in
+.IR neatnm1000.conf :
+.PP
+.RS
+usb 0x1f44 0x0001
+.RE
+.SH WARM SCANS
+The firmware keeps scan state after a finished scan. The backend detects a
+repeated scan on the same plugged device and skips the power-on handshake
+and the feed arming block, matching the vendor driver's own back-to-back
+behavior. A physically replugged scanner is always treated as cold.
+.SH FILES
+.TP
+.I @CONFIGDIR@/neatnm1000.conf
+The backend configuration file.
+.TP
+.I @DATADIR@/sane/neatnm1000/
+Init scripts (nm1000-ctrl-*.json) and calibration blobs (nm1000-*-out.bin).
+.SH ENVIRONMENT
+.TP
+.B SANE_DEBUG_NEATNM1000
+If set, the backend writes a protocol trace to stderr.
+.TP
+.B NEATNM1000_DATA_DIR
+Directory holding the init scripts and calibration blobs. Overrides the
+installed data directory (developer runs).
+.SH "SEE ALSO"
+.BR sane (7),
+.BR sane\-usb (5),
+.BR scanimage (1)
+.SH AUTHOR
+Pedro and contributors. Reverse-engineered from the vendor driver's USB
+traffic.

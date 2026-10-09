@@ -60,6 +60,7 @@ for file in "$@"; do
         *.jpg) ;;
         *.png) ;;
         *.pnm) ;;
+        *.bin) ;;                   # backend calibration blobs are binary
         *.patch) ;;                 # patch output may have trailing lines or whitespace
         Makefile.in) ;;             # skip automake outputs
         */Makefile.in) ;;

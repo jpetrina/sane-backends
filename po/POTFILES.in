@@ -60,6 +60,7 @@ backend/mustek.c
 backend/mustek_usb.c
 backend/mustek_usb2.c
 backend/mustek_usb2.h
+backend/neatnm1000.c
 backend/niash.c
 backend/p5.c
 backend/p5.h

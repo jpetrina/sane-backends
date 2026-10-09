@@ -22,7 +22,7 @@ BACKEND_5MANS = sane-abaton.5 sane-agfafocus.5 sane-apple.5 sane-as6e.5 \
 	sane-dll.5 sane-dc25.5 sane-dmc.5 sane-epson.5 sane-epson2.5 sane-epsonds.5 \
 	sane-escl.5 sane-hp.5 sane-gphoto2.5 sane-leo.5 sane-lexmark.5 \
 	sane-matsushita.5 sane-microtek.5 sane-microtek2.5 sane-mustek.5 \
-	sane-nec.5 sane-net.5 sane-pie.5 sane-pieusb.5 sane-pint.5 sane-pnm.5 \
+	sane-neatnm1000.5 sane-nec.5 sane-net.5 sane-pie.5 sane-pieusb.5 sane-pint.5 sane-pnm.5 \
 	sane-umax.5 sane-qcam.5 sane-scsi.5 sane-artec.5 sane-kodak.5 sane-kodakaio.5 \
 	sane-fujitsu.5 sane-sharp.5 sane-s9036.5 sane-tamarack.5 \
 	sane-ricoh.5 sane-ricoh2.5 sane-avision.5 sane-plustek.5 sane-st400.5 \
@@ -45,7 +45,7 @@ EXTRA_DIST += sane-abaton.man sane-agfafocus.man sane-apple.man sane-as6e.man \
 	sane-dll.man sane-dc25.man sane-dmc.man sane-epson.man \
 	sane-epson2.man sane-epsonds.man sane-escl.man sane-hp.man sane-gphoto2.man \
 	sane-leo.man sane-lexmark.man sane-matsushita.man sane-microtek.man \
-	sane-microtek2.man sane-mustek.man sane-nec.man sane-net.man \
+	sane-microtek2.man sane-mustek.man sane-neatnm1000.man sane-nec.man sane-net.man \
 	sane-pie.man sane-pieusb.man sane-pint.man sane-pnm.man sane-umax.man \
 	sane-qcam.man sane-scsi.man sane-artec.man sane-fujitsu.man \
 	sane-sharp.man sane-s9036.man sane-tamarack.man sane-kodak.man sane-kodakaio.man\
@@ -170,7 +170,7 @@ DESC_FILES = descriptions/abaton.desc descriptions/agfafocus.desc \
   descriptions/matsushita.desc descriptions/microtek2.desc \
   descriptions/microtek.desc descriptions/mustek.desc \
   descriptions/mustek_pp.desc descriptions/mustek_usb2.desc \
-  descriptions/mustek_usb.desc descriptions/nec.desc descriptions/net.desc \
+  descriptions/mustek_usb.desc descriptions/neatnm1000.desc descriptions/nec.desc descriptions/net.desc \
   descriptions/niash.desc descriptions/pie.desc descriptions/pieusb.desc descriptions/pint.desc \
   descriptions/p5.desc descriptions/pixma.desc descriptions/plustek.desc \
   descriptions/plustek_pp.desc descriptions/pnm.desc descriptions/qcam.desc \

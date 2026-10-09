@@ -1,0 +1,4 @@
+#neatnm1000.conf: see sane-neatnm1000(5)
+
+#Neat NM-1000 Mobile Scanner (sheetfed portable CIS)
+usb 0x1f44 0x0001
