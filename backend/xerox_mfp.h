@@ -137,6 +137,7 @@ struct transport {
                        SANE_Byte *resp, size_t *resplen);
     SANE_Status(*dev_open)(struct device *dev);
     void (*dev_close)(struct device *dev);
+    void (*flush)(struct device *dev);
     SANE_Status(*configure_device)(const char *devname, SANE_Status(*cb)(SANE_String_Const devname));
 };
 
@@ -144,12 +145,14 @@ struct transport {
 int		usb_dev_request(struct device *dev, SANE_Byte *cmd, size_t cmdlen, SANE_Byte *resp, size_t *resplen);
 SANE_Status	usb_dev_open(struct device *dev);
 void		usb_dev_close(struct device *dev);
+void		usb_dev_flush(struct device *dev);
 SANE_Status	usb_configure_device(const char *devname, SANE_Status(*cb)(SANE_String_Const devname));
 
 /*	TCP unicast	*/
 int		tcp_dev_request(struct device *dev, SANE_Byte *cmd, size_t cmdlen, SANE_Byte *resp, size_t *resplen);
 SANE_Status	tcp_dev_open(struct device *dev);
 void		tcp_dev_close(struct device *dev);
+void		tcp_dev_flush(struct device *dev);
 SANE_Status	tcp_configure_device(const char *devname, SANE_Status(*cb)(SANE_String_Const devname));
 
 /* device wants transfer buffer to be multiple of 512 */

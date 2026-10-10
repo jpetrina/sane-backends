@@ -166,6 +166,30 @@ tcp_dev_close(struct device *dev)
 }
 
 
+void
+tcp_dev_flush(struct device *dev)
+{
+    SANE_Byte buf[256];
+    int flags;
+    ssize_t rc;
+
+    if (dev->dn < 0)
+        return;
+
+    /* Drain any stale data left by a failed command so that the next
+       command does not read a response left over from the previous one. */
+    flags = fcntl(dev->dn, F_GETFL, 0);
+    if (flags < 0)
+        return;
+    if (fcntl(dev->dn, F_SETFL, flags | O_NONBLOCK) < 0)
+        return;
+    do {
+        rc = recv(dev->dn, buf, sizeof(buf), 0);
+    } while (rc > 0);
+    fcntl(dev->dn, F_SETFL, flags);
+}
+
+
 SANE_Status
 tcp_configure_device(const char *devname, SANE_Status(*list_one)(SANE_String_Const devname))
 {

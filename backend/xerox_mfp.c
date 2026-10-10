@@ -46,8 +46,8 @@ static struct device *devices_head = NULL;	/* sane_get_devices list */
 
 enum { TRANSPORT_USB, TRANSPORT_TCP, TRANSPORTS_MAX };
 transport available_transports[TRANSPORTS_MAX] = {
-    { "usb", usb_dev_request, usb_dev_open, usb_dev_close, usb_configure_device },
-    { "tcp", tcp_dev_request, tcp_dev_open, tcp_dev_close, tcp_configure_device },
+    { "usb", usb_dev_request, usb_dev_open, usb_dev_close, usb_dev_flush, usb_configure_device },
+    { "tcp", tcp_dev_request, tcp_dev_open, tcp_dev_close, tcp_dev_flush, tcp_configure_device },
 };
 
 static int resolv_state(int state)
@@ -253,6 +253,13 @@ static void dbg_dump(struct device *dev)
         (dlen < (int)dev->reslen)? "..." : "");
 }
 
+/* drain any stale data left over from a failed command */
+static void dev_flush(struct device *dev)
+{
+    DBG(3, "%s: %p\n", __func__, (void *)dev);
+    dev->io->flush(dev);
+}
+
 /* one command to device */
 /* return 0: on error, 1: success */
 static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
@@ -263,7 +270,7 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
 
 
     assert(reqlen <= sizeof(dev->res));	/* requested len */
-    dev->reslen = sizeof(dev->res);	/* doing full buffer to flush stalled commands */
+    dev->reslen = reqlen;	/* read only the known reply length; over-reading stalls ~1s/command on TCP */
 
     if (cmd[2] == CMD_SET_WINDOW) {
         /* Set Window have wrong packet length, huh. */
@@ -282,6 +289,7 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
     if (status != SANE_STATUS_GOOD) {
         DBG(1, "%s: dev_request: %s\n", __func__, sane_strstatus(status));
         dev->state = SANE_STATUS_IO_ERROR;
+        dev_flush(dev);
         return 0;
     }
 
@@ -295,6 +303,7 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
         DBG(1, "%s: illegal response len %zu, need %zu\n",
             __func__, dev->reslen, reqlen);
         dev->state = SANE_STATUS_IO_ERROR;
+        dev_flush(dev);
         return 0;
     } else {
         size_t pktlen;		/* len specified in packet */
@@ -305,6 +314,7 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
         if (dev->res[0] != RES_CODE) {
             DBG(2, "%s: illegal data header %02x\n", __func__, dev->res[0]);
             dev->state = SANE_STATUS_IO_ERROR;
+            dev_flush(dev);
             return 0;
         }
         pktlen = dev->res[2] + 3;
@@ -312,6 +322,7 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
             DBG(2, "%s: illegal response len %zu, should be %zu\n",
                 __func__, pktlen, dev->reslen);
             dev->state = SANE_STATUS_IO_ERROR;
+            dev_flush(dev);
             return 0;
         }
         if (dev->reslen > reqlen)

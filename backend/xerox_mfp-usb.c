@@ -117,6 +117,27 @@ usb_dev_close(struct device *dev)
 }
 
 
+void
+usb_dev_flush(struct device *dev)
+{
+    SANE_Byte buf[64];
+    size_t len;
+
+    if (dev->dn < 0)
+        return;
+
+    /* Drain any stale bulk data left by a failed command so that the next
+       command does not read a response from the previous one. Use a short
+       timeout so this returns promptly when nothing is pending. */
+    sanei_usb_set_timeout(100);
+    do {
+        len = sizeof(buf);
+    } while (sanei_usb_read_bulk(dev->dn, buf, &len) == SANE_STATUS_GOOD &&
+             len > 0);
+    sanei_usb_set_timeout(30000);
+}
+
+
 /* SANE API ignores return code of this callback */
 SANE_Status
 usb_configure_device(const char *devname, SANE_Status(*attach)(const char *dev))
