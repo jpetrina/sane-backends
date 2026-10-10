@@ -1,17 +1,16 @@
 /*
- *	SANE backend for
- *		Samsung SCX-4500W
+ *  SANE backend for Samsung SCX-4500W
  *
- *	Network Scanners Support
- *	Copyright 2010 Alexander Kuznetsov <acca(at)cpan.org>
+ *  Network Scanners Support
+ *  Copyright 2010 Alexander Kuznetsov <acca(at)cpan.org>
  *
  * This program is licensed under GPL + SANE exception.
  * More info at http://www.sane-project.org/license.html
  *
  */
 
-#undef	BACKEND_NAME
-#define	BACKEND_NAME xerox_mfp
+#undef  BACKEND_NAME
+#define BACKEND_NAME xerox_mfp
 #define DEBUG_DECLARE_ONLY
 #define DEBUG_NOT_STATIC
 
@@ -44,16 +43,17 @@
 #include "xerox_mfp.h"
 
 
-#define	RECV_TIMEOUT	1	/*	seconds		*/
+#define RECV_TIMEOUT    1   /* seconds */
 extern int sanei_debug_xerox_mfp;
 
-int	tcp_dev_request(struct device *dev,
-                    SANE_Byte *cmd, size_t cmdlen,
-                    SANE_Byte *resp, size_t *resplen)
+int
+tcp_dev_request(struct device *dev,
+                SANE_Byte *cmd, size_t cmdlen,
+                SANE_Byte *resp, size_t *resplen)
 {
-    size_t	bytes_recv = 0;
-    ssize_t	rc = 1;
-    size_t	len;
+    size_t bytes_recv = 0;
+    ssize_t rc = 1;
+    size_t len;
 
 
     /* Send request, if any */
@@ -73,14 +73,16 @@ int	tcp_dev_request(struct device *dev,
         while (bytes_recv < *resplen && rc > 0) {
             rc = recv(dev->dn, resp+bytes_recv, *resplen-bytes_recv, 0);
 
-            if (rc > 0)	bytes_recv += rc;
+            if (rc > 0) {
+                bytes_recv += rc;
+            }
             else {
                 DBG(1, "%s: error %s, bytes requested: %i, bytes read: %i\n",
                     __func__, strerror(errno), (int)*resplen, (int)bytes_recv);
                 *resplen = bytes_recv;
                 /*
                     TODO:
-                	do something smarter than that!
+                    do something smarter than that!
                 */
                 return SANE_STATUS_GOOD;
                 return SANE_STATUS_IO_ERROR;
@@ -93,24 +95,28 @@ int	tcp_dev_request(struct device *dev,
     return SANE_STATUS_GOOD;
 }
 
-SANE_Status	tcp_dev_open(struct device *dev)
+SANE_Status
+tcp_dev_open(struct device *dev)
 {
-    SANE_Status 	status;
-    char		*strhost;
-    char		*strport;
-    int			port;
-    struct		servent *sp;
-    struct		timeval tv;
-    SANE_String_Const	devname;
+    SANE_Status status;
+    char *strhost;
+    char *strport;
+    int port;
+    struct servent *sp;
+    struct timeval tv;
+    SANE_String_Const devname;
 
 
     devname = dev->sane.name;
     DBG(3, "%s: open %s\n", __func__, devname);
 
-    if (strncmp(devname, "tcp", 3) != 0)	return SANE_STATUS_INVAL;
+    if (strncmp(devname, "tcp", 3) != 0)
+        return SANE_STATUS_INVAL;
+
     devname += 3;
     devname = sanei_config_skip_whitespace(devname);
-    if (!*devname)	return SANE_STATUS_INVAL;
+    if (!*devname)
+        return SANE_STATUS_INVAL;
 
     devname = sanei_config_get_string(devname, &strhost);
     devname = sanei_config_skip_whitespace(devname);
@@ -147,7 +153,8 @@ SANE_Status	tcp_dev_open(struct device *dev)
 void
 tcp_dev_close(struct device *dev)
 {
-    if (!dev)	return;
+    if (!dev)
+        return;
 
     DBG(3, "%s: closing dev %p\n", __func__, (void *)dev);
 
@@ -155,7 +162,8 @@ tcp_dev_close(struct device *dev)
     if (dev->scanning) {
         dev->cancel = 1;
         /* flush READ_IMAGE data */
-        if (dev->reading)	sane_read(dev, NULL, 1, NULL);
+        if (dev->reading)
+            sane_read(dev, NULL, 1, NULL);
         /* send cancel if not sent before */
         if (dev->state != SANE_STATUS_CANCELLED)
             ret_cancel(dev, 0);
@@ -170,11 +178,11 @@ SANE_Status
 tcp_configure_device(const char *devname, SANE_Status(*list_one)(SANE_String_Const devname))
 {
     /*
-        TODO:	LAN scanners multicast discovery.
-    		devname would contain "tcp auto"
+        TODO: LAN scanners multicast discovery.
+        devname would contain "tcp auto"
 
-    		We find new devnames and feed them to
-    		`list_one_device' one by one
+        We find new devnames and feed them to
+        `list_one_device' one by one
     */
     return list_one(devname);
 }

@@ -6,8 +6,8 @@
  * More info at http://www.sane-project.org/license.html
  */
 
-#undef	BACKEND_NAME
-#define	BACKEND_NAME xerox_mfp
+#undef  BACKEND_NAME
+#define BACKEND_NAME xerox_mfp
 #define DEBUG_DECLARE_ONLY
 #define DEBUG_NOT_STATIC
 #include "sane/config.h"
@@ -110,7 +110,7 @@ usb_dev_close(struct device *dev)
     }
 
     if (xerox_need_clear_halt()) {
-        sanei_usb_clear_halt(dev->dn);	/* unstall for next users */
+        sanei_usb_clear_halt(dev->dn);  /* unstall for next users */
     }
     sanei_usb_close(dev->dn);
     dev->dn = -1;

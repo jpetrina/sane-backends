@@ -41,8 +41,8 @@
 #define BACKEND_BUILD 13
 #define XEROX_CONFIG_FILE "xerox_mfp.conf"
 
-static const SANE_Device **devlist = NULL;	/* sane_get_devices array */
-static struct device *devices_head = NULL;	/* sane_get_devices list */
+static const SANE_Device **devlist = NULL;  /* sane_get_devices array */
+static struct device *devices_head = NULL;  /* sane_get_devices list */
 
 enum { TRANSPORT_USB, TRANSPORT_TCP, TRANSPORTS_MAX };
 transport available_transports[TRANSPORTS_MAX] = {
@@ -80,14 +80,14 @@ static int resolv_state(int state)
 static char *str_cmd(int cmd)
 {
     switch (cmd) {
-    case CMD_ABORT:		return "ABORT";
-    case CMD_INQUIRY:		return "INQUIRY";
-    case CMD_RESERVE_UNIT:	return "RESERVE_UNIT";
-    case CMD_RELEASE_UNIT:	return "RELEASE_UNIT";
-    case CMD_SET_WINDOW:	return "SET_WINDOW";
-    case CMD_READ:		return "READ";
-    case CMD_READ_IMAGE:	return "READ_IMAGE";
-    case CMD_OBJECT_POSITION:	return "OBJECT_POSITION";
+    case CMD_ABORT:             return "ABORT";
+    case CMD_INQUIRY:           return "INQUIRY";
+    case CMD_RESERVE_UNIT:      return "RESERVE_UNIT";
+    case CMD_RELEASE_UNIT:      return "RELEASE_UNIT";
+    case CMD_SET_WINDOW:        return "SET_WINDOW";
+    case CMD_READ:              return "READ";
+    case CMD_READ_IMAGE:        return "READ_IMAGE";
+    case CMD_OBJECT_POSITION:   return "OBJECT_POSITION";
     }
     return "unknown";
 }
@@ -163,17 +163,17 @@ static int copy_decompress_data(struct device *dev, unsigned char *pDest, int ma
     int data_size = 0;
 
     if (destLen)
-	*destLen = 0;
+        *destLen = 0;
     if (!dev->decDataSize)
         return 0;
     data_size = dev->decDataSize - dev->currentDecDataIndex;
     if (data_size > maxlen)
         data_size = maxlen;
     if (data_size && pDest) {
-	memcpy(pDest, dev->decData + dev->currentDecDataIndex, data_size);
-	if (destLen)
-	    *destLen = data_size;
-	dev->currentDecDataIndex += data_size;
+        memcpy(pDest, dev->decData + dev->currentDecDataIndex, data_size);
+        if (destLen)
+            *destLen = data_size;
+        dev->currentDecDataIndex += data_size;
     }
     if (dev->decDataSize == dev->currentDecDataIndex) {
         dev->currentDecDataIndex = 0;
@@ -262,8 +262,8 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
     SANE_Byte *res = dev->res;
 
 
-    assert(reqlen <= sizeof(dev->res));	/* requested len */
-    dev->reslen = sizeof(dev->res);	/* doing full buffer to flush stalled commands */
+    assert(reqlen <= sizeof(dev->res)); /* requested len */
+    dev->reslen = sizeof(dev->res);     /* doing full buffer to flush stalled commands */
 
     if (cmd[2] == CMD_SET_WINDOW) {
         /* Set Window have wrong packet length, huh. */
@@ -297,7 +297,7 @@ static int dev_command(struct device *dev, SANE_Byte *cmd, size_t reqlen)
         dev->state = SANE_STATUS_IO_ERROR;
         return 0;
     } else {
-        size_t pktlen;		/* len specified in packet */
+        size_t pktlen;      /* len specified in packet */
 
         if (DBG_LEVEL > 3)
             dbg_dump(dev);
@@ -802,8 +802,8 @@ static int dev_set_window(struct device *dev)
     cmd[0x0a] = dev->win_len >> 16;
     cmd[0x0b] = dev->win_len >> 8;
     cmd[0x0c] = dev->win_len;
-    cmd[0x0d] = dev->resolution;		/* x */
-    cmd[0x0e] = dev->resolution;		/* y */
+    cmd[0x0d] = dev->resolution;        /* x */
+    cmd[0x0e] = dev->resolution;        /* y */
     cmd[0x0f] = (SANE_Byte)floor(dev->win_off_x);
     cmd[0x10] = (SANE_Byte)((dev->win_off_x - floor(dev->win_off_x)) * 100);
     cmd[0x11] = (SANE_Byte)floor(dev->win_off_y);
@@ -854,7 +854,7 @@ dev_inquiry(struct device *dev)
         /* skip spaces */;
 
     dev->sane.model = optr = (SANE_Char *) malloc(33);
-    xptr = optr;			/* is last non space character + 1 */
+    xptr = optr;            /* is last non space character + 1 */
     for (; ptr < &dev->res[0x24] && *ptr;) {
         if (*ptr != ' ')
             xptr = optr + 1;
@@ -1357,8 +1357,8 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
             int bufLen = (diff < maxlen) ? diff : maxlen;
             if (diff &&
                 copy_decompress_data(dev, buf, bufLen, lenp)) {
-		if (lenp)
-		    dev->total_out_size += *lenp;
+                if (lenp)
+                    dev->total_out_size += *lenp;
                 return SANE_STATUS_GOOD;
             }
         } else if (dev->composition != MODE_RGB24) {
@@ -1415,15 +1415,69 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
         dev->blocks++;
     }
 
+    /* Receive the on-device raw image data into a cyclic aka circular buffer.
+     *
+     * The circular buffer implementation is as follows:
+     *  - buffer::{data[DATASIZE], dataoff, datalen};
+     *  - data storage is preallocated to a fixed capacity: DATASIZE;
+     *  - dataoff is used to track the data start (for read);
+     *  - datalen is the stored data's length;
+     *  - DATATAIL() macro is to track the data end position (for write);
+     *  - Both start and end positions may be wrapped around at the DATASIZE,
+     *    (& DATAMASK);
+     *  - DATAROOM() macro is used to determine the currently available
+     *    length of the __contiguous__ storage after the data end (from DATATAIL)
+     *  - write is allowed only into the remaining capacity, overwriting of the
+     *    the buffered but not consumed data is not allowed;
+     *  - once data has been consumed, the dataoff and datalen must be adjusted
+     *    accordingly; dataoff may wrap around (& DATAMASK);
+     *  - when DATAROOM() returns 0, the data must be consumed before any more
+     *    data could be buffered.
+     *
+     *  NOTE: the DATAROOM() does not wrap around and yields the length
+     *  from DATATAIL() up to the DATASIZE position. So the returned length may
+     *  be shorter than the actual remaining capacity, that is there may be
+     *  more unoccupied space from the beginning of the buffer till dataoff.
+     *
+     *  This is because the buffer's storage pointer at the write position is passed
+     *  directly to the IO receive call, so it's expected to be contiguous and can't
+     *  wrap around. Thus in such cases this may result in extra IO receive call in
+     *  order to first fill the residual length till DATASIZE, and then continue
+     *  filling from the start of the buffer.
+     *
+     *  It's all manual and requires some discipline but it does the job.
+     */
     do {
         size_t datalen;
         int clrlen; /* cleared lines len */
         int olen; /* output len */
 
-        /* read as much data into the buffer */
-        datalen = MIN(dev->blocklen, DATAROOM(dev) & USB_BLOCK_MASK);
+        /* set up to read as much data as room left in the buffer */
+        datalen = DATAROOM(dev);
         while (datalen && dev->blocklen) {
             SANE_Byte *rbuf = dev->data + DATATAIL(dev);
+            /* USB 2.0 spec requires 512 byte packet max size for bulk transfers
+             * with high-speed endpoints. Smaller max sizes are allowed
+             * for slower endpoints (64, 32, 16, 8 for full-speed).
+             * Some Samsung MFP scanners require requests for at least the
+             * defined max size, when there are sufficient data available;
+             * otherwise successfully return 0 bytes.
+             * For example,
+             * - requesting 256 bytes with more than 256 bytes data available
+             *   will return 0 bytes;
+             * - requesting at least 512 will properly fulfill the request;
+             * - requesting 8 bytes with 16 bytes remaining will return 0 bytes;
+             *   yet requesting 16 bytes (or more) will correctly return the
+             *   remaining 16 bytes.
+             */
+            int usb_datalen = datalen & USB_BLOCK_MASK;
+
+            if (usb_datalen)
+                datalen = usb_datalen;
+            else if (strcmp(dev->io->ttype, "usb") == 0)
+                break;
+
+            datalen = MIN((size_t)dev->blocklen, datalen);
 
             DBG(9, "<> request len: %zu, [%d, %d; %d]\n",
                 datalen, dev->dataoff, DATATAIL(dev), dev->datalen);
@@ -1432,7 +1486,7 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
                 SANE_STATUS_GOOD)
                 return status;
 
-            dev->datalen += datalen;
+            dev->datalen += datalen; /* of actually received data */
             dev->blocklen -= datalen;
 
             DBG(9, "<> got %zu, [%d, %d; %d]\n",
@@ -1441,7 +1495,7 @@ sane_read(SANE_Handle h, SANE_Byte *buf, SANE_Int maxlen, SANE_Int *lenp)
             if (dev->blocklen < 0)
                 return ret_cancel(dev, SANE_STATUS_IO_ERROR);
 
-            datalen = MIN(dev->blocklen, DATAROOM(dev) & USB_BLOCK_MASK);
+            datalen = DATAROOM(dev);
         }
 
         if (buf && lenp) { /* read mode */
@@ -1564,17 +1618,17 @@ sane_start(SANE_Handle h)
 
     if (isJPEGEnabled(dev) &&
         dev->composition == MODE_RGB24) {
-	int fd;
+        int fd;
         remove(encTmpFileName);
 
-	/* Precreate temporary file in exclusive mode. */
-	fd = open(encTmpFileName, O_CREAT|O_EXCL, 0600);
-	if (fd == -1) {
-	    DBG(3, "%s: %p, can't create temporary file %s: %s\n", __func__,
-		(void *)dev, encTmpFileName, strerror(errno));
-	    return ret_cancel(dev, SANE_STATUS_ACCESS_DENIED);
-	}
-	close(fd);
+        /* Precreate temporary file in exclusive mode. */
+        fd = open(encTmpFileName, O_CREAT|O_EXCL, 0600);
+        if (fd == -1) {
+            DBG(3, "%s: %p, can't create temporary file %s: %s\n", __func__,
+                (void *)dev, encTmpFileName, strerror(errno));
+            return ret_cancel(dev, SANE_STATUS_ACCESS_DENIED);
+        }
+        close(fd);
     }
     dev->currentDecDataIndex = 0;
 
