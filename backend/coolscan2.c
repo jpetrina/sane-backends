@@ -2490,6 +2490,13 @@ cs2_load (cs2_t * s)
   status = cs2_grow_send_buffer (s);
   if (status)
     return status;
+
+  /* the 13-byte parameter block must be zeroed explicitly: the send
+     buffer is reused across commands (n_cmd is not set until
+     cs2_issue_cmd), and at least the LS-5000 (firmware 1.03) rejects
+     the command with ILLEGAL REQUEST if stale bytes remain */
+  memset (s->send_buf + s->n_send - 13, 0, 13);
+
   status = cs2_issue_cmd (s);
   if (status)
     return status;
@@ -2509,6 +2516,9 @@ cs2_eject (cs2_t * s)
   status = cs2_grow_send_buffer (s);
   if (status)
     return status;
+
+  memset (s->send_buf + s->n_send - 13, 0, 13);
+
   status = cs2_issue_cmd (s);
   if (status)
     return status;
@@ -2528,6 +2538,9 @@ cs2_reset (cs2_t * s)
   status = cs2_grow_send_buffer (s);
   if (status)
     return status;
+
+  memset (s->send_buf + s->n_send - 13, 0, 13);
+
   status = cs2_issue_cmd (s);
   if (status)
     return status;
