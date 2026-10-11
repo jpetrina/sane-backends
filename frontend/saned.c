@@ -593,7 +593,7 @@ static SANE_Bool
 check_v4_in_range (struct sockaddr_in *sin, char *base_ip, char *netmask)
 {
   int cidr;
-  int i, err;
+  int err;
   char *end;
   uint32_t mask;
   struct sockaddr_in *base;
@@ -601,7 +601,6 @@ check_v4_in_range (struct sockaddr_in *sin, char *base_ip, char *netmask)
   struct addrinfo *res;
   SANE_Bool ret = SANE_FALSE;
 
-  cidr = -1;
   cidr = strtol (netmask, &end, 10);
 
   /* Sanity check on the cidr value */
@@ -611,20 +610,8 @@ check_v4_in_range (struct sockaddr_in *sin, char *base_ip, char *netmask)
       return SANE_FALSE;
     }
 
-  mask = 0;
-  cidr -= 8;
-
   /* Build a bitmask out of the CIDR value */
-  for (i = 3; cidr >= 0; i--)
-    {
-      mask |= (0xff << (8 * i));
-      cidr -= 8;
-    }
-
-  if (cidr < 0)
-    mask |= (cidrtomask[cidr + 8] << (8 * i));
-
-  mask = htonl (mask);
+  mask = htonl (cidr == 0 ? 0 : 0xffffffffu << (32 - cidr));
 
   /* get a sockaddr_in representing the base IP address */
   memset (&hints, 0, sizeof (struct addrinfo));
@@ -660,14 +647,13 @@ check_v6_in_range (struct sockaddr_in6 *sin6, char *base_ip, char *netmask)
 {
   int cidr;
   int i, err;
-  unsigned int mask[16];
+  unsigned char mask[16];
   char *end;
   struct sockaddr_in6 *base;
   struct addrinfo hints;
   struct addrinfo *res;
   SANE_Bool ret = SANE_TRUE;
 
-  cidr = -1;
   cidr = strtol (netmask, &end, 10);
 
   /* Sanity check on the cidr value */
@@ -677,18 +663,11 @@ check_v6_in_range (struct sockaddr_in6 *sin6, char *base_ip, char *netmask)
       return SANE_FALSE;
     }
 
-  memset (mask, 0, (16 * sizeof (unsigned int)));
-  cidr -= 8;
-
   /* Build a bitmask out of the CIDR value */
-  for (i = 0; cidr >= 0; i++)
-    {
-      mask[i] = 0xff;
-      cidr -= 8;
-    }
+  memset (mask, 0, sizeof (mask));
 
-  if (cidr < 0)
-    mask[i] = cidrtomask[cidr + 8];
+  for (i = 0; i < 16 && cidr > 0; i++, cidr -= 8)
+    mask[i] = (cidr >= 8) ? 0xff : cidrtomask[cidr];
 
   /* get a sockaddr_in6 representing the base IP address */
   memset (&hints, 0, sizeof (struct addrinfo));
