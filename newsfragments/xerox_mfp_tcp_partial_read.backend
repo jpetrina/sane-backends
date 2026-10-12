@@ -1,0 +1,1 @@
+xerox_mfp: Fixed network scans stalling with 100% CPU usage when the scanner pauses for more than a second while sending image data (seen on Xerox WorkCentre 3210 at 200 dpi and above).

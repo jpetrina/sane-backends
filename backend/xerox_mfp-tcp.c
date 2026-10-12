@@ -45,6 +45,12 @@
 
 
 #define	RECV_TIMEOUT	1	/*	seconds		*/
+/*
+ * Image data reads know exactly how many bytes the scanner will send, but
+ * the device may pause for several seconds while it processes a dense page.
+ * Keep waiting through receive timeouts up to this limit.
+ */
+#define	DATA_RECV_TIMEOUT	30	/*	seconds		*/
 extern int sanei_debug_xerox_mfp;
 
 int	tcp_dev_request(struct device *dev,
@@ -54,6 +60,7 @@ int	tcp_dev_request(struct device *dev,
     size_t	bytes_recv = 0;
     ssize_t	rc = 1;
     size_t	len;
+    int		idle_seconds = 0;
 
 
     /* Send request, if any */
@@ -73,8 +80,33 @@ int	tcp_dev_request(struct device *dev,
         while (bytes_recv < *resplen && rc > 0) {
             rc = recv(dev->dn, resp+bytes_recv, *resplen-bytes_recv, 0);
 
-            if (rc > 0)	bytes_recv += rc;
-            else {
+            if (rc > 0) {
+                bytes_recv += rc;
+                idle_seconds = 0;
+            } else if (!cmd) {
+                /*
+                 * Image data read. Returning a short read here leaves
+                 * the data buffer unaligned to USB_BLOCK_SIZE, after which
+                 * sane_read() can no longer complete a line and returns
+                 * zero bytes forever. Wait for the full amount instead.
+                 */
+                if (rc < 0 && errno == EINTR) {
+                    rc = 1;
+                    continue;
+                }
+                if (rc < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) &&
+                    (idle_seconds += RECV_TIMEOUT) < DATA_RECV_TIMEOUT) {
+                    DBG(3, "%s: waiting for data, %i of %i bytes read\n",
+                        __func__, (int)bytes_recv, (int)*resplen);
+                    rc = 1;
+                    continue;
+                }
+                DBG(1, "%s: %s, bytes requested: %i, bytes read: %i\n",
+                    __func__, rc == 0 ? "connection closed" : strerror(errno),
+                    (int)*resplen, (int)bytes_recv);
+                *resplen = bytes_recv;
+                return SANE_STATUS_IO_ERROR;
+            } else {
                 DBG(1, "%s: error %s, bytes requested: %i, bytes read: %i\n",
                     __func__, strerror(errno), (int)*resplen, (int)bytes_recv);
                 *resplen = bytes_recv;
