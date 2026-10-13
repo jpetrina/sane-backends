@@ -2068,9 +2068,26 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
         sanei_genesys_set_motor_power(regs, false);
     }
 
+    // On GL841 the line period is derived from the LED exposure when scanning (see
+    // gl841_exposure_time()), but here it has been computed once from the initial exposure.
+    // An LED exposure longer than the line period does not give a usable measurement (on CIS
+    // sensors the light leaks into the next colour's line), so the line period must follow the
+    // exposure in the same way as in the final scan.
+    std::uint16_t gl841_min_lperiod = 0;
+    if (dev.model->asic_type == AsicType::GL841) {
+        gl841_min_lperiod = regs.get16(gl841::REG_LPERIOD);
+    }
+
     bool acceptable = false;
     for (unsigned i_test = 0; i_test < 100 && !acceptable; ++i_test) {
         regs_set_exposure(dev.model->asic_type, regs, { exp[0], exp[1], exp[2] });
+
+        if (dev.model->asic_type == AsicType::GL841) {
+            unsigned lperiod = std::max<unsigned>({ exp[0], exp[1], exp[2] }) + regs.get8(0x19);
+            regs.set16(gl841::REG_LPERIOD, std::max<unsigned>(lperiod, gl841_min_lperiod));
+            dbg.vlog(DBG_info, "test %u: exposure: %d, %d, %d, lperiod: %d", i_test,
+                     exp[0], exp[1], exp[2], regs.get16(gl841::REG_LPERIOD));
+        }
 
         dev.interface->write_registers(regs);
 
@@ -2155,11 +2172,14 @@ SensorExposure scanner_led_calibration(Genesys_Device& dev, const Genesys_Sensor
                 // we accept +- 2% delta from target
                 if (std::abs(avg[i] - target) > target / 50) {
                     float prev_weight = 0.5;
+                    float new_exp = 0;
                     if (avg[i] != 0) {
-                        exp[i] = exp[i] * prev_weight + ((exp[i] * target) / avg[i]) * (1 - prev_weight);
+                        new_exp = exp[i] * prev_weight + ((exp[i] * target) / avg[i]) * (1 - prev_weight);
                     } else {
-                        exp[i] = exp[i] * prev_weight + (exp[i] * 10) * (1 - prev_weight);
+                        new_exp = exp[i] * prev_weight + (exp[i] * 10) * (1 - prev_weight);
                     }
+                    // the line period is exposure + dummy and must fit into 16 bits
+                    exp[i] = static_cast<std::uint16_t>(std::min(new_exp, 65535.0f - 255.0f));
                     acceptable = false;
                 }
             }

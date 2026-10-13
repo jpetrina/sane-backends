@@ -1,0 +1,1 @@
+genesys: Fix LED calibration on GL841 CIS scanners (e.g. Canon LiDE 35/40/50) ending with a strong green cast, vertical stripes and very slow scans, by keeping the line period in sync with the LED exposure.
