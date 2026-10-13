@@ -424,6 +424,30 @@ cleanup_device_list (void)
   dev_list = NULL;
 }
 
+static SANE_Bool
+pixma_fixup_serial(SANE_Device *sdev)
+{
+  struct pixma_sane_t * ss;
+  size_t cdev_len;
+  const char *open_dev_id;
+
+  cdev_len = strlen(sdev->name);
+  for (ss = first_scanner; ss; ss = ss->next)
+    {
+      open_dev_id = pixma_get_string (ss->s, PIXMA_STRING_ID);
+      if (strlen(open_dev_id) > cdev_len &&
+          strncmp(open_dev_id, sdev->name, cdev_len) == 0)
+        {
+          PDBG (pixma_dbg (3, "pixma_fixup_serial() change name from %s to %s\n",
+                sdev->name, open_dev_id));
+          free_block ((const void *) sdev->name);
+          sdev->name = strdup (open_dev_id);
+          return SANE_TRUE;
+        }
+    }
+  return SANE_FALSE;
+}
+
 static void
 find_scanners (SANE_Bool local_only)
 {
@@ -455,8 +479,10 @@ find_scanners (SANE_Bool local_only)
       sdev->model = model;
       sdev->vendor = vendor_str;
       sdev->type = type_str;
+      pixma_fixup_serial (sdev);
       dev_list[i] = sdev;
     }
+
   /* dev_list is already NULL terminated by calloc(). */
   return;
 
