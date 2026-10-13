@@ -1,0 +1,1 @@
+coolscan3: Fixed ghosting in padded hardware multi-sample scans by using the scanner's per-pass transfer stride.
