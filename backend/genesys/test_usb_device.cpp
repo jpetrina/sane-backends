@@ -104,6 +104,8 @@ void TestUsbDevice::control_msg(int rtype, int reg, int value, int index, int le
     assert_is_open();
     if (rtype == REQUEST_TYPE_IN) {
         std::memset(data, 0, length);
+    } else {
+        ++out_transfer_count_;
     }
 }
 
@@ -121,6 +123,7 @@ void TestUsbDevice::bulk_write(const std::uint8_t* buffer, std::size_t* size)
     (void) size;
     DBG_HELPER(dbg);
     assert_is_open();
+    ++out_transfer_count_;
 }
 
 void TestUsbDevice::assert_is_open() const

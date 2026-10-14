@@ -80,6 +80,25 @@ public:
 
     void set_checkpoint_callback(TestCheckpointCallback callback);
 
+    /* The mock's own OUT-transfer counter (test_usb_device.h) plus every
+       write this class's own methods perform (write_register/write_
+       registers/write_0x8c/bulk_write_data/write_buffer/write_gamma/
+       write_ahb/write_fe_register, none of them reach usb_dev_, so the
+       counter above alone would miss them), so a checkpoint callback
+       can assert "no write of any kind happened between these two polls",
+       not just no raw USB traffic. Used by the GL126 magazine edge
+       wait's offline test: the raw USB counter alone missed these,
+       since none of them reach usb_dev_. */
+    unsigned write_count() const { return usb_dev_.out_transfer_count() + cache_write_count_; }
+
+    /* Bypasses write_count() entirely: for a test to seed a register
+       value (initial setup, or a checkpoint callback scripting a
+       register sequence) without that seed itself being mistaken for the
+       production write the count above is meant to catch. Writes
+       straight to the cache, exactly like write_register(), just
+       uncounted. */
+    void seed_register(std::uint16_t address, std::uint8_t value) { cached_regs_.update(address, value); }
+
 private:
     Genesys_Device* dev_;
 
@@ -93,6 +112,8 @@ private:
 
     std::string last_progress_message_;
     std::map<std::string, std::string> key_values_;
+
+    unsigned cache_write_count_ = 0;
 };
 
 } // namespace genesys

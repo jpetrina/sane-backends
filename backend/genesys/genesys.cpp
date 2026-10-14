@@ -38,6 +38,14 @@
 #define DEBUG_NOT_STATIC
 
 #include "genesys.h"
+// GL126 (OpticFilm 135i) process lock: mutual exclusion with the
+// companion userspace driver, taken/released around sane_open/sane_close
+// below. The rest of the GL126 command set is reached through low.cpp's
+// create_cmd_set(); gl126.h is included here too, but only for
+// gl126::kFrameMax (the "frame" option's constraint range below), not
+// for the command set.
+#include "gl126_lock.h"
+#include "gl126.h"
 #include "gl124_registers.h"
 #include "gl128_registers.h"
 #include "gl841_registers.h"
@@ -150,6 +158,24 @@ static const SANE_Range enhance_range = {
 /**
  * range for expiration time
  */
+// GL126 (OpticFilm 135i): the magazine holds a strip of up to
+// gl126::kFrameMax frames, six, not four: the vendor's whole-holder
+// 600 dpi pass images the empty holder end to end and shows six
+// apertures on a constant pitch (measured), and the vendor's own WIA
+// batch capture positioned to frames 5 and 6 directly (FEEDL 49796 and
+// 60174). Derived from the constant, not a second copy of the number,
+// so the two cannot drift.
+// GL126: how much room the "magazine" status line gives its text
+// (gl126::magazine_state_text()). Settable, but SET is a no-op, see
+// OPT_MAGAZINE below.
+#define GL126_MAGAZINE_TEXT_SIZE 256
+
+static const SANE_Range gl126_frame_range = {
+    1,                             // minimum
+    gl126::kFrameMax,              // maximum
+    1                              // quantization
+};
+
 static const SANE_Range expiration_range = {
   -1,	        /* minimum */
   30000,	/* maximum */
@@ -3669,11 +3695,19 @@ static void genesys_flatbed_calibration(Genesys_Device* dev, Genesys_Sensor& sen
     }
 
     // send default shading data
-    dev->interface->record_progress_message("sanei_genesys_init_shading_data");
-    sanei_genesys_init_shading_data(dev, sensor, pixels_per_line);
+    // Not for GL126 (OpticFilm 135i): the default table would go to scanner
+    // RAM through write_buffer, a transfer this unit has never been driven
+    // with; its shading table is measured and uploaded by the vendor's own
+    // phases.
+    if (dev->model->asic_type != AsicType::GL126) {
+        dev->interface->record_progress_message("sanei_genesys_init_shading_data");
+        sanei_genesys_init_shading_data(dev, sensor, pixels_per_line);
+    }
 
-    if (dev->settings.scan_method == ScanMethod::TRANSPARENCY ||
-        dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED)
+    // Not for GL126 either: no calibration area to move to (see genesys_start_scan).
+    if ((dev->settings.scan_method == ScanMethod::TRANSPARENCY ||
+         dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED) &&
+        dev->model->asic_type != AsicType::GL126)
     {
         scanner_move_to_ta(*dev);
     }
@@ -3981,7 +4015,12 @@ static void genesys_start_scan(Genesys_Device* dev, bool lamp_off)
   /* since not all scanners are set to wait for head to park
    * we check we are not still parking before starting a new scan */
     if (dev->parking) {
-        sanei_genesys_wait_for_home(dev);
+        // Not for GL126: its park ends with its own completion wait and the
+        // home status registers this reads are GL124's.
+        if (dev->model->asic_type != AsicType::GL126) {
+            sanei_genesys_wait_for_home(dev);
+        }
+        dev->parking = false;
     }
 
     // disable power saving
@@ -4002,21 +4041,30 @@ static void genesys_start_scan(Genesys_Device* dev, bool lamp_off)
     }
 
   /* set top left x and y values by scanning the internals if flatbed scanners */
-    if (!dev->model->is_sheetfed) {
+    // Not for GL126 (OpticFilm 135i): the vendor never homes before a scan
+    // and has no calibration area to move to, frame positioning is one
+    // absolute feed inside the scan sequence, and calibration happens at
+    // the current position.
+    if (!dev->model->is_sheetfed && dev->model->asic_type != AsicType::GL126) {
         // TODO: check we can drop this since we cannot have the scanner's head wandering here
         dev->parking = false;
         dev->cmd_set->move_back_home(dev, true);
     }
 
   /* move to calibration area for transparency adapter */
-    if (dev->settings.scan_method == ScanMethod::TRANSPARENCY ||
-        dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED)
+    if ((dev->settings.scan_method == ScanMethod::TRANSPARENCY ||
+         dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED) &&
+        dev->model->asic_type != AsicType::GL126)
     {
         scanner_move_to_ta(*dev);
     }
 
-  /* load document if needed (for sheetfed scanner for instance) */
-    if (dev->model->is_sheetfed) {
+  /* load document if needed (for sheetfed scanner for instance).
+     GL126 (OpticFilm 135i) too: this is where load_document() runs,
+     before calibration; it is a pure checker that refuses the scan
+     unless the magazine is loaded, and does nothing at all otherwise
+     (gl126.cpp load_document()). */
+    if (dev->model->is_sheetfed || dev->model->asic_type == AsicType::GL126) {
         dev->cmd_set->load_document(dev);
     }
 
@@ -4029,7 +4077,17 @@ static void genesys_start_scan(Genesys_Device* dev, bool lamp_off)
     dev->cmd_set->send_gamma_table(dev, sensor);
 
   /* try to use cached calibration first */
-  if (!genesys_restore_calibration (dev, sensor))
+  // GL126 (OpticFilm 135i): the vendor recalibrates for every scan, and the
+  // backend's begin_scan requires this sane_start's own offset->gain->shading
+  // hooks to have run (CalStage::ShadingDone, gl126.cpp). A restored
+  // calibration cache would skip genesys_scanner_calibration, leaving that
+  // stage unset, and begin_scan would then refuse the scan, which is exactly
+  // why --force-calibration had to be passed. So GL126 never reuses a cache to
+  // bypass calibration: every scan calibrates, whether or not a compatible
+  // cache exists. Other ASICs keep the cache behaviour unchanged.
+  bool restored = dev->model->asic_type != AsicType::GL126 &&
+                  genesys_restore_calibration(dev, sensor);
+  if (!restored)
     {
         // calibration : sheetfed scanners can't calibrate before each scan.
         // also don't run calibration for those scanners where all passes are disabled
@@ -4051,8 +4109,11 @@ static void genesys_start_scan(Genesys_Device* dev, bool lamp_off)
         dev->cmd_set->move_back_home(dev, true);
     }
 
-    if (dev->settings.scan_method == ScanMethod::TRANSPARENCY ||
-        dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED)
+    // Not for GL126: no calibration area to move to; the frame is reached by
+    // the absolute POSITION move inside begin_scan.
+    if ((dev->settings.scan_method == ScanMethod::TRANSPARENCY ||
+         dev->settings.scan_method == ScanMethod::TRANSPARENCY_INFRARED) &&
+        dev->model->asic_type != AsicType::GL126)
     {
         scanner_move_to_ta(*dev);
     }
@@ -4071,15 +4132,25 @@ static void genesys_start_scan(Genesys_Device* dev, bool lamp_off)
     {
         genesys_send_shading_coefficient(dev, sensor);
     }
-
     // now send registers for scan
-    dev->interface->write_registers(dev->reg);
+    // Not for GL126: its scan registers are the captured phases begin_scan
+    // writes; dev->reg holds nothing the vendor writes.
+    if (dev->model->asic_type != AsicType::GL126) {
+        dev->interface->write_registers(dev->reg);
+    }
 
     // start effective scan
     dev->cmd_set->begin_scan(dev, sensor, &dev->reg, true);
 
     if (is_testing_mode()) {
         dev->interface->test_checkpoint("start_scan");
+        return;
+    }
+    // GL126: begin_scan has already waited the way the vendor does (the
+    // position move's completion poll, the scan pass's settle reads); the
+    // feed-step and valid-word registers polled below are GL124's and read
+    // differently on this chip.
+    if (dev->model->asic_type == AsicType::GL126) {
         return;
     }
 
@@ -4295,6 +4366,7 @@ static Genesys_Settings calculate_scan_settings(Genesys_Scanner* s)
     }
 
     settings.expiration_time = s->expiration_time;
+    settings.frame = static_cast<unsigned>(s->frame);
 
     return settings;
 }
@@ -4486,6 +4558,26 @@ static void set_resolution_option_values(Genesys_Scanner& s, bool reset_resoluti
 {
     auto resolutions = s.dev->model->get_resolutions(s.scan_method);
 
+    /* GL126 only: MethodResolutions::get_resolutions() (device.cpp)
+       always returns this list sorted descending, every other genesys
+       model relies on that convention (highest resolution first, as
+       scanimage -A and most frontends' combos show it), so it is not
+       something to change generically here. But the OpticFilm 135i's
+       list is exactly what a libksane display bug reads at construction
+       time and gets wrong: LabeledCombo's constructor calls
+       setCurrentText(value.toString()) against each item's text, which
+       for this option reads "<n> dots/inch" (a unit) while the value is
+       the bare number, nothing matches, so index 0 stays selected
+       regardless of what the backend actually holds. Reversing to
+       ascending for GL126 only makes that stale index 0 (600, the
+       backend's own default two lines below) agree with the truth
+       instead of contradicting it; every other model's word list, and
+       this same option's resolution selection below (nearest-value /
+       min-element, both order-independent), are unaffected. */
+    if (s.dev->model->asic_type == AsicType::GL126) {
+        std::reverse(resolutions.begin(), resolutions.end());
+    }
+
     s.opt_resolution_values.resize(resolutions.size() + 1, 0);
     s.opt_resolution_values[0] = resolutions.size();
     std::copy(resolutions.begin(), resolutions.end(), s.opt_resolution_values.begin() + 1);
@@ -4558,6 +4650,15 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_MODE].size = max_string_size (mode_list);
   s->opt[OPT_MODE].constraint.string_list = mode_list;
   s->mode = SANE_VALUE_SCAN_MODE_GRAY;
+  if (model->asic_type == AsicType::GL126) {
+      // GL126 (OpticFilm 135i): every capture this backend performs is
+      // 3-channel (Color, or Gray with colour filter None, host-side
+      // gray); the generic default (Gray) opens the dialog on a mode this
+      // scanner never actually delivers as a single channel. digiKam
+      // opens with whatever this default is before the operator touches
+      // anything.
+      s->mode = SANE_VALUE_SCAN_MODE_COLOR;
+  }
 
   /* scan source */
     s->opt_source_values.clear();
@@ -4729,6 +4830,126 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_CONTRAST].cap = SANE_CAP_SOFT_SELECT | SANE_CAP_SOFT_DETECT;
   s->contrast = 0;  // disable by default
 
+  /* "Film" group (GL126 / OpticFilm 135i only): the magazine status line,
+     the two buttons that operate it, and which frame of the strip to
+     scan. Inactive as a whole on every other genesys chip, no other
+     model in this backend has a film magazine. Order within the group is
+     display order: the status line comes before the buttons it describes
+     (an operator should read the state before choosing what to press),
+     and Frame comes last, it only matters once something is loaded. */
+  s->opt[OPT_FILM_GROUP].name = "film-group";
+  s->opt[OPT_FILM_GROUP].title = SANE_I18N ("Film");
+  s->opt[OPT_FILM_GROUP].desc = SANE_I18N ("Film magazine and frame selection");
+  s->opt[OPT_FILM_GROUP].type = SANE_TYPE_GROUP;
+  s->opt[OPT_FILM_GROUP].cap = SANE_CAP_ADVANCED;
+  s->opt[OPT_FILM_GROUP].size = 0;
+  s->opt[OPT_FILM_GROUP].constraint_type = SANE_CONSTRAINT_NONE;
+
+  /* GL126 (OpticFilm 135i): magazine handling, one button. The vendor's
+     insert flow needs the operator to take the magazine out and push it
+     back to the mechanical stop in the middle of the sequence, and SANE
+     has no way for a backend to ask for that during sane_start, so
+     "Load film" does the release (on a cold unit it brings the scanner
+     up first), then waits (read-only, up to 120 s) for that reseat to be
+     observed on the loader sensor, then loads, all inside the one
+     button press. "Magazine -- next step" is a status line saying where
+     the magazine is believed to be, and what to do next; "Check status"
+     is allowed to read the hardware and reconcile that line with it.
+     Inactive on every other chip, no other genesys model has a
+     magazine. */
+  s->opt[OPT_MAGAZINE].name = "magazine";
+  s->opt[OPT_MAGAZINE].title = SANE_I18N ("Magazine -- next step");
+  /* Load film does the whole release-wait-load sequence by itself; Scan
+     no longer loads anything (load_document() is a pure checker), so
+     the procedure text is written around that. */
+  s->opt[OPT_MAGAZINE].desc =
+    SANE_I18N ("Press Load film first, then take the magazine out and push it in to the "
+               "stop; it loads by itself. Set Frame, press Scan. Eject film; next strip: "
+               "press Load film, swap, push in.");
+  s->opt[OPT_MAGAZINE].type = SANE_TYPE_STRING;
+  s->opt[OPT_MAGAZINE].unit = SANE_UNIT_NONE;
+  s->opt[OPT_MAGAZINE].size = GL126_MAGAZINE_TEXT_SIZE;
+  /* Constrained to its own possible values: an unconstrained string option
+     is drawn by KSane as an editable combo with Add/Remove buttons beside
+     it, which is noise for a line nobody can set. */
+  s->opt[OPT_MAGAZINE].constraint_type = SANE_CONSTRAINT_STRING_LIST;
+  s->opt[OPT_MAGAZINE].constraint.string_list = gl126::magazine_state_values();
+  /* SOFT_SELECT as well as SOFT_DETECT, even though nothing about the
+     magazine's state can actually be set: KSaneWidgets (libksane's
+     LabeledCombo, the widget it draws for every string-list option)
+     renders a SOFT_DETECT-only option disabled, grey label, grey value,
+     barely readable. The operator's only channel for "what do I do
+     next" (SANE has no dialogs) was effectively invisible without it.
+     Making the option settable renders it enabled (black) without it
+     doing anything: see the OPT_MAGAZINE case in set_option_value(), a
+     documented no-op. */
+  s->opt[OPT_MAGAZINE].cap = SANE_CAP_SOFT_SELECT | SANE_CAP_SOFT_DETECT;
+
+  /* One button does the whole thing: release, wait for the reseat,
+     load, and blocks while it waits (up to 120 s; a frontend on its GUI
+     thread, such as KSane, is unresponsive for that long, by design). A
+     timeout is not an error: it returns SANE_STATUS_GOOD with nothing
+     loaded, and the status line says what to do next. */
+  s->opt[OPT_LOAD_FILM].name = "load-film";
+  s->opt[OPT_LOAD_FILM].title = SANE_I18N ("Load film");
+  s->opt[OPT_LOAD_FILM].desc =
+    SANE_I18N ("Press this, then take the magazine fully out and push it back in to the "
+               "stop -- it loads by itself, no further button press needed. From a cold "
+               "scanner this takes about 25 s before the wait even starts, with no "
+               "progress shown; the wait itself is up to 120 s and returns normally if "
+               "nothing is done in time.");
+  s->opt[OPT_LOAD_FILM].type = SANE_TYPE_BUTTON;
+  s->opt[OPT_LOAD_FILM].unit = SANE_UNIT_NONE;
+  s->opt[OPT_LOAD_FILM].size = 0;
+  s->opt[OPT_LOAD_FILM].constraint_type = SANE_CONSTRAINT_NONE;
+
+  s->opt[OPT_EJECT_FILM].name = "eject-film";
+  s->opt[OPT_EJECT_FILM].title = SANE_I18N ("Eject film");
+  s->opt[OPT_EJECT_FILM].desc =
+    SANE_I18N ("Eject the magazine. To scan the next strip: swap the strip, push the "
+               "magazine in to the stop, then press Load film again -- Scan itself no "
+               "longer loads.");
+  s->opt[OPT_EJECT_FILM].type = SANE_TYPE_BUTTON;
+  s->opt[OPT_EJECT_FILM].unit = SANE_UNIT_NONE;
+  s->opt[OPT_EJECT_FILM].size = 0;
+  s->opt[OPT_EJECT_FILM].constraint_type = SANE_CONSTRAINT_NONE;
+
+  /* Allowed to read the hardware (the status line's own GET
+     deliberately never does) and reconcile the status line with it.
+     Never promotes anything to Loaded on hardware evidence alone: the
+     loader sensor cannot tell "loaded" from "loose in the slot". */
+  s->opt[OPT_CHECK_STATUS].name = "check-status";
+  s->opt[OPT_CHECK_STATUS].title = SANE_I18N ("Check status");
+  s->opt[OPT_CHECK_STATUS].desc =
+    SANE_I18N ("Read the scanner and update the status line.");
+  s->opt[OPT_CHECK_STATUS].type = SANE_TYPE_BUTTON;
+  s->opt[OPT_CHECK_STATUS].unit = SANE_UNIT_NONE;
+  s->opt[OPT_CHECK_STATUS].size = 0;
+  s->opt[OPT_CHECK_STATUS].constraint_type = SANE_CONSTRAINT_NONE;
+
+  /* GL126 (OpticFilm 135i): frame selection. The unit scans one frame of
+     the loaded strip per pass, reached by an absolute feed from home; the
+     scan area options do not apply (the frame's geometry is fixed). Inactive
+     on every other chip. */
+  s->opt[OPT_FRAME].name = "frame";
+  s->opt[OPT_FRAME].title = SANE_I18N ("Frame");
+  s->opt[OPT_FRAME].desc = SANE_I18N ("Frame of the film strip to scan (1-6, counted from the "
+                                       "end inserted first).");
+  s->opt[OPT_FRAME].type = SANE_TYPE_INT;
+  s->opt[OPT_FRAME].unit = SANE_UNIT_NONE;
+  s->opt[OPT_FRAME].constraint_type = SANE_CONSTRAINT_RANGE;
+  s->opt[OPT_FRAME].constraint.range = &gl126_frame_range;
+  s->frame = 1;
+
+  if (s->dev->model->asic_type != AsicType::GL126) {
+      s->opt[OPT_FILM_GROUP].cap |= SANE_CAP_INACTIVE;
+      s->opt[OPT_MAGAZINE].cap |= SANE_CAP_INACTIVE;
+      s->opt[OPT_LOAD_FILM].cap |= SANE_CAP_INACTIVE;
+      s->opt[OPT_EJECT_FILM].cap |= SANE_CAP_INACTIVE;
+      s->opt[OPT_CHECK_STATUS].cap |= SANE_CAP_INACTIVE;
+      s->opt[OPT_FRAME].cap |= SANE_CAP_INACTIVE;
+  }
+
   /* "Extras" group: */
   s->opt[OPT_EXTRAS_GROUP].name = "extras-group";
   s->opt[OPT_EXTRAS_GROUP].title = SANE_I18N ("Extras");
@@ -4747,7 +4968,27 @@ static void init_options(Genesys_Scanner* s)
   s->opt[OPT_COLOR_FILTER].type = SANE_TYPE_STRING;
   s->opt[OPT_COLOR_FILTER].constraint_type = SANE_CONSTRAINT_STRING_LIST;
   /* true gray not yet supported for GL847 and GL124 scanners */
-    if (!model->is_cis || model->asic_type==AsicType::GL847 || model->asic_type==AsicType::GL124) {
+    if (model->asic_type == AsicType::GL126) {
+      // GL126 (OpticFilm 135i): host-side gray (Gray mode, colour filter
+      // None, scanned RGB and reduced on the host) is the only single-
+      // channel capture this backend performs; the generic branch's
+      // default (Green) made sane_open throw before frame 1 was ever
+      // reached. The option is hidden for GL126 (see the DISABLE block
+      // below), but its default still has to be a value the backend
+      // actually supports: GET/SET on an inactive option returns
+      // SANE_STATUS_INVAL (sane_control_option_impl's
+      // SANE_OPTION_IS_ACTIVE check, unrelated to this change and true
+      // of every hidden option in this backend), KSane simply skips
+      // inactive options and scanimage only warns, but nothing reads
+      // this default through that path; it matters because
+      // calc_parameters() and calculate_scan_session() read
+      // dev->settings.color_filter directly, independent of whether the
+      // option is active.
+      s->opt[OPT_COLOR_FILTER].size = max_string_size (cis_color_filter_list);
+      s->opt[OPT_COLOR_FILTER].constraint.string_list = cis_color_filter_list;
+      s->color_filter = s->opt[OPT_COLOR_FILTER].constraint.string_list[3]; // "None"
+    }
+    else if (!model->is_cis || model->asic_type==AsicType::GL847 || model->asic_type==AsicType::GL124) {
       s->opt[OPT_COLOR_FILTER].size = max_string_size (color_filter_list);
       s->opt[OPT_COLOR_FILTER].constraint.string_list = color_filter_list;
       s->color_filter = s->opt[OPT_COLOR_FILTER].constraint.string_list[1];
@@ -5044,6 +5285,37 @@ static void init_options(Genesys_Scanner* s)
     s->opt[OPT_IGNORE_OFFSETS].constraint_type = SANE_CONSTRAINT_NONE;
     s->opt[OPT_IGNORE_OFFSETS].cap = SANE_CAP_SOFT_DETECT | SANE_CAP_SOFT_SELECT |
                                      SANE_CAP_ADVANCED;
+
+    /* GL126 (OpticFilm 135i): hide the options that do nothing on this
+       chip: brightness/contrast (stored in the session parameters, no
+       consumer anywhere in this backend),
+       lamp-off timing (save_power is a no-op for GL126), the whole
+       calibration-cache family (GL126 always recalibrates; restore is
+       gated off, so a file, an expiration, "clear" and "force" all do
+       nothing), and ignore-internal-offsets (same reason, there is no
+       cache to bypass). Color filter is hidden too, with its default set
+       to "None" just above. The scan-area (geometry) options are
+       deliberately left out of this list: their values do nothing on
+       GL126 either, but KSane's preview canvas depends on them staying
+       active. GET/SET on any of these now returns SANE_STATUS_INVAL,
+       which is the SANE contract for an inactive option
+       (sane_control_option_impl's SANE_OPTION_IS_ACTIVE check), KSane
+       simply skips inactive options and scanimage only warns;
+       calc_parameters() is unaffected, since it reads the underlying
+       fields (s->color_filter etc.) directly rather than through the
+       option path. */
+    if (s->dev->model->asic_type == AsicType::GL126) {
+        DISABLE(OPT_BRIGHTNESS);
+        DISABLE(OPT_CONTRAST);
+        DISABLE(OPT_LAMP_OFF_TIME);
+        DISABLE(OPT_LAMP_OFF);
+        DISABLE(OPT_COLOR_FILTER);
+        DISABLE(OPT_CALIBRATION_FILE);
+        DISABLE(OPT_EXPIRATION_TIME);
+        DISABLE(OPT_CLEAR_CALIBRATION);
+        DISABLE(OPT_FORCE_CALIBRATION);
+        DISABLE(OPT_IGNORE_OFFSETS);
+    }
 
     calc_parameters(s);
 }
@@ -5449,6 +5721,30 @@ static void sane_open_impl(SANE_String_Const devicename, SANE_Handle * handle)
         throw SaneException("could not find the device to open: %s", devicename);
     }
 
+    // GL126 (OpticFilm 135i) process lock: RAII guard covering the rest of
+    // this function. sane_open_impl acquires the lock and sane_close_impl
+    // releases it, but they are two different functions with an unbounded
+    // amount of throwing code in between (USB open, cmd_set->init,
+    // update_hardware_sensors), a try/catch around just the USB-open
+    // block missed all of that, and a catch(...) that released
+    // unconditionally would drop another GL126 session's lock if this
+    // open failed after that session had already added a reference. The
+    // guard is armed right after a successful acquire and disarmed only
+    // once this function is about to return successfully, from then, the
+    // new handle owns that reference and sane_close_impl releases it. Any
+    // throw in between releases exactly the one reference this open
+    // took; a non-GL126 open (or the testing-mode branch) never arms it,
+    // so it never touches the lock at all.
+    struct Gl126LockGuard {
+        bool armed = false;
+        ~Gl126LockGuard()
+        {
+            if (armed) {
+                gl126::process_lock_release();
+            }
+        }
+    } gl126_lock_guard;
+
     if (is_testing_mode()) {
         // during testing we need to initialize dev->model before test scanner interface is created
         // as that it needs to know what type of chip it needs to mimic.
@@ -5465,6 +5761,21 @@ static void sane_open_impl(SANE_String_Const devicename, SANE_Handle * handle)
 
         dev->interface->get_usb_device().open(dev->file_name.c_str());
     } else {
+        // GL126 (OpticFilm 135i): take the driver's process lock before any
+        // USB transfer. Claiming the USB interface alone does not exclude
+        // the driver's read-only sessions (status, doctor), which hold
+        // this same lock without claiming the interface.
+        std::string gl126_lock_holder;
+        if (dev->model->asic_type == AsicType::GL126) {
+            if (!gl126::process_lock_acquire(&gl126_lock_holder)) {
+                throw SaneException(SANE_STATUS_DEVICE_BUSY,
+                                    "OpticFilm 135i is held by another process (%s); "
+                                    "nothing was sent to the scanner",
+                                    gl126_lock_holder.empty() ? "unknown" : gl126_lock_holder.c_str());
+            }
+            gl126_lock_guard.armed = true;
+        }
+
         dev->interface = std::unique_ptr<ScannerInterfaceUsb>{new ScannerInterfaceUsb{dev}};
 
         dbg.vstatus("open device '%s'", dev->file_name.c_str());
@@ -5515,6 +5826,12 @@ static void sane_open_impl(SANE_String_Const devicename, SANE_Handle * handle)
 
     // some hardware capabilities are detected through sensors
     dev->cmd_set->update_hardware_sensors (s);
+
+    // Reaching here means sane_open_impl is returning successfully: the
+    // new handle now owns the GL126 lock reference (if any was taken),
+    // and sane_close_impl releases it. Disarm so the guard's destructor
+    // (run on this normal return, same as on a throw) does nothing.
+    gl126_lock_guard.armed = false;
 }
 
 SANE_GENESYS_API_LINKAGE
@@ -5548,6 +5865,20 @@ sane_close_impl(SANE_Handle handle)
 
     auto* dev = it->dev;
 
+    // GL126: release the driver's process lock reference this handle took in
+    // sane_open_impl, at scope exit so that a throw anywhere below (eject,
+    // park wait, close) cannot leave it held inside a long-lived process.
+    // Runs after the USB close on the normal path.
+    struct Gl126LockRelease {
+        bool armed;
+        ~Gl126LockRelease()
+        {
+            if (armed) {
+                gl126::process_lock_release();
+            }
+        }
+    } gl126_lock_release{dev->model->asic_type == AsicType::GL126};
+
     // eject document for sheetfed scanners
     if (dev->model->is_sheetfed) {
         catch_all_exceptions(__func__, [&](){ dev->cmd_set->eject_document(dev); });
@@ -5571,12 +5902,26 @@ sane_close_impl(SANE_Handle handle)
     dev->clear();
 
     // LAMP OFF : same register across all the ASICs */
-    dev->interface->write_register(0x03, 0x00);
+    // Not for GL126: its reference driver writes nothing at session close,
+    // and the vendor's 0x03 = 0x00 only ever appears inside its PARK and
+    // cold-init sequences. A lone lamp-off on a loaded magazine left the
+    // unit in a state the following eject stalled from.
+    if (dev->model->asic_type != AsicType::GL126) {
+        dev->interface->write_register(0x03, 0x00);
+    }
 
-    catch_all_exceptions(__func__, [&](){ dev->interface->get_usb_device().clear_halt(); });
+    // The GL126 unit (OpticFilm 135i) has never been driven with a port
+    // reset or an endpoint clear-halt: its reference driver releases the
+    // interface and nothing else, and the unit is known to leave the bus
+    // for good after a session under some conditions. Whether a reset is
+    // safe is a separate bring-up check, so until it is made the close
+    // path does what the reference driver does.
+    if (dev->model->asic_type != AsicType::GL126) {
+        catch_all_exceptions(__func__, [&](){ dev->interface->get_usb_device().clear_halt(); });
 
-    // we need this to avoid these ASIC getting stuck in bulk writes
-    catch_all_exceptions(__func__, [&](){ dev->interface->get_usb_device().reset(); });
+        // we need this to avoid these ASIC getting stuck in bulk writes
+        catch_all_exceptions(__func__, [&](){ dev->interface->get_usb_device().reset(); });
+    }
 
     // not freeing dev because it's in the dev list
     catch_all_exceptions(__func__, [&](){ dev->interface->get_usb_device().close(); });
@@ -5703,6 +6048,17 @@ static void get_option_value(Genesys_Scanner* s, int option, void* val)
         break;
     case OPT_EXPIRATION_TIME:
         *reinterpret_cast<SANE_Word*>(val) = s->expiration_time;
+        break;
+    case OPT_MAGAZINE: {
+        std::string text = (dev->model->asic_type == AsicType::GL126)
+            ? gl126::magazine_state_text(dev)
+            : std::string("not applicable");
+        std::snprintf(reinterpret_cast<char*>(val), GL126_MAGAZINE_TEXT_SIZE, "%s",
+                      text.c_str());
+        break;
+    }
+    case OPT_FRAME:
+        *reinterpret_cast<SANE_Word*>(val) = s->frame;
         break;
     case OPT_CUSTOM_GAMMA:
         *reinterpret_cast<SANE_Word*>(val) = s->custom_gamma;
@@ -5921,7 +6277,13 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
         {
           DISABLE(OPT_CONTRAST);
           DISABLE(OPT_BRIGHTNESS);
-            } else {
+        } else if (dev->model->asic_type != AsicType::GL126) {
+          // GL126 (OpticFilm 135i) only ever offers 16-bit depth (its
+          // bpp_gray_values/bpp_color_values are both {16}), so this branch
+          // is latent there today, but init_options hides these two
+          // options for GL126 precisely because they have no consumer on
+          // this chip, and re-enabling them here would silently
+          // contradict that if the model ever gained an 8-bit mode.
           ENABLE(OPT_CONTRAST);
           ENABLE(OPT_BRIGHTNESS);
         }
@@ -5944,7 +6306,17 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
             s->mode = reinterpret_cast<const char*>(val);
 
             if (s->mode == SANE_VALUE_SCAN_MODE_GRAY) {
-                if (dev->model->asic_type != AsicType::GL646 || !dev->model->is_cis) {
+                // Not for GL126 (OpticFilm 135i): the option is hidden
+                // there (init_options) because Red/Green/Blue are not
+                // captures this backend performs on this chip,
+                // gl126::calculate_scan_session refuses a single-channel
+                // gray request with any colour filter but None before any
+                // device I/O. Re-enabling it here on a plain switch to Gray
+                // would put the option back in front of the operator with
+                // its stock default (Green on this model, since is_cis is
+                // false) and no scan would ever complete with it.
+                if ((dev->model->asic_type != AsicType::GL646 || !dev->model->is_cis) &&
+                    dev->model->asic_type != AsicType::GL126) {
                     ENABLE(OPT_COLOR_FILTER);
                 }
                 create_bpp_list(s, dev->model->bpp_gray_values);
@@ -5994,6 +6366,12 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
                 s->lamp_off_time = *reinterpret_cast<SANE_Word*>(val);
                     dev->cmd_set->set_powersaving(dev, s->lamp_off_time);
             }
+            break;
+        }
+        case OPT_FRAME: {
+            s->frame = *reinterpret_cast<SANE_Word*>(val);
+            calc_parameters(s);
+            *myinfo |= SANE_INFO_RELOAD_PARAMS;
             break;
         }
         case OPT_EXPIRATION_TIME: {
@@ -6074,6 +6452,49 @@ static void set_option_value(Genesys_Scanner* s, int option, void *val, SANE_Int
             for (i = 0; i < option_size; i++) {
                 dev->gamma_override_tables[GENESYS_BLUE][i] = table[i];
             }
+            break;
+        }
+        case OPT_MAGAZINE: {
+            /* Deliberately a no-op: the state this option reports lives
+               in gl126's magazine state machine and the cross-process
+               mark, never in anything a SET here could change. The
+               option is settable anyway, only so KSaneWidgets renders
+               its label and value in black instead of the disabled grey
+               it uses for a read-only (SOFT_DETECT-only) option: seen on
+               hardware, the operator could not read the status line at
+               all and had to be walked through the process from outside
+               the dialog. SANE_INFO_RELOAD_OPTIONS makes the frontend
+               re-fetch the option right after this SET, which snaps
+               KSane's combo back to the true value
+               (magazine_state_text()/the mark) regardless of what was
+               set, so this "accepts" every listed value while changing
+               nothing. A value outside the constraint list never reaches
+               here: sanei_constrain_value() (sane_control_option_impl,
+               this file) rejects it before set_option_value() is
+               called. */
+            *myinfo |= SANE_INFO_RELOAD_OPTIONS;
+            break;
+        }
+        case OPT_LOAD_FILM: {
+            /* The whole magazine load, in one press: release, wait for
+               the reseat (up to 120 s), then load. Exceptions propagate:
+               a refusal here must reach the frontend, not be swallowed
+               the way OPT_CALIBRATE swallows its own. A timeout is not
+               an exception: it returns normally with nothing loaded; the
+               status line (OPT_MAGAZINE, re-read because of
+               SANE_INFO_RELOAD_OPTIONS below) says what to do next. */
+            gl126::magazine_load_film(dev);
+            *myinfo |= SANE_INFO_RELOAD_OPTIONS;
+            break;
+        }
+        case OPT_EJECT_FILM: {
+            gl126::magazine_eject(dev);
+            *myinfo |= SANE_INFO_RELOAD_OPTIONS;
+            break;
+        }
+        case OPT_CHECK_STATUS: {
+            gl126::magazine_check_status(dev);
+            *myinfo |= SANE_INFO_RELOAD_OPTIONS;
             break;
         }
         case OPT_CALIBRATE: {

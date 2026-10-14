@@ -48,6 +48,20 @@ public:
                      std::uint8_t* data) override;
     void bulk_read(std::uint8_t* buffer, std::size_t* size) override;
     void bulk_write(const std::uint8_t* buffer, std::size_t* size) override;
+
+    /* How many OUT transfers (a control_msg with rtype != REQUEST_TYPE_IN,
+       or a bulk_write) this mock has answered since the last reset,
+       "answered", not "acknowledged": the mock never refuses a write, it
+       just counts it. Added for the GL126 magazine edge wait: that wait
+       is a read-only loop by construction (it only ever calls
+       read_register / sleep_ms), but a regression test wants to assert
+       that on the wire too, from a checkpoint callback that snapshots
+       this count at the first poll and checks it is unchanged at every
+       later one. Every other genesys test ignores this counter; it
+       costs them nothing. */
+    unsigned out_transfer_count() const { return out_transfer_count_; }
+    void reset_out_transfer_count() { out_transfer_count_ = 0; }
+
 private:
     void assert_is_open() const;
 
@@ -56,6 +70,7 @@ private:
     std::uint16_t vendor_ = 0;
     std::uint16_t product_ = 0;
     std::uint16_t bcd_device_ = 0;
+    unsigned out_transfer_count_ = 0;
 };
 
 } // namespace genesys

@@ -35,6 +35,7 @@
 #include "gl646_registers.h"
 
 #include "gl124.h"
+#include "gl126.h"
 #include "gl128_registers.h"
 #include "gl128.h"
 #include "gl646.h"
@@ -67,6 +68,7 @@ std::unique_ptr<CommandSet> create_cmd_set(AsicType asic_type)
         case AsicType::GL846: return std::unique_ptr<CommandSet>(new gl846::CommandSetGl846{});
         case AsicType::GL847: return std::unique_ptr<CommandSet>(new gl847::CommandSetGl847{});
         case AsicType::GL124: return std::unique_ptr<CommandSet>(new gl124::CommandSetGl124{});
+        case AsicType::GL126: return std::unique_ptr<CommandSet>(new gl126::CommandSetGl126{});
         case AsicType::GL128: return std::unique_ptr<CommandSet>(new gl128::CommandSetGl128{});
         default: throw SaneException(SANE_STATUS_INVAL, "unknown ASIC type");
     }
@@ -143,6 +145,7 @@ Status scanner_read_status(Genesys_Device& dev)
 
     switch (dev.model->asic_type) {
         case AsicType::GL124: address = 0x101; break;
+        case AsicType::GL126: address = 0x101; break;
         case AsicType::GL128: address = 0x101; break;
         case AsicType::GL646:
         case AsicType::GL841:
@@ -1169,6 +1172,13 @@ ImagePipelineStack build_image_pipeline(const Genesys_Device& dev, const ScanSes
 
     if (log_image_data) {
         pipeline.push_node<ImagePipelineNodeDebug>(debug_prefix + "_0_from_usb.tiff");
+    }
+    if (dev.model->asic_type == AsicType::GL126) {
+        // the dual-light profiles: one line in two is the image (gl126.cpp)
+        gl126::push_dual_light_nodes(session, pipeline);
+        if (log_image_data) {
+            pipeline.push_node<ImagePipelineNodeDebug>(debug_prefix + "_1_after_gl126_parity.tiff");
+        }
     }
 
     if (session.segment_count > 1) {

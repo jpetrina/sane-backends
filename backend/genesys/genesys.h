@@ -87,6 +87,22 @@ enum Genesys_Option
   OPT_BRIGHTNESS,
   OPT_CONTRAST,
 
+  // GL126 (OpticFilm 135i) only: film magazine and frame selection.
+  // Inactive (the whole group) on every other genesys chip, no other
+  // model in this backend has a film magazine. The status line comes
+  // before the two buttons it describes: option order is display order,
+  // and an operator should read the state before choosing what to press,
+  // not afterwards. FRAME comes last, it only matters once something is
+  // loaded.
+  OPT_FILM_GROUP,
+  OPT_MAGAZINE,      // GL126: status text, where the magazine is (settable
+                     // as a no-op only, so KSane renders it enabled)
+  OPT_LOAD_FILM,     // GL126: the whole load flow, release, wait for the
+                     // reseat, LOAD, in one button press
+  OPT_EJECT_FILM,    // GL126: eject the magazine
+  OPT_CHECK_STATUS,  // GL126: read the hardware and update the status line
+  OPT_FRAME,         // GL126: which frame of the strip to scan
+
   OPT_EXTRAS_GROUP,
   OPT_LAMP_OFF_TIME,
   OPT_LAMP_OFF,
@@ -197,6 +213,7 @@ struct Genesys_Scanner
     SANE_Word contrast = 0;
     SANE_Word brightness = 0;
     SANE_Word expiration_time = 0;
+    SANE_Word frame = 1;   // GL126: frame of the strip, 1-6
     bool custom_gamma = false;
 
     SANE_Word pos_top_left_y = 0;

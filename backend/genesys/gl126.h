@@ -1,0 +1,183 @@
+/* sane - Scanner Access Now Easy.
+
+   Copyright (C) 2026 Christian Gillinger
+
+   This file is part of the SANE package.
+
+   This program is free software; you can redistribute it and/or
+   modify it under the terms of the GNU General Public License as
+   published by the Free Software Foundation; either version 2 of the
+   License, or (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful, but
+   WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+/* GL126 command set: Plustek OpticFilm 135i (07b3:1436).
+
+   Every hook that moves the motor refuses with a clear message instead
+   of guessing a sequence; hooks are brought up one at a time, on the one
+   reference unit that exists, with the operator listening for a
+   mechanical fault. Do not fill in a motor hook from the register tables
+   alone.
+
+   The register values come from gl126_tables.h, generated from the
+   Python driver's captured tables. The chip is close enough to GL124 for
+   the genesys framework to fit, but its scan flow is the vendor's, not
+   GL124's, hence a separate command set rather than a GL124 model
+   variant.
+
+   Protocol notes and the reverse-engineering record:
+   https://github.com/cgillinger/opticfilm135i-linux
+*/
+
+#ifndef BACKEND_GENESYS_GL126_H
+#define BACKEND_GENESYS_GL126_H
+
+#include "genesys.h"
+#include "command_set_common.h"
+
+namespace genesys {
+namespace gl126 {
+
+/** The film holder's aperture count: the largest frame number the
+    "frame" SANE option and the driver's own frame checks (begin_scan(),
+    gl126_ops::feedl_for_frame()) will accept. Six, not four: the
+    vendor's whole-holder 600 dpi pass images the empty holder end to
+    end and shows six apertures on a constant pitch (measured), and the
+    vendor's own WIA batch capture positioned to frames 5 and 6 directly
+    (FEEDL 49796 and 60174). Declared here, not file-local to gl126.cpp,
+    so the "frame" option's constraint range (genesys.cpp) is derived
+    from it rather than carrying its own copy of the number. Mirrors the
+    companion userspace driver's own frame count, the same authority on
+    this holder. */
+constexpr unsigned kFrameMax = 6;
+
+class CommandSetGl126 : public CommandSetCommon
+{
+public:
+    ~CommandSetGl126() override = default;
+
+    bool needs_home_before_init_regs_for_scan(Genesys_Device* dev) const override;
+
+    void init(Genesys_Device* dev) const override;
+
+    void init_regs_for_warmup(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                              Genesys_Register_Set* regs) const override;
+
+    void init_regs_for_shading(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                               Genesys_Register_Set& regs) const override;
+
+    void init_regs_for_scan_session(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                                    Genesys_Register_Set* reg,
+                                    const ScanSession& session) const override;
+
+    void set_fe(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                std::uint8_t set) const override;
+    void set_powersaving(Genesys_Device* dev, int delay) const override;
+    void save_power(Genesys_Device* dev, bool enable) const override;
+
+    void begin_scan(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                    Genesys_Register_Set* regs, bool start_motor) const override;
+
+    void end_scan(Genesys_Device* dev, Genesys_Register_Set* regs,
+                  bool check_stop) const override;
+
+    void send_gamma_table(Genesys_Device* dev, const Genesys_Sensor& sensor) const override;
+
+    void offset_calibration(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                            Genesys_Register_Set& regs) const override;
+
+    void coarse_gain_calibration(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                                 Genesys_Register_Set& regs, int dpi) const override;
+
+    SensorExposure led_calibration(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                                   Genesys_Register_Set& regs) const override;
+
+    void wait_for_motor_stop(Genesys_Device* dev) const override;
+
+    void move_back_home(Genesys_Device* dev, bool wait_until_home) const override;
+
+    void update_hardware_sensors(struct Genesys_Scanner* s) const override;
+
+    void update_home_sensor_gpio(Genesys_Device& dev) const override;
+
+    void load_document(Genesys_Device* dev) const override;
+
+    void detect_document_end(Genesys_Device* dev) const override;
+
+    void eject_document(Genesys_Device* dev) const override;
+
+    void send_shading_data(Genesys_Device* dev, const Genesys_Sensor& sensor,
+                           std::uint8_t* data, int size) const override;
+
+    /* The backend uploads its own shading tables, in the vendor's format,
+       from the calibration hook. Answering "true" here is what keeps the
+       core's own shading machinery off the wire: with "false" the core
+       pushes a default table and later its coefficients to scanner RAM
+       through write_buffer (a transfer this unit has never been driven
+       with). send_shading_data() itself is a no-op: the core's
+       coefficients are never used, and the model sets
+       DISABLE_SHADING_CALIBRATION so they are never computed either. */
+    bool has_send_shading_data() const override { return true; }
+
+    ScanSession calculate_scan_session(const Genesys_Device* dev,
+                                       const Genesys_Sensor& sensor,
+                                       const Genesys_Settings& settings) const override;
+
+    void asic_boot(Genesys_Device* dev, bool cold) const override;
+};
+
+/* The image path: the core's image pipeline asks
+   ScannerInterfaceUsb::bulk_read_data for one chunk at a time (sized by
+   the session to the captured 519156 B); for GL126 that call is
+   forwarded here, which emits the vendor's per-chunk sequence
+   (descriptor with wIndex 8 for the first chunk of a scan, 0 after; ack;
+   bulk IN; bulk-done read). */
+void read_image_chunk_usb(Genesys_Device* dev, std::uint8_t* data, std::size_t size);
+
+/** The dual-light profiles' image stream alternates IR (even) and
+    visible (odd) lines. Called by the core's build_image_pipeline()
+    right after the USB source node for GL126; pushes, when the session
+    asks for it (ScanSession::gl126_keep_parity), a node that keeps every
+    second line. No-op for the plain profile. The IR pass is colour-
+    aligned by the core's own ComponentShiftLines node like the visible
+    image. */
+void push_dual_light_nodes(const ScanSession& session, ImagePipelineStack& pipeline);
+
+/** The magazine flow is one button. "Load film" (magazine_load_film())
+    runs the whole thing in a single call: a cold unit's bring-up if
+    needed, the vendor device-open table and the jog (skipped when
+    nothing needs releasing, the Ejected case), a read-only wait for the
+    operator's reseat (present to clear to present on the loader sensor,
+    reg 0x101), and then LOAD. A timeout (120 s) ends the call with no
+    LOAD and the magazine considered Released; SANE_STATUS_GOOD either
+    way, since the operator doing nothing is not an error. "Check status"
+    (magazine_check_status()) is a third button that is allowed to read
+    the hardware and reconcile the status line with it, without ever
+    promoting anything to Loaded on hardware evidence alone.
+
+    load_document() (CommandSetGl126, gl126.cpp) does not load anything:
+    it is a pure checker of the in-process state and the cross-process
+    mark (gl126_lock.h MagazineMarkKind, now Released, Ejected or
+    Loaded), called from genesys_start_scan before calibration. */
+void magazine_load_film(Genesys_Device* dev);
+void magazine_eject(Genesys_Device* dev);
+void magazine_check_status(Genesys_Device* dev);
+std::string magazine_state_text(const Genesys_Device* dev);
+
+/** Every value magazine_state_text() can return, NULL-terminated, for the
+    "magazine" option's SANE_CONSTRAINT_STRING_LIST. Constraining it makes
+    KSane draw a plain combo showing the current value rather than an edit
+    box with Add/Remove buttons beside it. */
+const char* const* magazine_state_values();
+
+} // namespace gl126
+} // namespace genesys
+
+#endif // BACKEND_GENESYS_GL126_H

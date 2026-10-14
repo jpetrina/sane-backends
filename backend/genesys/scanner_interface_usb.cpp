@@ -22,6 +22,7 @@
 
 #include "scanner_interface_usb.h"
 #include "low.h"
+#include "gl126.h"
 
 namespace genesys {
 
@@ -44,6 +45,7 @@ std::uint8_t ScannerInterfaceUsb::read_register(std::uint16_t address)
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
         dev_->model->asic_type == AsicType::GL124 ||
+        dev_->model->asic_type == AsicType::GL126 ||
         dev_->model->asic_type == AsicType::GL128)
     {
         std::uint8_t value2x8[2];
@@ -90,6 +92,7 @@ void ScannerInterfaceUsb::write_register(std::uint16_t address, std::uint8_t val
         dev_->model->asic_type == AsicType::GL845 ||
         dev_->model->asic_type == AsicType::GL846 ||
         dev_->model->asic_type == AsicType::GL124 ||
+        dev_->model->asic_type == AsicType::GL126 ||
         dev_->model->asic_type == AsicType::GL128)
     {
         std::uint8_t buffer[2];
@@ -228,6 +231,14 @@ void ScannerInterfaceUsb::bulk_read_data(std::uint8_t addr, std::uint8_t* data, 
 {
     // currently supported: GL646, GL841, GL843, GL845, GL846, GL847, GL124
     DBG_HELPER(dbg);
+
+    // GL126 (OpticFilm 135i): the image is read as the vendor reads it, one
+    // descriptor and one bulk IN per chunk, a bulk-done read after, from
+    // the GL126 command set file.
+    if (dev_->model->asic_type == AsicType::GL126) {
+        gl126::read_image_chunk_usb(dev_, data, size);
+        return;
+    }
 
     unsigned is_addr_used = 1;
     unsigned has_header_before_each_chunk = 0;
@@ -443,7 +454,9 @@ void ScannerInterfaceUsb::write_fe_register(std::uint8_t address, std::uint16_t 
     Genesys_Register_Set reg(Genesys_Register_Set::SEQUENTIAL);
 
     reg.init_reg(0x51, address);
-    if (dev_->model->asic_type == AsicType::GL124 || dev_->model->asic_type == AsicType::GL128) {
+    if (dev_->model->asic_type == AsicType::GL124 ||
+        dev_->model->asic_type == AsicType::GL126 ||
+        dev_->model->asic_type == AsicType::GL128) {
         reg.init_reg(0x5d, (value / 256) & 0xff);
         reg.init_reg(0x5e, value & 0xff);
     } else {
