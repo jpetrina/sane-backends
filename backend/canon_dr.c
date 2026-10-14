@@ -367,6 +367,9 @@
       v67 2022-06-04, MAN
          - initial support for DR-M260 (#553)
          - initial support for DR-3080CII (#567)
+      v68 2026-09-15, Mark31415
+         - improve P-215II color calibration
+         - compensate P-215II duplex back-side start offset
 
    SANE FLOW DIAGRAM
 
@@ -419,7 +422,7 @@
 #include "canon_dr.h"
 
 #define DEBUG 1
-#define BUILD 67
+#define BUILD 68
 
 /* values for SANE_DEBUG_CANON_DR env var:
  - errors           5
@@ -1681,6 +1684,18 @@ init_model (struct scanner *s)
     s->duplex_interlace = DUPLEX_INTERLACE_FBfb;
     s->duplex_offset_side = SIDE_BACK;
     s->need_ccal = 1;
+
+    /*
+     * The Canon Windows driver performs scan-derived fine calibration on
+     * P-215II. Keep the existing P-215 behavior until it is validated.
+     */
+    if (!strcmp (s->model_name, "P-215II")) {
+      /* Compensate the P-215II duplex back-side start offset. */
+      s->duplex_offset = 320;
+      s->fcal_src = FCAL_SRC_SCAN;
+      s->fcal_dest = FCAL_DEST_SW;
+    }
+
     s->invert_tly = 1;
     s->unknown_byte2 = 0x88;
     s->rgb_format = 1;
@@ -6714,7 +6729,7 @@ copy_simplex(struct scanner *s, unsigned char * buf, int len, int side)
     if(s->f_gain[side]){
       DBG (17, "copy_simplex: apply gain\n");
       for(j=0; j<s->s.valid_Bpl; j++){
-        int curr = line[j] * 240/s->f_gain[side][j];
+        int curr = line[j] * 240 / s->f_gain[side][j];
         if(curr > 255) curr = 255;
         line[j] = curr;
       }
@@ -7137,6 +7152,1000 @@ foo_AFE(struct scanner *s)
 #endif
 
 /*
+ * P-215II 12-bit coarse AFE calibration.
+ *
+ * Reverse engineered from Canon Windows-driver USB captures at 200, 300,
+ * 400 and 600 dpi.  The algorithm is intentionally gated to ADF Front Color
+ * and those captured resolutions; unsupported modes/resolutions keep using
+ * the legacy path until separately validated.
+ */
+#define P215_CAL_LINES              16
+#define P215_CAL_TLY_1200           471 /* ~471 == 0xfffffe28 in Windows SET WINDOW */
+#define P215_OFFSET_INITIAL         0x80
+#define P215_OFFSET_TARGET1         120
+#define P215_OFFSET_BASE_STEP       4
+#define P215_EXPOSURE_LOW           200
+#define P215_EXPOSURE_PROBE_MAX     0x1fff
+#define P215_GAIN_SCALE             72
+#define P215_DUPLEX_GAIN_STEP       34
+
+/*
+ * Calibration parameters derived from USB captures of the Canon
+ * Windows driver with a P-215II.
+ *
+ * Canon does not always calibrate at the requested horizontal resolution:
+ *   200 dpi scan -> calibration SET WINDOW X=300, Y=200
+ *   300 dpi scan -> calibration SET WINDOW X=300, Y=300
+ *   400 dpi scan -> calibration SET WINDOW X=600, Y=400
+ *   600 dpi scan -> calibration SET WINDOW X=600, Y=600
+ *
+ * The exposure/gain/dark targets below reproduce the corresponding Windows
+ * coarse-AFE decisions from the captures. Keep them explicit until more
+ * devices/captures establish a more general formula.
+ */
+struct p215_cal_profile {
+  int request_dpi;
+  int cal_x_dpi;
+  int exposure_high;
+
+  /* Validated ADF Front/simplex calibration targets. */
+  int exposure_target;
+  int gain_target;
+  int offset_target2;
+
+  /*
+   * Validated ADF Duplex targets.  Index with SIDE_FRONT/SIDE_BACK.
+   * These are targets/statistics, not final AFE register values: gain,
+   * offset and RGB exposure remain dynamically calculated from each scan.
+   */
+  int duplex_offset_target1[2];
+  int duplex_exposure_target[2];
+  int duplex_gain_target[2];
+  int duplex_offset_target2[2];
+};
+
+static int
+p215_get_cal_profile (int dpi_x, int dpi_y, struct p215_cal_profile *p)
+{
+  if(dpi_x != dpi_y)
+    return 0;
+
+  memset(p, 0, sizeof(*p));
+  p->request_dpi = dpi_x;
+
+  switch(dpi_x){
+    case 200:
+      p->cal_x_dpi = 300;
+      p->exposure_high = 1500;
+
+      p->exposure_target = 2342;
+      p->gain_target = 2730;
+      p->offset_target2 = 128;
+
+      p->duplex_offset_target1[SIDE_FRONT] = 120;
+      p->duplex_offset_target1[SIDE_BACK] = 120;
+      p->duplex_exposure_target[SIDE_FRONT] = 2357;
+      p->duplex_exposure_target[SIDE_BACK] = 1915;
+      p->duplex_gain_target[SIDE_FRONT] = 2760;
+      p->duplex_gain_target[SIDE_BACK] = 2730;
+      p->duplex_offset_target2[SIDE_FRONT] = 128;
+      p->duplex_offset_target2[SIDE_BACK] = 132;
+      return 1;
+
+    case 300:
+      p->cal_x_dpi = 300;
+      p->exposure_high = 1500;
+
+      p->exposure_target = 2340;
+      p->gain_target = 2730;
+      p->offset_target2 = 128;
+
+      p->duplex_offset_target1[SIDE_FRONT] = 120;
+      p->duplex_offset_target1[SIDE_BACK] = 120;
+      p->duplex_exposure_target[SIDE_FRONT] = 2355;
+      p->duplex_exposure_target[SIDE_BACK] = 1902;
+      p->duplex_gain_target[SIDE_FRONT] = 2730;
+      p->duplex_gain_target[SIDE_BACK] = 2730;
+      p->duplex_offset_target2[SIDE_FRONT] = 124;
+      p->duplex_offset_target2[SIDE_BACK] = 132;
+      return 1;
+
+    case 400:
+      p->cal_x_dpi = 600;
+      p->exposure_high = 3500;
+
+      p->exposure_target = 2467;
+      /* Reproduces Windows gain 0x08 and final offset 0x96. */
+      p->gain_target = 2750;
+      p->offset_target2 = 124;
+
+      p->duplex_offset_target1[SIDE_FRONT] = 120;
+      p->duplex_offset_target1[SIDE_BACK] = 116;
+      p->duplex_exposure_target[SIDE_FRONT] = 2484;
+      p->duplex_exposure_target[SIDE_BACK] = 2038;
+      p->duplex_gain_target[SIDE_FRONT] = 2760;
+      p->duplex_gain_target[SIDE_BACK] = 2730;
+      p->duplex_offset_target2[SIDE_FRONT] = 128;
+      p->duplex_offset_target2[SIDE_BACK] = 128;
+      return 1;
+
+    case 600:
+      p->cal_x_dpi = 600;
+      p->exposure_high = 3500;
+
+      p->exposure_target = 2445;
+      p->gain_target = 2730;
+      p->offset_target2 = 128;
+
+      p->duplex_offset_target1[SIDE_FRONT] = 120;
+      p->duplex_offset_target1[SIDE_BACK] = 116;
+      p->duplex_exposure_target[SIDE_FRONT] = 2448;
+      p->duplex_exposure_target[SIDE_BACK] = 2019;
+      p->duplex_gain_target[SIDE_FRONT] = 2730;
+      p->duplex_gain_target[SIDE_BACK] = 2730;
+      p->duplex_offset_target2[SIDE_FRONT] = 124;
+      p->duplex_offset_target2[SIDE_BACK] = 132;
+      return 1;
+  }
+
+  return 0;
+}
+
+static int
+p215ii_is_model (struct scanner *s)
+{
+  return !strcmp(s->model_name, "P-215II");
+}
+
+static int
+p215ii_finecal_supported (struct scanner *s)
+{
+  struct p215_cal_profile profile;
+
+  return p215ii_is_model(s)
+      && s->u.mode == MODE_COLOR
+      && (s->u.source == SOURCE_ADF_FRONT
+          || s->u.source == SOURCE_ADF_DUPLEX)
+      && p215_get_cal_profile(s->u.dpi_x, s->u.dpi_y, &profile);
+}
+
+static int
+p215_clamp_int (long long value, int lo, int hi)
+{
+  if(value < lo) return lo;
+  if(value > hi) return hi;
+  return (int)value;
+}
+
+/* Round a signed rational to the nearest integer, halves away from zero. */
+static long long
+p215_round_div (long long num, long long den)
+{
+  if(den <= 0)
+    return 0;
+
+  if(num >= 0)
+    return (num + den/2) / den;
+
+  return -((-num + den/2) / den);
+}
+
+/* Two 12-bit samples are packed into three bytes, low nibble first. */
+static unsigned int
+p215_unpack12 (const unsigned char *p, size_t sample)
+{
+  size_t pair = (sample / 2) * 3;
+
+  if(!(sample & 1))
+    return (unsigned int)p[pair]
+      | ((unsigned int)(p[pair+1] & 0x0f) << 8);
+
+  return ((unsigned int)p[pair+1] >> 4)
+    | ((unsigned int)p[pair+2] << 4);
+}
+
+/*
+ * SET WINDOW for the calibration scan.  update_params() keeps color as
+ * 24 bpp internally, where set_window() normally maps that to 8 bits/channel.
+ * Temporarily setting bpp=12 changes only the descriptor's bits-per-pixel
+ * field; all line sizing for the raw read is handled explicitly below.
+ */
+static SANE_Status
+p215_set_window_12bit (struct scanner *s)
+{
+  SANE_Status ret;
+  int old_bpp = s->s.bpp;
+  int old_unknown_byte2 = s->unknown_byte2;
+
+  /* Match the Windows calibration descriptor exactly for these fields. */
+  s->s.bpp = 12;
+  s->unknown_byte2 = 0x84;
+  ret = set_window(s);
+  s->unknown_byte2 = old_unknown_byte2;
+  s->s.bpp = old_bpp;
+
+  return ret;
+}
+
+/*
+ * Make one 12-bit calibration scan and return, for each channel, the largest
+ * sensor-column sum across P215_CAL_LINES.  Summing first and selecting the
+ * maximum afterwards exactly matches the statistic seen in the Windows
+ * calibration: average each sensor position over the 16 lines, then find the
+ * brightest column.  Keeping sums avoids intermediate rounding.
+ */
+static SANE_Status
+p215_calibration_scan_12bit (struct scanner *s, int scan,
+  int channel_max_sum[3], int *overall_max_sum)
+{
+  SANE_Status ret = SANE_STATUS_GOOD;
+  SANE_Status clear_ret;
+  unsigned char cmd[READ_len];
+  size_t cmdLen = READ_len;
+  unsigned char *raw = NULL;
+  unsigned int *sum = NULL;
+  size_t samples_per_line;
+  size_t raw_bpl;
+  size_t raw_len;
+  size_t inLen;
+  int width = s->s.width;
+  int y, c, x;
+  int scan_started = 0;
+
+  if(width <= 0)
+    return SANE_STATUS_INVAL;
+
+  samples_per_line = (size_t)width * 3;
+
+  /* width is a multiple of 8 on P-215, so this is always integral. */
+  raw_bpl = samples_per_line * 12 / 8;
+  raw_len = raw_bpl * P215_CAL_LINES;
+
+  raw = malloc(raw_len);
+  if(!raw)
+    return SANE_STATUS_NO_MEM;
+
+  sum = calloc((size_t)width * 3, sizeof(*sum));
+  if(!sum){
+    free(raw);
+    return SANE_STATUS_NO_MEM;
+  }
+
+  ret = start_scan(s, scan);
+  if(ret != SANE_STATUS_GOOD)
+    goto cleanup;
+
+  scan_started = 1;
+
+  memset(cmd, 0, cmdLen);
+  set_SCSI_opcode(cmd, READ_code);
+  set_R_datatype_code(cmd, SR_datatype_image);
+  set_R_xfer_length(cmd, raw_len);
+
+  inLen = raw_len;
+  ret = do_cmd(
+    s, 1, 0,
+    cmd, cmdLen,
+    NULL, 0,
+    raw, &inLen
+  );
+
+  /* EOF after returning the requested calibration image is success. */
+  if(ret != SANE_STATUS_GOOD && ret != SANE_STATUS_EOF){
+    DBG(5, "p215_calibration_scan_12bit: READ failed %d\n", ret);
+    goto cleanup;
+  }
+
+  if(inLen != raw_len){
+    DBG(5, "p215_calibration_scan_12bit: short read %lu/%lu\n",
+      (unsigned long)inLen, (unsigned long)raw_len);
+    ret = SANE_STATUS_IO_ERROR;
+    goto cleanup;
+  }
+
+  for(y=0; y<P215_CAL_LINES; y++){
+    const unsigned char *line = raw + (size_t)y * raw_bpl;
+
+    for(c=0; c<3; c++){
+      for(x=0; x<width; x++){
+        size_t sample = (size_t)c * width + x;
+        sum[(size_t)c * width + x] += p215_unpack12(line, sample);
+      }
+    }
+  }
+
+  *overall_max_sum = 0;
+  for(c=0; c<3; c++){
+    int max_sum = 0;
+
+    for(x=0; x<width; x++){
+      unsigned int v = sum[(size_t)c * width + x];
+      if(v > (unsigned int)max_sum)
+        max_sum = (int)v;
+    }
+
+    channel_max_sum[c] = max_sum;
+    if(max_sum > *overall_max_sum)
+      *overall_max_sum = max_sum;
+  }
+
+  DBG(15, "p215 12bit scan %02x: maxsum R/G/B=%d/%d/%d overall=%d\n",
+    scan, channel_max_sum[0], channel_max_sum[1], channel_max_sum[2],
+    *overall_max_sum);
+
+  ret = SANE_STATUS_GOOD;
+
+cleanup:
+  if(scan_started){
+    clear_ret = object_position(s, SANE_FALSE);
+    if(clear_ret != SANE_STATUS_GOOD && ret == SANE_STATUS_GOOD)
+      ret = clear_ret;
+  }
+
+  free(sum);
+  free(raw);
+  return ret;
+}
+
+static SANE_Status
+p215_write_front_AFE (struct scanner *s, int gain, int offset,
+  int exp_r, int exp_g, int exp_b)
+{
+  s->c_gain[SIDE_FRONT] = p215_clamp_int(gain, 0, 0xff);
+  s->c_offset[SIDE_FRONT] = p215_clamp_int(offset, 0, 0xff);
+  s->c_exposure[SIDE_FRONT][CHAN_RED] = p215_clamp_int(exp_r, 0, 0x1fff);
+  s->c_exposure[SIDE_FRONT][CHAN_GREEN] = p215_clamp_int(exp_g, 0, 0x1fff);
+  s->c_exposure[SIDE_FRONT][CHAN_BLUE] = p215_clamp_int(exp_b, 0, 0x1fff);
+
+  /* Windows simplex calibration keeps the unused back AFE at a safe baseline. */
+  s->c_gain[SIDE_BACK] = 0;
+  s->c_offset[SIDE_BACK] = 0x80;
+  s->c_exposure[SIDE_BACK][CHAN_RED] = 0;
+  s->c_exposure[SIDE_BACK][CHAN_GREEN] = 0;
+  s->c_exposure[SIDE_BACK][CHAN_BLUE] = 0;
+
+  return write_AFE(s);
+}
+
+static SANE_Status
+calibrate_AFE_p215_12bit (struct scanner *s)
+{
+  SANE_Status ret = SANE_STATUS_GOOD;
+  int old_tl_x = s->u.tl_x;
+  int old_br_x = s->u.br_x;
+  int old_page_x = s->u.page_x;
+  int old_tl_y = s->u.tl_y;
+  int old_br_y = s->u.br_y;
+  int old_dpi_x = s->u.dpi_x;
+  int old_dpi_y = s->u.dpi_y;
+  int old_mode = s->u.mode;
+  int old_source = s->u.source;
+  struct p215_cal_profile profile;
+  int old_brightness = s->brightness;
+  int old_contrast = s->contrast;
+  int dummy[3], dummy_max;
+  int dark0[3], dark0_max;
+  int low[3], low_max;
+  int high[3], high_max;
+  int bright[3], bright_max;
+  int dark1[3], dark1_max;
+  int exposure[3];
+  int offset1, offset2, gain;
+  int c;
+
+  DBG(10, "calibrate_AFE_p215_12bit: start\n");
+
+  if(!p215_get_cal_profile(old_dpi_x, old_dpi_y, &profile)){
+    DBG(5, "calibrate_AFE_p215_12bit: unsupported dpi %d/%d\n",
+      old_dpi_x, old_dpi_y);
+    return SANE_STATUS_INVAL;
+  }
+
+  /*
+   * Do not use the legacy c_res/c_mode cache for P-215.  It has no source
+   * dimension, so switching between ADF Front and ADF Duplex at the same
+   * resolution could otherwise reuse calibration from the wrong AFE state.
+   * The dynamic calibration is short and is safer to repeat.
+   */
+
+  /*
+   * Canon calibrates the complete front sensor.  Horizontal sampling uses
+   * the sensor bucket captured from Windows (300 for 200/300 scans, 600 for
+   * 400/600 scans), while vertical calibration remains at requested DPI.
+   */
+  s->u.dpi_x = profile.cal_x_dpi;
+  s->u.dpi_y = old_dpi_y;
+  s->u.tl_x = 0;
+  s->u.br_x = s->valid_x;
+  s->u.page_x = s->valid_x;
+  /* Windows uses ULY=0xfffffe28, i.e. invert_tly(~471), for calibration. */
+  s->u.tl_y = P215_CAL_TLY_1200;
+  s->u.br_y = P215_CAL_TLY_1200
+    + P215_CAL_LINES * 1200 / s->u.dpi_y;
+  s->u.mode = MODE_COLOR;
+  s->u.source = SOURCE_ADF_FRONT;
+
+  /* Calibration is always measured at neutral hardware BTC settings. */
+  s->brightness = 0;
+  s->contrast = 0;
+
+  ret = update_params(s, 1);
+  if(ret != SANE_STATUS_GOOD){
+    DBG(5, "calibrate_AFE_p215_12bit: update_params failed\n");
+    goto cleanup;
+  }
+
+  DBG(5, "P215 12-bit AFE: request=%ddpi cal=%dx%d width=%d lines=%d high=%d target=%d\n",
+    profile.request_dpi, s->s.dpi_x, s->s.dpi_y, s->s.width,
+    P215_CAL_LINES, profile.exposure_high, profile.exposure_target);
+
+  /* Old fine calibration must never affect coarse-calibration measurements. */
+  ret = offset_buffers(s, 0);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = gain_buffers(s, 0);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  ret = ssm_buffer(s);
+  if(ret != SANE_STATUS_GOOD){
+    DBG(5, "calibrate_AFE_p215_12bit: ssm_buffer failed\n");
+    goto cleanup;
+  }
+
+  ret = p215_set_window_12bit(s);
+  if(ret != SANE_STATUS_GOOD){
+    DBG(5, "calibrate_AFE_p215_12bit: 12-bit SET WINDOW failed\n");
+    goto cleanup;
+  }
+
+  /* 1: initial dark scan, gain 0, offset 0x80, exposure 0. */
+  ret = p215_write_front_AFE(s, 0, P215_OFFSET_INITIAL, 0, 0, 0);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  ret = p215_calibration_scan_12bit(s, 0xff, dark0, &dark0_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  /* Windows uses integer truncation for this first offset correction. */
+  offset1 = P215_OFFSET_INITIAL + (int)(
+    ((long long)P215_OFFSET_TARGET1 * P215_CAL_LINES - dark0_max)
+      / ((long long)P215_OFFSET_BASE_STEP * P215_CAL_LINES));
+  offset1 = p215_clamp_int(offset1, 0, 0xff);
+
+  DBG(5, "P215 12-bit AFE: dark0=%d/16 -> offset1=%02x\n",
+    dark0_max, offset1);
+
+  /* 2: Canon makes a lamp-on zero-exposure probe at the new offset. */
+  ret = p215_write_front_AFE(s, 0, offset1, 0, 0, 0);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_12bit(s, 0xfe, dummy, &dummy_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  /* 3: full-scale exposure probe.  Retained because it is in the Windows trace. */
+  ret = p215_write_front_AFE(s, 0, offset1,
+    P215_EXPOSURE_PROBE_MAX, P215_EXPOSURE_PROBE_MAX, P215_EXPOSURE_PROBE_MAX);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_12bit(s, 0xfe, dummy, &dummy_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  /* 4/5: two exposure support points. */
+  ret = p215_write_front_AFE(s, 0, offset1,
+    P215_EXPOSURE_LOW, P215_EXPOSURE_LOW, P215_EXPOSURE_LOW);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_12bit(s, 0xfe, low, &low_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  ret = p215_write_front_AFE(s, 0, offset1,
+    profile.exposure_high, profile.exposure_high, profile.exposure_high);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_12bit(s, 0xfe, high, &high_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  for(c=0; c<3; c++){
+    long long den = (long long)high[c] - low[c];
+    long long num = ((long long)profile.exposure_target * P215_CAL_LINES - low[c])
+      * (profile.exposure_high - P215_EXPOSURE_LOW);
+
+    if(den <= 0){
+      DBG(5, "P215 12-bit AFE: invalid exposure slope ch=%d low=%d high=%d\n",
+        c, low[c], high[c]);
+      ret = SANE_STATUS_IO_ERROR;
+      goto cleanup;
+    }
+
+    exposure[c] = P215_EXPOSURE_LOW + (int)p215_round_div(num, den);
+    exposure[c] = p215_clamp_int(exposure[c], 0, P215_EXPOSURE_PROBE_MAX);
+  }
+
+  DBG(5, "P215 12-bit AFE: exposure=%04x/%04x/%04x\n",
+    exposure[0], exposure[1], exposure[2]);
+
+  /* 6: verify calculated per-channel exposure and derive shared analog gain. */
+  ret = p215_write_front_AFE(s, 0, offset1,
+    exposure[0], exposure[1], exposure[2]);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_12bit(s, 0xfe, bright, &bright_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  if(bright_max <= 0){
+    ret = SANE_STATUS_IO_ERROR;
+    goto cleanup;
+  }
+
+  gain = (int)p215_round_div(
+    (long long)P215_GAIN_SCALE
+      * ((long long)profile.gain_target * P215_CAL_LINES - bright_max),
+    bright_max);
+  gain = p215_clamp_int(gain, 0, 0xff);
+
+  DBG(5, "P215 12-bit AFE: bright=%d/16 -> gain=%02x\n",
+    bright_max, gain);
+
+  /* 7: with analog gain active, repeat the dark scan for final offset. */
+  ret = p215_write_front_AFE(s, gain, offset1,
+    exposure[0], exposure[1], exposure[2]);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_12bit(s, 0xff, dark1, &dark1_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  offset2 = offset1 + (int)p215_round_div(
+    ((long long)profile.offset_target2 * P215_CAL_LINES - dark1_max)
+      * P215_GAIN_SCALE,
+    (long long)P215_CAL_LINES * P215_OFFSET_BASE_STEP
+      * (P215_GAIN_SCALE + gain));
+  offset2 = p215_clamp_int(offset2, 0, 0xff);
+
+  DBG(5, "P215 12-bit AFE: dark1=%d/16 -> offset2=%02x\n",
+    dark1_max, offset2);
+
+  /* Final AFE state used by the following fine calibration and document scan. */
+  ret = p215_write_front_AFE(s, gain, offset2,
+    exposure[0], exposure[1], exposure[2]);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  /* Cache against the user's requested resolution, not calibration X DPI. */
+  s->c_res = old_dpi_x;
+  s->c_mode = MODE_COLOR;
+
+  DBG(5, "P215 12-bit AFE FINAL: gain=%02x offset=%02x exp=%04x/%04x/%04x\n",
+    gain, offset2, exposure[0], exposure[1], exposure[2]);
+
+cleanup:
+  s->u.tl_x = old_tl_x;
+  s->u.br_x = old_br_x;
+  s->u.page_x = old_page_x;
+  s->u.tl_y = old_tl_y;
+  s->u.br_y = old_br_y;
+  s->u.dpi_x = old_dpi_x;
+  s->u.dpi_y = old_dpi_y;
+  s->u.mode = old_mode;
+  s->u.source = old_source;
+  s->brightness = old_brightness;
+  s->contrast = old_contrast;
+
+  DBG(10, "calibrate_AFE_p215_12bit: finish %d\n", ret);
+  return ret;
+}
+
+
+/*
+ * Duplex variant of the P-215 12-bit calibration read.
+ *
+ * Windows returns one packed-12 stream containing both sensors.  The 12-bit
+ * samples alternate front/back:
+ *
+ *   F0 B0 F1 B1 F2 B2 ...
+ *
+ * Split after unpacking, not at byte boundaries.  Within each side the
+ * samples remain planar R, G, B for each line, just like the simplex
+ * calibration stream.
+ */
+static SANE_Status
+p215_calibration_scan_duplex_12bit (struct scanner *s, int scan,
+  int channel_max_sum[2][3], int overall_max_sum[2])
+{
+  SANE_Status ret = SANE_STATUS_GOOD;
+  SANE_Status clear_ret;
+  unsigned char cmd[READ_len];
+  size_t cmdLen = READ_len;
+  unsigned char *raw = NULL;
+  unsigned int *sum = NULL;
+  size_t samples_per_side_line;
+  size_t samples_per_line;
+  size_t raw_bpl;
+  size_t raw_len;
+  size_t inLen;
+  int width = s->s.width;
+  int y, side, c, x;
+  int scan_started = 0;
+
+  if(width <= 0)
+    return SANE_STATUS_INVAL;
+
+  samples_per_side_line = (size_t)width * 3;
+  samples_per_line = samples_per_side_line * 2;
+
+  raw_bpl = samples_per_line * 12 / 8;
+  raw_len = raw_bpl * P215_CAL_LINES;
+
+  raw = malloc(raw_len);
+  if(!raw)
+    return SANE_STATUS_NO_MEM;
+
+  sum = calloc((size_t)width * 3 * 2, sizeof(*sum));
+  if(!sum){
+    free(raw);
+    return SANE_STATUS_NO_MEM;
+  }
+
+  ret = start_scan(s, scan);
+  if(ret != SANE_STATUS_GOOD)
+    goto cleanup;
+
+  scan_started = 1;
+
+  memset(cmd, 0, cmdLen);
+  set_SCSI_opcode(cmd, READ_code);
+  set_R_datatype_code(cmd, SR_datatype_image);
+  set_R_xfer_length(cmd, raw_len);
+
+  inLen = raw_len;
+  ret = do_cmd(
+    s, 1, 0,
+    cmd, cmdLen,
+    NULL, 0,
+    raw, &inLen
+  );
+
+  if(ret != SANE_STATUS_GOOD && ret != SANE_STATUS_EOF){
+    DBG(5, "p215_calibration_scan_duplex_12bit: READ failed %d\n", ret);
+    goto cleanup;
+  }
+
+  if(inLen != raw_len){
+    DBG(5, "p215_calibration_scan_duplex_12bit: short read %lu/%lu\n",
+      (unsigned long)inLen, (unsigned long)raw_len);
+    ret = SANE_STATUS_IO_ERROR;
+    goto cleanup;
+  }
+
+  for(y=0; y<P215_CAL_LINES; y++){
+    const unsigned char *line = raw + (size_t)y * raw_bpl;
+
+    for(c=0; c<3; c++){
+      for(x=0; x<width; x++){
+        size_t side_sample = (size_t)c * width + x;
+        size_t packed_sample = side_sample * 2;
+
+        sum[((size_t)SIDE_FRONT * 3 + c) * width + x]
+          += p215_unpack12(line, packed_sample);
+        sum[((size_t)SIDE_BACK * 3 + c) * width + x]
+          += p215_unpack12(line, packed_sample + 1);
+      }
+    }
+  }
+
+  for(side=0; side<2; side++){
+    overall_max_sum[side] = 0;
+
+    for(c=0; c<3; c++){
+      int max_sum = 0;
+
+      for(x=0; x<width; x++){
+        unsigned int v = sum[((size_t)side * 3 + c) * width + x];
+        if(v > (unsigned int)max_sum)
+          max_sum = (int)v;
+      }
+
+      channel_max_sum[side][c] = max_sum;
+      if(max_sum > overall_max_sum[side])
+        overall_max_sum[side] = max_sum;
+    }
+  }
+
+  DBG(15,
+    "p215 duplex 12bit scan %02x: F=%d/%d/%d max=%d B=%d/%d/%d max=%d\n",
+    scan,
+    channel_max_sum[SIDE_FRONT][0],
+    channel_max_sum[SIDE_FRONT][1],
+    channel_max_sum[SIDE_FRONT][2],
+    overall_max_sum[SIDE_FRONT],
+    channel_max_sum[SIDE_BACK][0],
+    channel_max_sum[SIDE_BACK][1],
+    channel_max_sum[SIDE_BACK][2],
+    overall_max_sum[SIDE_BACK]);
+
+  ret = SANE_STATUS_GOOD;
+
+cleanup:
+  if(scan_started){
+    clear_ret = object_position(s, SANE_FALSE);
+    if(clear_ret != SANE_STATUS_GOOD && ret == SANE_STATUS_GOOD)
+      ret = clear_ret;
+  }
+
+  free(sum);
+  free(raw);
+  return ret;
+}
+
+static SANE_Status
+p215_write_duplex_AFE (struct scanner *s,
+  const int gain[2], const int offset[2], int exposure[2][3])
+{
+  int side, c;
+
+  for(side=0; side<2; side++){
+    s->c_gain[side] = p215_clamp_int(gain[side], 0, 0xff);
+    s->c_offset[side] = p215_clamp_int(offset[side], 0, 0xff);
+
+    for(c=0; c<3; c++)
+      s->c_exposure[side][c]
+        = p215_clamp_int(exposure[side][c], 0, P215_EXPOSURE_PROBE_MAX);
+  }
+
+  return write_AFE(s);
+}
+
+/*
+ * P-215II ADF Duplex color coarse calibration.
+ *
+ * Reverse engineered from complete Canon Windows-driver captures at
+ * 200/300/400/600 dpi.  Both sensors are measured in every calibration scan.
+ * The profile constants are calibration targets; final gain/offset/exposure
+ * values are always derived from the current sensor data.
+ */
+static SANE_Status
+calibrate_AFE_p215_duplex_12bit (struct scanner *s)
+{
+  SANE_Status ret = SANE_STATUS_GOOD;
+  int old_tl_x = s->u.tl_x;
+  int old_br_x = s->u.br_x;
+  int old_page_x = s->u.page_x;
+  int old_tl_y = s->u.tl_y;
+  int old_br_y = s->u.br_y;
+  int old_dpi_x = s->u.dpi_x;
+  int old_dpi_y = s->u.dpi_y;
+  int old_mode = s->u.mode;
+  int old_source = s->u.source;
+  int old_brightness = s->brightness;
+  int old_contrast = s->contrast;
+  struct p215_cal_profile profile;
+
+  int dummy[2][3], dummy_max[2];
+  int dark0[2][3], dark0_max[2];
+  int low[2][3], low_max[2];
+  int high[2][3], high_max[2];
+  int bright[2][3], bright_max[2];
+  int dark1[2][3], dark1_max[2];
+
+  int gain[2] = {0,0};
+  int offset[2] = {P215_OFFSET_INITIAL, P215_OFFSET_INITIAL};
+  int exposure[2][3] = {{0,0,0},{0,0,0}};
+  int side, c;
+
+  DBG(10, "calibrate_AFE_p215_duplex_12bit: start\n");
+
+  if(!p215_get_cal_profile(old_dpi_x, old_dpi_y, &profile)){
+    DBG(5, "calibrate_AFE_p215_duplex_12bit: unsupported dpi %d/%d\n",
+      old_dpi_x, old_dpi_y);
+    return SANE_STATUS_INVAL;
+  }
+
+  /*
+   * Do not use the legacy c_res/c_mode early-out here: that cache does not
+   * include source/side, so a preceding simplex calibration could otherwise
+   * leave the back sensor uncalibrated.
+   */
+  s->u.dpi_x = profile.cal_x_dpi;
+  s->u.dpi_y = old_dpi_y;
+  s->u.tl_x = 0;
+  s->u.br_x = s->valid_x;
+  s->u.page_x = s->valid_x;
+  s->u.tl_y = P215_CAL_TLY_1200;
+  s->u.br_y = P215_CAL_TLY_1200
+    + P215_CAL_LINES * 1200 / s->u.dpi_y;
+  s->u.mode = MODE_COLOR;
+  s->u.source = SOURCE_ADF_DUPLEX;
+
+  s->brightness = 0;
+  s->contrast = 0;
+
+  ret = update_params(s, 1);
+  if(ret != SANE_STATUS_GOOD){
+    DBG(5, "calibrate_AFE_p215_duplex_12bit: update_params failed\n");
+    goto cleanup;
+  }
+
+  DBG(5,
+    "P215 12-bit DUPLEX AFE: request=%ddpi cal=%dx%d width=%d lines=%d high=%d\n",
+    profile.request_dpi, s->s.dpi_x, s->s.dpi_y, s->s.width,
+    P215_CAL_LINES, profile.exposure_high);
+
+  ret = offset_buffers(s, 0);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = gain_buffers(s, 0);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  ret = ssm_buffer(s);
+  if(ret != SANE_STATUS_GOOD){
+    DBG(5, "calibrate_AFE_p215_duplex_12bit: ssm_buffer failed\n");
+    goto cleanup;
+  }
+
+  ret = p215_set_window_12bit(s);
+  if(ret != SANE_STATUS_GOOD){
+    DBG(5, "calibrate_AFE_p215_duplex_12bit: 12-bit SET WINDOW failed\n");
+    goto cleanup;
+  }
+
+  /* 1: dark at gain 0, offset 0x80, exposure 0 on both sensors. */
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  ret = p215_calibration_scan_duplex_12bit(s, 0xff, dark0, dark0_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  for(side=0; side<2; side++){
+    offset[side] = P215_OFFSET_INITIAL + (int)p215_round_div(
+      (long long)profile.duplex_offset_target1[side] * P215_CAL_LINES
+        - dark0_max[side],
+      (long long)P215_OFFSET_BASE_STEP * P215_CAL_LINES);
+    offset[side] = p215_clamp_int(offset[side], 0, 0xff);
+  }
+
+  DBG(5,
+    "P215 12-bit DUPLEX AFE: dark0 F=%d/16 -> %02x B=%d/16 -> %02x\n",
+    dark0_max[SIDE_FRONT], offset[SIDE_FRONT],
+    dark0_max[SIDE_BACK], offset[SIDE_BACK]);
+
+  /* 2: lamp-on zero-exposure probe. */
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_duplex_12bit(s, 0xfe, dummy, dummy_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  /* 3: full-scale exposure probe. */
+  for(side=0; side<2; side++)
+    for(c=0; c<3; c++)
+      exposure[side][c] = P215_EXPOSURE_PROBE_MAX;
+
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_duplex_12bit(s, 0xfe, dummy, dummy_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  /* 4: low support point. */
+  for(side=0; side<2; side++)
+    for(c=0; c<3; c++)
+      exposure[side][c] = P215_EXPOSURE_LOW;
+
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_duplex_12bit(s, 0xfe, low, low_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  /* 5: high support point. */
+  for(side=0; side<2; side++)
+    for(c=0; c<3; c++)
+      exposure[side][c] = profile.exposure_high;
+
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_duplex_12bit(s, 0xfe, high, high_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  for(side=0; side<2; side++){
+    for(c=0; c<3; c++){
+      long long den = (long long)high[side][c] - low[side][c];
+      long long num =
+        ((long long)profile.duplex_exposure_target[side] * P215_CAL_LINES
+          - low[side][c])
+        * (profile.exposure_high - P215_EXPOSURE_LOW);
+
+      if(den <= 0){
+        DBG(5,
+          "P215 duplex AFE: invalid exposure slope side=%d ch=%d low=%d high=%d\n",
+          side, c, low[side][c], high[side][c]);
+        ret = SANE_STATUS_IO_ERROR;
+        goto cleanup;
+      }
+
+      exposure[side][c] = P215_EXPOSURE_LOW
+        + (int)p215_round_div(num, den);
+      exposure[side][c] = p215_clamp_int(
+        exposure[side][c], 0, P215_EXPOSURE_PROBE_MAX);
+    }
+  }
+
+  DBG(5,
+    "P215 12-bit DUPLEX AFE: exposure F=%04x/%04x/%04x B=%04x/%04x/%04x\n",
+    exposure[SIDE_FRONT][0], exposure[SIDE_FRONT][1],
+    exposure[SIDE_FRONT][2], exposure[SIDE_BACK][0],
+    exposure[SIDE_BACK][1], exposure[SIDE_BACK][2]);
+
+  /* 6: verify exposure and derive an independent analog gain for each sensor. */
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_duplex_12bit(s, 0xfe, bright, bright_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  for(side=0; side<2; side++){
+    if(bright_max[side] <= 0){
+      ret = SANE_STATUS_IO_ERROR;
+      goto cleanup;
+    }
+
+    /*
+     * Across all four Duplex captures the analog gain changes the 12-bit
+     * white statistic by ~34 counts per register step.  Using the captured
+     * target reproduces every Windows gain decision (09/0a front, 14..17
+     * back) while remaining fully data-driven.
+     */
+    gain[side] = (int)p215_round_div(
+      (long long)profile.duplex_gain_target[side] * P215_CAL_LINES
+        - bright_max[side],
+      (long long)P215_DUPLEX_GAIN_STEP * P215_CAL_LINES);
+    gain[side] = p215_clamp_int(gain[side], 0, 0xff);
+  }
+
+  DBG(5,
+    "P215 12-bit DUPLEX AFE: bright F=%d/16 -> gain=%02x B=%d/16 -> gain=%02x\n",
+    bright_max[SIDE_FRONT], gain[SIDE_FRONT],
+    bright_max[SIDE_BACK], gain[SIDE_BACK]);
+
+  /* 7: dark with analog gain active, then final offset correction per side. */
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+  ret = p215_calibration_scan_duplex_12bit(s, 0xff, dark1, dark1_max);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  for(side=0; side<2; side++){
+    offset[side] += (int)p215_round_div(
+      ((long long)profile.duplex_offset_target2[side] * P215_CAL_LINES
+        - dark1_max[side]) * P215_GAIN_SCALE,
+      (long long)P215_CAL_LINES * P215_OFFSET_BASE_STEP
+        * (P215_GAIN_SCALE + gain[side]));
+    offset[side] = p215_clamp_int(offset[side], 0, 0xff);
+  }
+
+  DBG(5,
+    "P215 12-bit DUPLEX AFE: dark1 F=%d/16 -> %02x B=%d/16 -> %02x\n",
+    dark1_max[SIDE_FRONT], offset[SIDE_FRONT],
+    dark1_max[SIDE_BACK], offset[SIDE_BACK]);
+
+  ret = p215_write_duplex_AFE(s, gain, offset, exposure);
+  if(ret != SANE_STATUS_GOOD) goto cleanup;
+
+  s->c_res = old_dpi_x;
+  s->c_mode = MODE_COLOR;
+
+  DBG(5,
+    "P215 12-bit DUPLEX AFE FINAL: F gain=%02x offset=%02x exp=%04x/%04x/%04x; "
+    "B gain=%02x offset=%02x exp=%04x/%04x/%04x\n",
+    gain[SIDE_FRONT], offset[SIDE_FRONT],
+    exposure[SIDE_FRONT][0], exposure[SIDE_FRONT][1],
+    exposure[SIDE_FRONT][2],
+    gain[SIDE_BACK], offset[SIDE_BACK],
+    exposure[SIDE_BACK][0], exposure[SIDE_BACK][1],
+    exposure[SIDE_BACK][2]);
+
+cleanup:
+  s->u.tl_x = old_tl_x;
+  s->u.br_x = old_br_x;
+  s->u.page_x = old_page_x;
+  s->u.tl_y = old_tl_y;
+  s->u.br_y = old_br_y;
+  s->u.dpi_x = old_dpi_x;
+  s->u.dpi_y = old_dpi_y;
+  s->u.mode = old_mode;
+  s->u.source = old_source;
+  s->brightness = old_brightness;
+  s->contrast = old_contrast;
+
+  DBG(10, "calibrate_AFE_p215_duplex_12bit: finish %d\n", ret);
+  return ret;
+}
+
+/*
  * makes several scans, adjusts coarse calibration
  */
 static SANE_Status
@@ -7146,6 +8155,7 @@ calibrate_AFE (struct scanner *s)
   int i, j, k;
   int min, max;
   int lines = 8;
+  struct p215_cal_profile p215_profile;
 
   /*buffer these for later*/
   int old_tl_y = s->u.tl_y;
@@ -7158,6 +8168,24 @@ calibrate_AFE (struct scanner *s)
   if(!s->need_ccal){
     DBG (10, "calibrate_AFE: not required\n");
     return ret;
+  }
+
+  /*
+   * Validated against USB captures from the Canon Windows driver for
+   * P-215II color
+   * at 200, 300, 400 and 600 dpi:
+   *   - ADF Front: one packed-12 sensor stream
+   *   - ADF Duplex: packed-12 samples alternate front/back
+   * Unsupported sources/resolutions retain the legacy backend path.
+   */
+  if(p215ii_is_model(s)
+      && s->u.mode == MODE_COLOR
+      && p215_get_cal_profile(s->u.dpi_x, s->u.dpi_y, &p215_profile)){
+    if(s->u.source == SOURCE_ADF_FRONT)
+      return calibrate_AFE_p215_12bit(s);
+
+    if(s->u.source == SOURCE_ADF_DUPLEX)
+      return calibrate_AFE_p215_duplex_12bit(s);
   }
 
   /* always cal with a short scan in duplex color */
@@ -7387,8 +8415,29 @@ calibrate_fine (struct scanner *s)
     goto cleanup;
   }
 
-  /* don't recalibrate if we've already done it with these params */
-  if(s->f_res == s->s.dpi_x && s->f_mode == s->s.mode){
+  /*
+   * Restrict P-215II scan-derived fine calibration to paths that
+   * have been validated against the Canon Windows driver.
+   */
+  if(p215ii_is_model(s) && !p215ii_finecal_supported(s)){
+    DBG (10, "calibrate_fine: unsupported P-215II scan mode\n");
+
+    /* Do not leave calibration arrays from a previous supported scan active. */
+    offset_buffers(s,0);
+    gain_buffers(s,0);
+
+    goto cleanup;
+  }
+
+  /*
+   * The generic fine-calibration cache keys only resolution and mode, not
+   * source.  The active coarse AFE and the FineCal sensor set differ between
+   * simplex and duplex.  Re-run FineCal for P-215II so a source change cannot
+   * reuse stale calibration data.
+   */
+  if(!p215ii_is_model(s)
+      && s->f_res == s->s.dpi_x
+      && s->f_mode == s->s.mode){
     DBG (10, "calibrate_fine: already done\n");
     goto cleanup;
   }
@@ -7624,6 +8673,7 @@ calibrate_fine_src_scan (struct scanner *s)
   int i, j, k;
   int min, max;
   int lines = 8;
+  int sides = 2;
 
   /*buffer these for later*/
   int old_tl_y = s->u.tl_y;
@@ -7632,10 +8682,17 @@ calibrate_fine_src_scan (struct scanner *s)
 
   DBG (10, "calibrate_fine_src_scan: start\n");
 
-  /* always cal with a short scan in duplex */
+  /* On the P-215II, front-sensor FineCal must use the same simplex
+   * acquisition mode as a front-only image scan. */
   s->u.tl_y = 0;
   s->u.br_y = lines * 1200 / s->u.dpi_y;
-  s->u.source = SOURCE_ADF_DUPLEX;
+  if(p215ii_is_model(s) && old_source == SOURCE_ADF_FRONT){
+    s->u.source = SOURCE_ADF_FRONT;
+    sides = 1;
+  }
+  else{
+    s->u.source = SOURCE_ADF_DUPLEX;
+  }
 
   /* load our own private copy of scan params */
   ret = update_params(s,1);
@@ -7662,7 +8719,7 @@ calibrate_fine_src_scan (struct scanner *s)
   ret = offset_buffers(s,0);
   ret = gain_buffers(s,0);
 
-  /* need to tell it we want duplex */
+  /* tell the scanner which acquisition mode the calibration uses */
   ret = ssm_buffer(s);
   if (ret != SANE_STATUS_GOOD) {
     DBG (5, "calibrate_fine_src_scan: ERROR: cannot ssm buffer\n");
@@ -7690,7 +8747,7 @@ calibrate_fine_src_scan (struct scanner *s)
     goto cleanup;
   }
 
-  for(i=0;i<2;i++){
+  for(i=0;i<sides;i++){
     for(j=0; j<s->s.valid_Bpl; j++){
       min = 0;
       for(k=j;k<lines*s->s.Bpl;k+=s->s.Bpl){
@@ -7715,7 +8772,7 @@ calibrate_fine_src_scan (struct scanner *s)
     goto cleanup;
   }
 
-  for(i=0;i<2;i++){
+  for(i=0;i<sides;i++){
     for(j=0; j<s->s.valid_Bpl; j++){
       max = 0;
       for(k=j;k<lines*s->s.Bpl;k+=s->s.Bpl){
@@ -7861,8 +8918,15 @@ calibration_scan (struct scanner *s, int scan)
     return ret;
   }
 
-  while(!s->s.eof[SIDE_FRONT] && !s->s.eof[SIDE_BACK]){
-    ret = read_from_scanner_duplex(s,1);
+  if(s->s.source == SOURCE_ADF_FRONT){
+    while(!s->s.eof[SIDE_FRONT]){
+      ret = read_from_scanner(s, SIDE_FRONT, 1);
+    }
+  }
+  else{
+    while(!s->s.eof[SIDE_FRONT] && !s->s.eof[SIDE_BACK]){
+      ret = read_from_scanner_duplex(s,1);
+    }
   }
 
   DBG (10, "calibration_scan: finished\n");
