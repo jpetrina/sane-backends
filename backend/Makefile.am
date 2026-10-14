@@ -78,7 +78,7 @@ BACKEND_CONFS= abaton.conf agfafocus.conf apple.conf artec.conf \
 	       kvs1025.conf leo.conf lexmark.conf lexmark_x2600.conf \
                ma1509.conf magicolor.conf \
 	       matsushita.conf microtek2.conf microtek.conf mustek.conf \
-	       mustek_pp.conf mustek_usb.conf nec.conf net.conf \
+	       mustek_pp.conf mustek_usb.conf neatnm1000.conf nec.conf net.conf \
 	       p5.conf \
 	       pie.conf pieusb.conf pixma.conf plustek.conf plustek_pp.conf \
 	       qcam.conf ricoh.conf rts8891.conf s9036.conf sceptre.conf \
@@ -176,7 +176,7 @@ be_convenience_libs = libabaton.la libagfafocus.la \
     libleo.la liblexmark.la liblexmark_x2600.la libma1509.la libmagicolor.la \
     libmatsushita.la libmicrotek.la libmicrotek2.la \
     libmustek.la libmustek_pp.la libmustek_usb.la \
-    libmustek_usb2.la libnec.la libnet.la \
+    libmustek_usb2.la libneatnm1000.la libnec.la libnet.la \
     libniash.la libp5.la \
     libpie.la libpieusb.la libpint.la libpixma.la \
     libplustek.la libplustek_pp.la libpnm.la \
@@ -211,7 +211,7 @@ be_dlopen_libs = libsane-abaton.la libsane-agfafocus.la \
     libsane-lexmark.la libsane-lexmark_x2600.la libsane-ma1509.la libsane-magicolor.la \
     libsane-matsushita.la libsane-microtek.la libsane-microtek2.la \
     libsane-mustek.la libsane-mustek_pp.la libsane-mustek_usb.la \
-    libsane-mustek_usb2.la libsane-nec.la libsane-net.la \
+    libsane-mustek_usb2.la libsane-neatnm1000.la libsane-nec.la libsane-net.la \
     libsane-niash.la libsane-p5.la \
     libsane-pie.la libsane-pieusb.la libsane-pint.la libsane-pixma.la \
     libsane-plustek.la libsane-plustek_pp.la libsane-pnm.la \
@@ -1181,6 +1181,37 @@ libsane_ma1509_la_LIBADD = $(COMMON_LIBS) \
     ../sanei/sanei_usb.lo \
     $(USB_LIBS) $(RESMGR_LIBS)
 EXTRA_DIST += ma1509.conf.in
+
+libneatnm1000_la_SOURCES = neatnm1000.c
+libneatnm1000_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=neatnm1000
+
+nodist_libsane_neatnm1000_la_SOURCES = neatnm1000-s.c
+libsane_neatnm1000_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=neatnm1000
+libsane_neatnm1000_la_LDFLAGS = $(DIST_SANELIBS_LDFLAGS)
+libsane_neatnm1000_la_LIBADD = $(COMMON_LIBS) \
+    libneatnm1000.la \
+    ../sanei/sanei_init_debug.lo \
+    ../sanei/sanei_constrain_value.lo \
+    ../sanei/sanei_config.lo \
+    sane_strstatus.lo \
+    ../sanei/sanei_usb.lo \
+    $(USB_LIBS) $(RESMGR_LIBS)
+EXTRA_DIST += neatnm1000.conf.in
+
+neatnm1000_datadir = $(datadir)/sane/neatnm1000
+dist_neatnm1000_data_DATA = \
+    neatnm1000/nm1000-ctrl-gray150.json \
+    neatnm1000/nm1000-ctrl-gray300.json \
+    neatnm1000/nm1000-ctrl-gray600.json \
+    neatnm1000/nm1000-ctrl-color150.json \
+    neatnm1000/nm1000-ctrl-color300.json \
+    neatnm1000/nm1000-150gray-out.bin \
+    neatnm1000/nm1000-150gray-long-out.bin \
+    neatnm1000/nm1000-300gray-out.bin \
+    neatnm1000/nm1000-600gray-out.bin \
+    neatnm1000/nm1000-150color-out.bin \
+    neatnm1000/nm1000-300color-out.bin
+EXTRA_DIST += neatnm1000/README
 
 libmagicolor_la_SOURCES = magicolor.c magicolor.h
 libmagicolor_la_CPPFLAGS = $(AM_CPPFLAGS) -DBACKEND_NAME=magicolor $(SNMP_CFLAGS)

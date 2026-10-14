@@ -67,6 +67,7 @@ Backends:
  mustek_pp:     Jochen Eisinger, Eddy De Greef
  mustek_usb:    Tom Wang and Henning Geinitz
  mustek_usb2:   Roy Zhou, Jack Xu, Vinci Cen, and Henning Geinitz
+ neatnm1000:    Pedro Rodriguez
  nec:           Kazuya Fukuda
  net:           Andreas Beck, David Mosberger, Julien Blache
  niash:         Ullrich Sigwanz, Bertrik Sikken
