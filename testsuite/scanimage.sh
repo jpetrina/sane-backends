@@ -23,7 +23,7 @@ if test -n "$installed"; then
         SCANIMAGE=../frontend/scanimage
         if test ! -x "$SCANIMAGE"; then
             echo "scanimage test: scanimage not built, skipping"
-            exit 0
+            exit 77
         fi
     fi
 else
@@ -31,12 +31,12 @@ else
 
     if test ! -x "$SCANIMAGE"; then
         echo "scanimage test: scanimage not built, skipping"
-        exit 0
+        exit 77
     fi
 
     if test ! -f ../backend/libsane-test.la; then
         echo "scanimage test: test backend not built, skipping"
-        exit 0
+        exit 77
     fi
 
     CONFDIR="$(mktemp -d)"
@@ -53,7 +53,8 @@ cleanup() {
     test -n "$CONFDIR" && rm -rf "$CONFDIR"
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 1' INT TERM
 
 echo "---> Trying flatbed scanner"
 "$SCANIMAGE" -d test -T || exit 1
