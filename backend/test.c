@@ -1897,7 +1897,7 @@ sane_init (SANE_Int * __sane_unused__ version_code, SANE_Auth_Callback __sane_un
     {
       SANE_Char number_string[PATH_MAX];
 
-      test_device = calloc (sizeof (*test_device), 1);
+      test_device = calloc (1, sizeof (*test_device));
       if (!test_device)
 	goto fail_device;
       test_device->sane.vendor = "Noname";

@@ -567,7 +567,7 @@ add_sm_device (SANE_String_Const devname, SANE_String_Const modname)
 {
   SM3840_Device *dev;
 
-  dev = calloc (sizeof (*dev), 1);
+  dev = calloc (1, sizeof (*dev));
   if (!dev)
     return (SANE_STATUS_NO_MEM);
 
@@ -802,7 +802,7 @@ sane_open (SANE_String_Const devicename, SANE_Handle * handle)
   DBG (2, "using device: %s %p\n", dev->sane.name, (void *) dev);
   if (!dev)
     return SANE_STATUS_INVAL;
-  s = calloc (sizeof (*s), 1);
+  s = calloc (1, sizeof (*s));
   if (!s)
     return SANE_STATUS_NO_MEM;
 

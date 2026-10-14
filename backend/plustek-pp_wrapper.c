@@ -143,17 +143,14 @@ static int ppDev_open( const char *dev_name, void *misc )
 
 			version = _PTDRV_COMPAT_IOCTL_VERSION;
 
-			if( dev->adj.direct_io )
-				result = PtDrvIoctl( _PTDRV_OPEN_DEVICE, &version );
-			else
-				result = ioctl( handle, _PTDRV_OPEN_DEVICE, &version );
+			/** Cannot be reached with the backend's own driver because there
+			 *  would be no version mismatch. ioctl is fine here.
+			 */
+			result = ioctl( handle, _PTDRV_OPEN_DEVICE, &version );
 
 			if( result < 0 ) {
 
-				if( dev->adj.direct_io )
-					PtDrvClose();
-				else
-					close( dev->fd );
+				close( dev->fd );
 
 				DBG( _DBG_ERROR,
 					 "ioctl PT_DRV_OPEN_DEVICE failed(%d)\n", result );
@@ -174,10 +171,7 @@ static int ppDev_open( const char *dev_name, void *misc )
 				memcpy( &compatAdj.neg, &dev->adj.neg, sizeof(OffsDef));
 				memcpy( &compatAdj.tpa, &dev->adj.tpa, sizeof(OffsDef));
 
-				if( dev->adj.direct_io )
-					PtDrvIoctl( _PTDRV_ADJUST, &compatAdj );
-				else
-					ioctl( handle, _PTDRV_ADJUST, &compatAdj );
+				ioctl( handle, _PTDRV_ADJUST, &compatAdj );
 				return handle;
 			}
 		}

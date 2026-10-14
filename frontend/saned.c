@@ -1888,7 +1888,7 @@ process_request (Wire * w)
     case SANE_NET_OPEN:
       {
 	SANE_Open_Reply reply;
-	SANE_Handle be_handle;
+	SANE_Handle be_handle = NULL;
 	SANE_String name, resource;
 
 	sanei_w_string (w, &name);

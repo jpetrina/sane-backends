@@ -1146,13 +1146,13 @@ get_next_file (char *dir_name, DIR * dir)
   while (strcmp (dir_entry->d_name, ".") == 0
 	 || strcmp (dir_entry->d_name, "..") == 0);
 
-  if (strlen (dir_name) + strlen (dir_entry->d_name) + 1 > PATH_MAX)
+  if (snprintf (file_name, PATH_MAX, "%s%s", dir_name, dir_entry->d_name)
+      >= PATH_MAX)
     {
       if (verbose > 1)
 	printf ("filename too long\n");
       return 0;
     }
-  sprintf (file_name, "%s%s", dir_name, dir_entry->d_name);
   return file_name;
 }
 

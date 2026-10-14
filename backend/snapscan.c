@@ -872,7 +872,7 @@ SANE_Status sane_open (SANE_String_Const name, SANE_Handle * h)
 
     /* create and initialize the scanner structure */
 
-    *h = (SnapScan_Scanner *) calloc (sizeof (SnapScan_Scanner), 1);
+    *h = (SnapScan_Scanner *) calloc (1, sizeof (SnapScan_Scanner));
     if (!*h)
     {
         DBG (DL_MAJOR_ERROR,

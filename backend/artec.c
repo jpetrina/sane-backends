@@ -2029,7 +2029,7 @@ attach (const char *devname, ARTEC_Device ** devp)
        * 3) copy our fudged vendor string into the inquiry result.
        */
       snprintf (temp_result, sizeof (temp_result), "%-8.8s", artec_vendor);
-      strncpy (result + 8, temp_result, 8);
+      memcpy (result + 8, temp_result, 8);
     }
 
   if (artec_model[0] != 0x0)
@@ -2040,7 +2040,7 @@ attach (const char *devname, ARTEC_Device ** devp)
        * 3) copy our fudged model string into the inquiry result.
        */
       snprintf (temp_result, sizeof (temp_result), "%-16.16s", artec_model);
-      strncpy (result + 16, temp_result, 16);
+      memcpy (result + 16, temp_result, 16);
     }
 
   /* are we really dealing with a scanner by ULTIMA/ARTEC? */
