@@ -26,6 +26,7 @@ LS-40 ED (Coolscan IV)       USB
 LS-50 ED (Coolscan V)        USB
 LS-2000                      SCSI
 LS-4000 ED                   IEEE 1394
+LS-5000 ED                   USB
 LS-8000 ED                   IEEE 1394
 .fi
 .ft R
@@ -69,32 +70,51 @@ syntax with which they must be supplied to
 .TP
 .B \-\-frame <n>
 This option specifies which frame to operate on, if a motorized film strip
-feeder or APS adapter are used. The frame number
+feeder or APS adapter is used. The frame number
 .I <n>
-ranges from 1 to the number of frames available, which is sensed each time
-the backend is initialized (usually each time you start the frontend).
+ranges from 1 to the transport capacity reported by the adapter when the
+backend is initialized. This is not a count of exposures on the loaded roll.
+For example, an SA-21 converted to SA-30 operation with the solderless
+modification reports a capacity of 40 even when the roll has 24 exposures.
+Frame selection was verified on that modified adapter; this does not establish
+support for a stock SA-21 or other feeders. The backend does not perform a
+Nikon Scan-style prescan to count frames.
+.TP
+.B \-\-frame\-count <n>
+This option requests that many consecutive frames, beginning at
+.BR \-\-frame .
+The frame and count must fit within the adapter-reported transport capacity.
+Selecting a later frame reduces an existing count when needed to keep the
+selection in range.
 .TP
 .B \-\-subframe <x>
 This option shifts the scan window by the specified amount (default
 unit is mm).
 .TP
 .B \-\-infrared=yes/no
-If set to "yes", the scanner will read the infrared channel, thus allowing
-defect removal in software. The infrared image is read during a second scan,
-with no options altered. The backend must not be restarted between the scans.
-If you use
-.BR scanimage (1),
-perform a batch scan with
-.B \-\-batch\-count=2
-to obtain the IR information.
+On the LS-5000 ED, setting this option to "yes" reads infrared as a fourth
+pixel-interleaved sample alongside red, green, and blue. The published SANE
+API has no RGBI frame type, so the backend reports an RGB frame whose
+bytes-per-line value includes all four samples. A frontend must understand
+this convention before it can save or process the infrared channel.
+The LS-5000 firmware can combine infrared with RGB multi-sampling in one scan.
+That mode uses a packed stream with four independent RGB samples and one
+aligned infrared plane. This backend does not decode the packed layout, so it
+rejects the combined setting before sending a scan command. The captured
+stream does not establish whether the firmware combines several infrared
+readings internally. Preview mode remains RGB-only even when infrared is
+enabled.
 .TP
 .B \-\-depth <n>
 Here <n> can either be 8 or the maximum number of bits supported by the
-scanner (10, 12, or 14). It specifies whether or not the scanner reduces
+scanner. It specifies whether or not the scanner reduces
 the scanned data to 8 bits before sending it to the backend. If 8 bits are
 used, some information and thus image quality is lost, but the amount of data
 is smaller compared to higher depths. Also, many imaging programs and image
-formats cannot handle depths greater than 8 bits.
+formats cannot handle depths greater than 8 bits. On the LS-5000 ED with
+firmware 1.03, the tested 8-bit scan path is rejected by the scanner. The
+backend therefore defaults that model to 16 bits; 8-bit scanning is not
+currently working on that firmware.
 .TP
 .B \-\-autofocus
 Perform autofocus operation. Unless otherwise specified by the other options (

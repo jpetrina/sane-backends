@@ -40,6 +40,8 @@
 #include "../include/sane/sanei_debug.h"
 #include "../include/sane/sanei_config.h"
 
+#include "coolscan3-policy.h"
+
 #define BACKEND_NAME coolscan3
 #include "../include/sane/sanei_backend.h"	/* must be last */
 
@@ -464,9 +466,8 @@ sane_open(SANE_String_Const name, SANE_Handle * h)
 			o.type = SANE_TYPE_BOOL;
 			o.size = WSIZE;
 			o.cap = SANE_CAP_SOFT_SELECT | SANE_CAP_SOFT_DETECT;
-#ifndef SANE_FRAME_RGBI
-                        o.cap |= SANE_CAP_INACTIVE;
-#endif
+			if (s->type != CS3_TYPE_LS5000)
+				o.cap |= SANE_CAP_INACTIVE;
 			break;
 
 		case CS3_OPTION_SAMPLES_PER_SCAN:
@@ -798,7 +799,12 @@ sane_open(SANE_String_Const name, SANE_Handle * h)
 				alloc_failed = 1;
 			else {
 				range->min = 1;
-				range->max = s->n_frames - s->i_frame + 1;
+				/* this descriptor is built before i_frame is
+				   initialized (was: n_frames - i_frame + 1,
+				   which advertised one frame too many); the
+				   scan starts at frame 1, so the strip length
+				   is the bound */
+				range->max = s->n_frames;
 				range->quant = 1;
 				o.constraint.range = range;
 			}
@@ -1014,7 +1020,9 @@ sane_open(SANE_String_Const name, SANE_Handle * h)
 	s->ae = SANE_FALSE;
 	s->aewb = SANE_FALSE;
 	s->samples_per_scan = 1;
-	s->depth = 8;
+	/* the LS-5000's 8-bit path is rejected by firmware 1.03 (SET WINDOW
+	   fails with ILLEGAL REQUEST); default to the verified 16-bit path */
+	s->depth = (s->type == CS3_TYPE_LS5000) ? 16 : 8;
 	s->i_frame = 1;
 	s->frame_count = 1;
 	s->subframe = 0.;
@@ -1077,6 +1085,7 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v,
 {
 	cs3_t *s = (cs3_t *) h;
 	SANE_Int flags = 0;
+	int adjusted_frame_count;
 	cs3_pixel_t pixel;
 	SANE_Option_Descriptor o = s->option_list[n];
 
@@ -1253,10 +1262,26 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v,
 			s->negative = *(SANE_Word *) v;
 			break;
 		case CS3_OPTION_INFRARED:
+			switch (cs3_scan_mode_check(s->type == CS3_TYPE_LS5000,
+						   *(SANE_Word *) v,
+						   s->samples_per_scan)) {
+			case CS3_SCAN_MODE_INFRARED_UNSUPPORTED:
+				return SANE_STATUS_UNSUPPORTED;
+			case CS3_SCAN_MODE_PACKED_LAYOUT_REQUIRED:
+				return SANE_STATUS_INVAL;
+			case CS3_SCAN_MODE_OK:
+				break;
+			}
 			s->infrared = *(SANE_Word *) v;
-			/*      flags |= SANE_INFO_RELOAD_PARAMS; XXX */
+			/* infrared changes bytes_per_line (4 samples/pixel) */
+			flags |= SANE_INFO_RELOAD_PARAMS;
 			break;
 		case CS3_OPTION_SAMPLES_PER_SCAN:
+			if (cs3_scan_mode_check(s->type == CS3_TYPE_LS5000,
+						s->infrared,
+						*(SANE_Word *) v) !=
+			    CS3_SCAN_MODE_OK)
+				return SANE_STATUS_INVAL;
 			s->samples_per_scan = *(SANE_Word *) v;
 			break;
 		case CS3_OPTION_DEPTH:
@@ -1268,6 +1293,9 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v,
 			break;
 
 		case CS3_OPTION_PREVIEW:
+			if (cs3_preview_change_requires_reload_params(
+				    s->preview, *(SANE_Word *) v))
+				flags |= SANE_INFO_RELOAD_PARAMS;
 			s->preview = *(SANE_Word *) v;
 			break;
 
@@ -1315,11 +1343,21 @@ sane_control_option(SANE_Handle h, SANE_Int n, SANE_Action a, void *v,
 			cs3_reset(s);
 			break;
 		case CS3_OPTION_FRAME:
+			adjusted_frame_count = cs3_frame_count_for_frame(
+				s->n_frames, *(SANE_Word *) v, s->frame_count);
+			if (adjusted_frame_count < 0)
+				return SANE_STATUS_INVAL;
 			s->i_frame = *(SANE_Word *) v;
+			if (adjusted_frame_count != s->frame_count) {
+				s->frame_count = adjusted_frame_count;
+				flags |= SANE_INFO_RELOAD_OPTIONS;
+			}
 			break;
 
 		case CS3_OPTION_FRAME_COUNT:
-			if (*(SANE_Word *) v > (s->n_frames - s->i_frame + 1))
+			if (!cs3_frame_selection_is_valid(s->n_frames,
+						  s->i_frame,
+						  *(SANE_Word *) v))
 				return SANE_STATUS_INVAL;
 			s->frame_count = *(SANE_Word *) v;
 			flags |= SANE_INFO_RELOAD_PARAMS;
@@ -1435,16 +1473,12 @@ sane_get_parameters(SANE_Handle h, SANE_Parameters * p)
 	p->bytes_per_line =
 		s->n_colors * s->logical_width * s->bytes_per_pixel;
 
-#ifdef SANE_FRAME_RGBI
-	if (s->infrared) {
-		p->format = SANE_FRAME_RGBI;
-
-	} else {
-#endif
-		p->format = SANE_FRAME_RGB;	/* XXXXXXXX CCCCCCCCCC */
-#ifdef SANE_FRAME_RGBI
-	}
-#endif
+	/* with infrared enabled, four samples per pixel are delivered
+	   pixel-interleaved (R G B I); SANE_FRAME_RGBI is not part of the
+	   published SANE API, so report SANE_FRAME_RGB and let frontends
+	   detect the fourth channel from bytes_per_line, the same
+	   convention the pieusb backend uses */
+	p->format = SANE_FRAME_RGB;
 
 	p->last_frame = SANE_TRUE;
 	p->lines = s->logical_height;
@@ -1465,10 +1499,24 @@ sane_start(SANE_Handle h)
 	if (s->scanning)
 		return SANE_STATUS_INVAL;
 
+	switch (cs3_scan_mode_check(s->type == CS3_TYPE_LS5000,
+				   s->infrared, s->samples_per_scan)) {
+	case CS3_SCAN_MODE_INFRARED_UNSUPPORTED:
+		return SANE_STATUS_UNSUPPORTED;
+	case CS3_SCAN_MODE_PACKED_LAYOUT_REQUIRED:
+		return SANE_STATUS_INVAL;
+	case CS3_SCAN_MODE_OK:
+		break;
+	}
+
 	if (s->n_frames > 1 && s->frame_count == 0) {
 		DBG(4, "%s: no more frames\n", __func__);
 		return SANE_STATUS_NO_DOCS;
 	}
+	if (s->n_frames > 1 &&
+	    !cs3_frame_selection_is_valid(s->n_frames, s->i_frame,
+					  s->frame_count))
+		return SANE_STATUS_INVAL;
 
 	if (s->n_frames > 1) {
 		DBG(4, "%s: scanning frame at position %d, %d to go\n",
@@ -1481,40 +1529,45 @@ sane_start(SANE_Handle h)
 
 	s->i_line_buf = 0;
 	s->xfer_position = 0;
-
 	s->scanning = SANE_TRUE;
 
 	/* load if appropriate */
 	if (s->autoload) {
 		status = cs3_load(s);
 		if (status != SANE_STATUS_GOOD)
-			return status;
+			goto start_done;
 	}
 
 	/* check for documents */
 	status = cs3_scanner_ready(s, CS3_STATUS_NO_DOCS);
 	if (status != SANE_STATUS_GOOD)
-		return status;
-	if (s->status & CS3_STATUS_NO_DOCS)
-		return SANE_STATUS_NO_DOCS;
+		goto start_done;
+	if (s->status & CS3_STATUS_NO_DOCS) {
+		status = SANE_STATUS_NO_DOCS;
+		goto start_done;
+	}
 
 	if (s->autofocus) {
 		status = cs3_autofocus(s);
 		if (status != SANE_STATUS_GOOD)
-			return status;
+			goto start_done;
 	}
 
 	if (s->aewb) {
 		status = cs3_autoexposure(s, 1);
 		if (status != SANE_STATUS_GOOD)
-			return status;
+			goto start_done;
 	} else if (s->ae) {
 		status = cs3_autoexposure(s, 0);
 		if (status != SANE_STATUS_GOOD)
-			return status;
+			goto start_done;
 	}
 
-	return cs3_scan(s, CS3_SCAN_NORMAL);
+	status = cs3_scan(s, CS3_SCAN_NORMAL);
+
+start_done:
+	s->scanning = cs3_start_result_is_scanning(status == SANE_STATUS_GOOD);
+	return status;
 }
 
 SANE_Status
@@ -2079,7 +2132,8 @@ cs3_parse_sense_data(cs3_t * s)
 
 	case 0x09:
 		if ((s->sense_code == 0x09800600)
-		    || (s->sense_code == 0x09800601))
+		    || (s->sense_code == 0x09800601)
+		    || (s->sense_code == 0x09800201))
 			s->status = CS3_STATUS_REISSUE;
 		break;
 
@@ -2890,16 +2944,16 @@ cs3_convert_options(cs3_t * s)
 		if (s->real_exposure[cs3_colors[i_color]] < 1)
 			s->real_exposure[cs3_colors[i_color]] = 1;
 
-	s->n_colors = 3;	/* XXXXXXXXXXXXXX CCCCCCCCCCCCCC */
-	if (s->infrared)
-		s->n_colors = 4;
+	/* preview never carries infrared. Decide before the color count and
+	   transfer size are derived so sane_get_parameters() and the actual
+	   frame can never disagree, and without clobbering the option value
+	   (previously a preview permanently disabled infrared for subsequent
+	   scans) */
+	s->n_colors = (s->infrared && !s->preview) ? 4 : 3;
 
 	s->xfer_bytes_total =
 		s->bytes_per_pixel * s->n_colors * s->logical_width *
 		s->logical_height;
-
-	if (s->preview)
-		s->infrared = SANE_FALSE;
 
 	return SANE_STATUS_GOOD;
 }
@@ -3154,10 +3208,26 @@ cs3_scan(cs3_t * s, cs3_scan_t type)
 		return status;
 	}
 
-	if (s->status == CS3_STATUS_REISSUE) {
-		status = cs3_issue_cmd(s);
-		if (status != SANE_STATUS_GOOD)
-			return status;
+	{
+		cs3_reissue_action_t action;
+		cs3_reissue_state_t reissue;
+
+		cs3_reissue_state_init(&reissue, 4);
+		for (;;) {
+			action = cs3_reissue_state_step(&reissue,
+							s->status ==
+							CS3_STATUS_REISSUE);
+			if (action == CS3_REISSUE_DONE)
+				break;
+			if (action == CS3_REISSUE_EXHAUSTED) {
+				DBG(1, "%s: SCAN reissue limit exhausted\n",
+				    __func__);
+				return SANE_STATUS_IO_ERROR;
+			}
+			status = cs3_issue_cmd(s);
+			if (status != SANE_STATUS_GOOD)
+				return status;
+		}
 	}
 
 	return SANE_STATUS_GOOD;
