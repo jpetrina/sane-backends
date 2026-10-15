@@ -436,7 +436,6 @@
 /* if JPEG support is not enabled in sane.h, we setup our own defines */
 #ifndef SANE_FRAME_JPEG
 #define SANE_FRAME_JPEG 0x0B
-#define SANE_JPEG_DISABLED 1
 #endif
 /* ------------------------------------------------------------------------- */
 #define STRING_FLATBED SANE_I18N("Flatbed")
@@ -1680,6 +1679,9 @@ init_model (struct scanner *s)
     s->gray_interlace[SIDE_FRONT] = GRAY_INTERLACE_gG;
     s->duplex_interlace = DUPLEX_INTERLACE_FBfb;
     s->duplex_offset_side = SIDE_BACK;
+    /* P-215 duplex is only correct through the scanner's onboard JPEG
+       pipeline; the raw duplex path leaves the top-side lamp off (#884). */
+    s->has_comp_JPEG = 1;
     s->need_ccal = 1;
     s->invert_tly = 1;
     s->unknown_byte2 = 0x88;
