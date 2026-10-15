@@ -95,6 +95,7 @@ MAN2HTML = nroff -c -man |\
 	@if $(AM_V_P); then echo "Generating manpage $@..."; fi
 	@sed -e 's|@DATADIR@|$(datadir)|g' \
 	  -e 's|@CONFIGDIR@|$(configdir)|g' \
+	  -e 's|@DEFAULTCONFIGDIR@|$(defaultconfigdir)|g' \
 	  -e 's|@DOCDIR@|$(docdir)|g' \
 	  -e 's|@LIBDIR@|$(libdir)/sane|g' \
 	  -e 's|@BINDIR@|$(bindir)|g' \
