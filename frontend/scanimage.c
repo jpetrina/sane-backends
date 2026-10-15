@@ -43,6 +43,7 @@
 #include <libgen.h>     // for basename()
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #ifdef HAVE_LIBPNG
 #include <png.h>
@@ -90,6 +91,7 @@ Image;
 #define OPTION_BATCH_INCREMENT	1006
 #define OPTION_BATCH_PROMPT    1007
 #define OPTION_BATCH_PRINT     1008
+#define OPTION_BATCH_WAIT_DOCS	1009
 
 #define BATCH_COUNT_UNLIMITED -1
 
@@ -112,6 +114,7 @@ static struct option basic_options[] = {
   {"batch-increment", required_argument, NULL, OPTION_BATCH_INCREMENT},
   {"batch-print", no_argument, NULL, OPTION_BATCH_PRINT},
   {"batch-prompt", no_argument, NULL, OPTION_BATCH_PROMPT},
+  {"batch-wait-docs", required_argument, NULL, OPTION_BATCH_WAIT_DOCS},
   {"format", required_argument, NULL, OPTION_FORMAT},
   {"accept-md5-only", no_argument, NULL, OPTION_MD5},
   {"icc-profile", required_argument, NULL, 'i'},
@@ -2123,6 +2126,7 @@ main (int argc, char **argv)
   int batch_count = BATCH_COUNT_UNLIMITED;
   int batch_start_at = 1;
   int batch_increment = 1;
+  int batch_scan_timeout = 0;
   int promptc;
   SANE_Status status;
   SANE_Int version_code;
@@ -2205,6 +2209,9 @@ main (int argc, char **argv)
 	case OPTION_BATCH_COUNT:
 	  batch_count = atoi (optarg);
 	  batch = 1;
+	  break;
+	case OPTION_BATCH_WAIT_DOCS:
+	  batch_scan_timeout = atoi (optarg);
 	  break;
 	case OPTION_FORMAT:
 	  if (strcmp (optarg, "tiff") == 0)
@@ -2417,7 +2424,8 @@ Parameters are separated by a blank from single-character options (e.g.\n\
     --batch-double         increment page number by two, same as\n\
                            --batch-increment=2\n\
     --batch-print          print image filenames to stdout\n\
-    --batch-prompt         ask for pressing a key before scanning a page\n");
+    --batch-prompt         ask for pressing a key before scanning a page\n\
+-w, --batch-wait-docs=#    timeout in seconds to wait for a page to be placed in the scanner\n");
       printf ("\
     --accept-md5-only      only accept authorization requests using md5\n\
 -p, --progress             print progress messages\n\
@@ -2833,6 +2841,18 @@ List of available devices:", prog_name);
 #else
 	  status = sane_start (device);
 #endif
+	  if (batch && batch_scan_timeout)
+	    {
+	      time_t deadline = time(NULL) + batch_scan_timeout;
+	      while (status == SANE_STATUS_NO_DOCS && time(NULL) < deadline)
+	        {
+	          fprintf (stderr, "%s: sane_start: %s: Reattempting...\n",
+	                   prog_name, sane_strstatus (status));
+	          usleep(100000);
+	          status = sane_start(device);
+	        }
+	    }
+
 	  if (status != SANE_STATUS_GOOD)
 	    {
 	      fprintf (stderr, "%s: sane_start: %s\n",
@@ -2985,12 +3005,14 @@ List of available devices:", prog_name);
                     }
                   unlink (output_file);
                 }
+	      sane_cancel (device);
 	      break;
 	    }			/* switch */
 	}
-      while ((batch
-	      && (batch_count == BATCH_COUNT_UNLIMITED || --batch_count))
-	     && SANE_STATUS_GOOD == status);
+      while (batch
+	     && ((status == SANE_STATUS_NO_DOCS && batch_scan_timeout)
+	         || ((batch_count == BATCH_COUNT_UNLIMITED || --batch_count)
+	             && SANE_STATUS_GOOD == status)));
 
       if (batch)
 	{
