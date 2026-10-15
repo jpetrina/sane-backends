@@ -2394,8 +2394,6 @@ setvalue(SANE_Handle handle, SANE_Int option, void *value, SANE_Int *info)
 		{
 			DBG(17, "OPT_TL_Y = %d\n", sval->w);
 		}
-		// adf crop set to off
-		s->val[OPT_ADF_CRP].w = 0;
 		break;
 
 	case OPT_SOURCE:
@@ -2934,10 +2932,11 @@ sane_start(SANE_Handle handle)
 
 		SANE_Int duplexMode = (strcmp(source_list[s->val[OPT_SOURCE].w], STRING_ADFDUPLEX) == 0);
 
-		sprintf(buf, "#ADF%s%s%s",
+		sprintf(buf, "#ADF%s%s%s%s",
 		duplexMode ? "DPLX" : "",
 		s->val[OPT_ADF_SKEW].w ? "SKEW" : "",
-		s->val[OPT_ADF_CRP].w ? "CRP " : ""
+		s->val[OPT_ADF_CRP].w ? "CRP " : "",
+		(s->hw->adf_has_pedt && s->val[OPT_ADF_CRP].w) ? "PEDT" : ""
 		);
 
 		if (duplexMode)

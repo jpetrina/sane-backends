@@ -153,6 +153,7 @@ struct epsonds_device
 	SANE_Bool has_button;		/* has scan button (interrupt endpoint) */
 
 	SANE_Byte adf_has_crp;		/* supports crp */
+	SANE_Bool adf_has_pedt;		/* supports paper-end detection (page-length-bounded scan) */
 
 	SANE_Bool has_tpu;		/* tpu */
 	SANE_Range tpu_x_range;	        /* transparency unit x range */

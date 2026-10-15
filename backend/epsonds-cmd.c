@@ -661,6 +661,7 @@ static SANE_Status capa_cb(void *userdata, char *token, int len)
 
 		if (strncmp("ADFPEDT", token, 3 + 4) == 0) {
 			DBG(1, "     ADF: paper end detection\n");
+			s->hw->adf_has_pedt = 1;
 		}
 
 		if (strncmp("ADFLOAD", token, 3 + 4) == 0) {
