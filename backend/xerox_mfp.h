@@ -122,6 +122,7 @@ struct device {
     int total_img_size;		/* predicted image size */
     int total_out_size;		/* total we sent to user */
     int total_data_size;		/* total of what scanner sent us */
+    int total_lines;		/* number of lines expected */
 
     /* transport to use */
     transport *io;
