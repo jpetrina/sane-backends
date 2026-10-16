@@ -1781,6 +1781,14 @@ do_scan (Wire * w, int h, int data_fd)
 
               /* get more input data */
 
+              /* WARNING: this DROPS the ring buffer. We only get here after all
+                          data was sent to the client, so restart at offset 0: reader
+                          and writer never wrap any more, and all wrap-around code in
+                          do_scan() and store_reclen() is dead. Without it the next read
+                          gets only the leftover tail of the buffer (e.g. 518 bytes), and
+                          brscan5 1.7.0 fails sane_read() when asked for less than a line. */
+              reader = 0;
+              writer = 0;
               /* reserve 4 bytes to store the length of the data record: */
               i = reader;
               reader += 4;
